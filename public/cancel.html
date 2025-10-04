@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Canceled</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #fff6f6;
+      text-align: center;
+      padding: 50px;
+      color: #333;
+    }
+    .card {
+      background: white;
+      max-width: 450px;
+      margin: auto;
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+    h1 { color: #e74c3c; }
+    button {
+      background-color: #e74c3c;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    button:hover { background-color: #c0392b; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>❌ Payment Canceled</h1>
+    <p>Your payment was not completed.</p>
+    <p>If this was a mistake, you can try again below.</p>
+    <button onclick="window.location.href='/'">Go Back</button>
+  </div>
+</body>
+</html>

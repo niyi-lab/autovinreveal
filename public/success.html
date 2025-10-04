@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Successful</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f8fff8;
+      text-align: center;
+      padding: 50px;
+      color: #333;
+    }
+    .card {
+      background: white;
+      max-width: 450px;
+      margin: auto;
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+    h1 { color: #2ecc71; }
+    button {
+      background-color: #2ecc71;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    button:hover { background-color: #27ae60; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>✅ Payment Successful</h1>
+    <p>Thank you! Your payment has been received.</p>
+    <p>You can now access your VIN report.</p>
+    <button onclick="goToReport()">View Report</button>
+  </div>
+
+  <script>
+    // If using guest checkout: retrieve session_id from URL
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+
+    async function goToReport() {
+      // Redirect to your VIN report route (adjust as needed)
+      // Example: call your /api/report endpoint
+      if (sessionId) {
+        window.location.href = `/view-report.html?session_id=${sessionId}`;
+      } else {
+        window.location.href = '/';
+      }
+    }
+  </script>
+</body>
+</html>
