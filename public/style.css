@@ -1,0 +1,97 @@
+/* ===== Theme tokens ===== */
+:root{
+  --bg:#f8fafc; --text:#0f172a; --muted:#6b7280;
+  --card:#ffffff; --border:#e5e7eb; --tableHead:#eef2f7;
+  --brand:#2563eb; --brand-dark:#1d4ed8;
+  --toast-err:#dc2626; --toast-ok:#16a34a;
+}
+.dark{
+  --bg:#0f172a; --text:#e6edf5; --muted:#9aa4b2;
+  --card:#1f2937; --border:#374151; --tableHead:#111827;
+}
+
+/* ===== Base ===== */
+html, body { height:100%; }
+body { background:var(--bg); color:var(--text); font-family:system-ui, Arial, sans-serif; }
+
+/* ===== Utilities ===== */
+.lbl{display:block;font-size:.9rem;font-weight:500;margin-bottom:.25rem;color:var(--text)}
+.sep{height:1px;width:40px;background:var(--border)}
+.th{ text-align:left; padding:.5rem 1rem; color:var(--muted); font-weight:600 }
+
+/* ===== Card ===== */
+.card{
+  background:var(--card); border:1px solid var(--border);
+  border-radius:16px; padding:24px; box-shadow:0 12px 30px rgba(0,0,0,.06);
+  position:relative;
+}
+
+/* ===== Inputs ===== */
+.input,.select{
+  width:100%; padding:10px 12px; border-radius:12px;
+  border:1px solid var(--border); background:var(--card); color:var(--text);
+  outline:none; transition:border-color .2s, box-shadow .2s;
+}
+.input:focus,.select:focus{
+  border-color:var(--brand);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--brand) 30%, transparent);
+}
+
+/* ===== Buttons ===== */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:.5rem;
+  padding:10px 14px; border-radius:12px; font-weight:600;
+  box-shadow:0 6px 16px rgba(0,0,0,.10);
+  transition:transform .05s, background .2s;
+}
+.btn:active{ transform:scale(.99) }
+.btn-primary{ background:var(--brand); color:#fff; border:0 }
+.btn-primary:hover{ background:var(--brand-dark) }
+
+.btn-outline{
+  border:1px solid var(--border); padding:8px 12px; border-radius:10px;
+  background:var(--card); color:var(--text);
+}
+.btn-outline:hover{ filter:brightness(1.03) }
+
+.theme-btn{
+  display:inline-flex; align-items:center; gap:.5rem;
+  padding:6px 12px; font-size:.9rem; border-radius:12px;
+  background:var(--card); color:var(--text); border:1px solid var(--border);
+}
+.theme-btn:hover{ filter:brightness(1.03) }
+
+/* ===== Loading ===== */
+.loading{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+  backdrop-filter: blur(2px);
+  border-radius:16px;
+}
+
+/* ===== Table ===== */
+.table-wrap{ overflow:auto; border-radius:12px; border:1px solid var(--border); background:var(--card) }
+table{ width:100%; border-collapse:collapse }
+thead{ background:var(--tableHead) }
+tbody{ background:var(--card) }
+tbody tr + tr{ border-top:1px solid var(--border) }
+
+/* ===== Toasts ===== */
+@keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.animate-fadeIn{ animation: fadeIn .25s ease-out }
+.toast{ padding:.75rem 1rem; border-radius:.75rem; color:#fff; box-shadow:0 8px 24px rgba(0,0,0,.18) }
+.toast.error{ background:var(--toast-err) }
+.toast.ok{ background:var(--toast-ok) }
+
+/* ===== Auth Modal ===== */
+#authModal input {
+  width: 100%;
+  padding: 10px;
+}
+#authModal .btn {
+  background: var(--brand);
+  color: white;
+}
+#authModal .btn:hover {
+  background: var(--brand-dark);
+}

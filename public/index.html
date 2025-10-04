@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en" class="h-full">
+
+<head>
+  <meta charset="utf-8" />
+  <title>AutoVINReveal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/style.css">
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: { colors: { brand: { DEFAULT: '#2563eb', dark: '#1d4ed8' } } } } };
+  </script>
+
+  <!-- Apply dark mode BEFORE paint -->
+  <script>
+    (() => {
+      const saved = localStorage.getItem('theme');
+      const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
+      if (saved === 'dark' || (!saved && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+</head>
+
+<body class="h-full">
+  <div class="max-w-3xl mx-auto p-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+      <h1 class="text-3xl text-[rgb(153,120,77)]">AutoVINReveal</h1>
+      <div class="flex gap-3">
+        <button id="themeBtn" class="theme-btn">
+          <span class="icon">🌙</span><span class="label">Dark</span>
+        </button>
+        <button id="loginBtn" class="btn-outline">🔑 Login</button>
+      </div>
+    </div>
+
+    <!-- Form card -->
+    <div class="relative mt-6 card">
+      <form id="f" class="space-y-4">
+        <div>
+          <label class="lbl">VIN</label>
+          <input name="vin" maxlength="17" placeholder="e.g., 1C6RD6FT1CS310366" class="input" />
+        </div>
+
+        <div class="flex items-center justify-center">
+          <div class="sep"></div>
+          <span class="mx-3 text-xs uppercase tracking-widest" style="color:var(--muted)">or</span>
+          <div class="sep"></div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="lbl">State</label>
+            <select name="state" class="select">
+              <option value="">Select a state…</option>
+              <option value="CA">California</option>
+              <option value="NY">New York</option>
+              <option value="TX">Texas</option>
+              <option value="FL">Florida</option>
+              <option value="ON">Ontario</option>
+            </select>
+          </div>
+          <div>
+            <label class="lbl">Plate</label>
+            <input name="plate" placeholder="e.g., 8ABC123" class="input" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="lbl">Type</label>
+            <select name="type" class="select">
+              <option value="carfax">CARFAX</option>
+              <option value="autocheck">AutoCheck</option>
+              <option value="auctions">Auctions</option>
+            </select>
+          </div>
+          <div>
+            <label class="lbl">Format</label>
+            <select name="as" class="select">
+              <option value="html">HTML</option>
+              <option value="pdf">PDF</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="pt-2">
+          <button id="go" class="btn btn-primary w-full">
+            <svg class="w-5 h-5 opacity-90" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6" />
+            </svg>
+            View Report
+          </button>
+        </div>
+      </form>
+
+      <!-- Loading overlay -->
+      <div id="loading" class="loading hidden">
+        <div class="flex items-center gap-3" style="color:var(--brand)">
+          <svg class="w-6 h-6 animate-spin" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" fill="none" stroke-width="4" />
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+          </svg>
+          <span class="font-medium">Fetching report…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Buy Credits Modal -->
+    <div id="buyCreditsModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="card max-w-sm text-center">
+        <h2 class="text-lg font-bold mb-2">Not Enough Credits</h2>
+        <p class="mb-4 text-sm" style="color:var(--muted)">You need credits to view a report.</p>
+        <button id="buyNowBtn" class="btn btn-primary w-full">Buy 5 Credits ($8)</button>
+        <button id="closeModalBtn" class="btn-outline w-full mt-3">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+      <div class="card w-[420px] max-w-[92vw]">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">Sign in</h2>
+          <button id="closeLoginModal" class="btn-outline text-xs">✕</button>
+        </div>
+
+        <label class="lbl">Email</label>
+        <input id="loginEmail" type="email" class="input" placeholder="you@email.com" />
+
+        <div class="mt-3">
+          <label class="lbl">Password</label>
+          <input id="loginPassword" type="password" class="input" placeholder="••••••••" />
+        </div>
+
+        <div class="mt-4 grid grid-cols-2 gap-2">
+          <button id="doLogin" class="btn btn-primary">Sign in</button>
+          <button id="doSignup" class="btn-outline">Create account</button>
+        </div>
+
+        <p class="text-xs mt-3" style="color:var(--muted)">
+          Tip: you can also buy credits without signing in — Stripe will just ask for your card info.
+        </p>
+      </div>
+    </div>
+
+
+    <!-- History -->
+    <div class="mt-8">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-lg font-semibold">Results History</h2>
+        <button id="clearHistory" class="btn-outline text-sm">Clear all</button>
+      </div>
+      <div class="table-wrap rounded-xl">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr>
+              <th class="th">VIN</th>
+              <th class="th">Type</th>
+              <th class="th">Format</th>
+              <th class="th">Time</th>
+              <th class="th">Action</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toastBox" class="fixed top-4 right-4 space-y-2 z-50"></div>
+
+   <script>
+    window.VITE_SUPABASE_URL = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
+    window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."; // your anon key
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- IMPORTANT: module script so imports work -->
+  <script type="module" src="/app.js"></script>
+</body>
+
+</html>
