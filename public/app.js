@@ -1,5 +1,5 @@
 /* ================================
-   Config & Utilities
+   Endpoints
 ================================ */
 const API = {
   report: '/api/report',
@@ -7,7 +7,10 @@ const API = {
   credits: (uid) => `/api/credits/${uid}`,
 };
 
-function $id(id) { return document.getElementById(id); }
+/* ================================
+   Helpers
+================================ */
+const $id = (id) => document.getElementById(id);
 
 function showToast(message, type = 'error') {
   const box = $id('toastBox');
@@ -23,17 +26,17 @@ function showToast(message, type = 'error') {
 }
 
 /* ================================
-   Supabase init (single source)
+   Supabase (browser env)
 ================================ */
-const SB_URL  = window.VITE_SUPABASE_URL  || (typeof process !== 'undefined' ? process?.env?.VITE_SUPABASE_URL  : '') || '';
-const SB_ANON = window.VITE_SUPABASE_ANON_KEY || (typeof process !== 'undefined' ? process?.env?.VITE_SUPABASE_ANON_KEY : '') || '';
+const SB_URL  = window.VITE_SUPABASE_URL || '';
+const SB_ANON = window.VITE_SUPABASE_ANON_KEY || '';
 
 let supabase = null;
 if (window.supabase && SB_URL && SB_ANON) {
   supabase = window.supabase.createClient(SB_URL, SB_ANON);
 }
 
-/* Detect Stripe success & capture session_id for guest one-time use */
+/* Stripe success → capture session id for guest one-time use */
 const urlParams = new URLSearchParams(window.location.search);
 const checkoutSuccess = urlParams.get('checkout') === 'success';
 const stripeSessionId = urlParams.get('session_id') || null;
@@ -58,6 +61,7 @@ themeBtn?.addEventListener('click', () => {
   const nowDark = !document.documentElement.classList.contains('dark');
   setTheme(nowDark ? 'dark' : 'light');
 });
+// set initial button state
 (() => {
   const dark  = document.documentElement.classList.contains('dark');
   const label = themeBtn?.querySelector('.label');
@@ -67,25 +71,25 @@ themeBtn?.addEventListener('click', () => {
 })();
 
 /* ================================
-   Login modal (email + password)
+   Auth (email + password)
 ================================ */
-const loginBtn         = $id('loginBtn');
-const loginModal       = $id('loginModal');
-const closeLoginModal  = $id('closeLoginModal');
-const emailEl          = $id('loginEmail');
-const pwEl             = $id('loginPassword');
-const doLoginBtn       = $id('doLogin');
-const doSignupBtn      = $id('doSignup');
+const loginBtn        = $id('loginBtn');
+const loginModal      = $id('loginModal');
+const closeLoginModal = $id('closeLoginModal');
+const emailEl         = $id('loginEmail');
+const pwEl            = $id('loginPassword');
+const doLoginBtn      = $id('doLogin');
+const doSignupBtn     = $id('doSignup');
 
 function openLogin()  { loginModal?.classList.remove('hidden'); }
 function closeLogin() { loginModal?.classList.add('hidden'); }
-
 closeLoginModal?.addEventListener('click', closeLogin);
 
 async function doSignup() {
   if (!supabase) { showToast('Supabase not loaded', 'error'); return; }
-  const email = (emailEl.value || '').trim();
-  const password = pwEl.value || '';
+
+  const email = (emailEl?.value || '').trim();
+  const password = pwEl?.value || '';
 
   if (!email) return showToast('Enter your email', 'error');
   if (password.length < 6) return showToast('Password must be at least 6 characters', 'error');
@@ -96,7 +100,24 @@ async function doSignup() {
       password,
       options: { emailRedirectTo: window.location.origin }
     });
-    if (error) throw error;
+
+    if (error) {
+      // Robust “already exists” detection across Supabase error variants
+      const msg = (error.message || '').toLowerCase();
+      if (
+        error.status === 400 || error.status === 409 || error.status === 422 ||
+        msg.includes('already') || msg.includes('registered') || msg.includes('exists')
+      ) {
+        showToast('That email is already registered. Please sign in instead.', 'error');
+        // keep the modal open and focus the Sign in flow
+        emailEl.value = email;        // keep their email filled
+        doLoginBtn?.focus();          // cursor to "Sign in" button
+        return;
+      }
+      throw error;
+    }
+
+    // If email confirmations are enabled, Supabase won’t return a session yet
     if (!data.session) {
       showToast('Check your email to confirm your account.', 'ok');
     } else {
@@ -108,10 +129,12 @@ async function doSignup() {
   }
 }
 
+
+
 async function doLogin() {
   if (!supabase) { showToast('Supabase not loaded', 'error'); return; }
-  const email = (emailEl.value || '').trim();
-  const password = pwEl.value || '';
+  const email = (emailEl?.value || '').trim();
+  const password = pwEl?.value || '';
   if (!email || !password) return showToast('Enter email and password', 'error');
 
   try {
@@ -130,10 +153,11 @@ async function doLogout() {
   showToast('Signed out', 'ok');
 }
 
+/* Hook buttons */
 doSignupBtn?.addEventListener('click', doSignup);
 doLoginBtn?.addEventListener('click', doLogin);
 
-/* Toggle header button using a single click handler */
+/* One header button that switches behavior */
 let currentSession = null;
 loginBtn?.addEventListener('click', () => {
   if (currentSession?.user) doLogout();
@@ -146,9 +170,7 @@ function reflectAuthUI(session) {
   loginBtn.textContent = session?.user ? 'Sign out' : '🔑 Login';
 }
 
-/* ================================
-   Auth callback & listener
-================================ */
+/* Auth callback & listener */
 (async () => {
   if (!supabase) return;
 
@@ -156,7 +178,6 @@ function reflectAuthUI(session) {
   const fromAuthLink = /[?&]code=/.test(location.search) || /access_token=/.test(location.hash);
   if (fromAuthLink) {
     const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
-    // Clean URL
     const url = new URL(location.href);
     url.searchParams.delete('code');
     url.searchParams.delete('state');
@@ -184,10 +205,10 @@ async function getSession() {
    History (localStorage)
 ================================ */
 const HISTORY_KEY = 'reportHistory';
-function loadHistory() { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } }
-function saveHistory(list) { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); }
-function addToHistory(item) { const list = loadHistory(); list.unshift(item); saveHistory(list.slice(0, 20)); }
-function formatTime(ts) { return new Date(ts).toLocaleString(); }
+const loadHistory = () => { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } };
+const saveHistory = (list) => localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+const addToHistory = (item) => { const list = loadHistory(); list.unshift(item); saveHistory(list.slice(0, 20)); };
+const formatTime = (ts) => new Date(ts).toLocaleString();
 
 async function replayRequest(item) {
   const data = {
@@ -255,20 +276,19 @@ $id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(H
 const buyModal    = $id('buyCreditsModal');
 const buyNowBtn   = $id('buyNowBtn');
 const closeBuyBtn = $id('closeModalBtn');
-function openBuyModal(){ buyModal?.classList.remove('hidden'); }
-function closeBuyModal(){ buyModal?.classList.add('hidden'); }
+const openBuyModal  = () => buyModal?.classList.remove('hidden');
+const closeBuyModal = () => buyModal?.classList.add('hidden');
 closeBuyBtn?.addEventListener('click', closeBuyModal);
 
 /* ================================
-   Purchase flow (guest or user)
+   Stripe purchase
 ================================ */
 async function startPurchase(user) {
   try {
-    const body = { user_id: user?.id || null }; // null => guest checkout
     const r = await fetch(API.checkout, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ user_id: user?.id || null }) // null => guest
     });
     if (!r.ok) { const t = await r.text(); throw new Error(t || 'Stripe error'); }
     const { url } = await r.json();
@@ -278,18 +298,17 @@ async function startPurchase(user) {
   }
 }
 buyNowBtn?.addEventListener('click', async () => {
-  const { user } = await getSession(); // can be null -> guest
+  const { user } = await getSession();
   closeBuyModal();
   startPurchase(user);
 });
 
 /* ================================
-   Fetch report (main form)
+   Fetch report
 ================================ */
 const f = $id('f');
 const go = $id('go');
 const loading = $id('loading');
-
 const looksVin = (v) => /^[A-HJ-NPR-Z0-9]{17}$/i.test(v || '');
 
 f?.addEventListener('submit', async (e) => {
@@ -352,11 +371,7 @@ f?.addEventListener('submit', async (e) => {
     // Guest + returned from Stripe => attach receipt
     if (!currentUser && stripeSessionId) body.oneTimeSession = stripeSessionId;
 
-    const r = await fetch(API.report, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body)
-    });
+    const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(body) });
 
     if (r.status === 401 || r.status === 402) { openBuyModal(); return; }
     if (r.status === 409) { showToast('That receipt was already used. Please purchase again.', 'error'); return; }
@@ -387,7 +402,5 @@ f?.addEventListener('submit', async (e) => {
   }
 });
 
-/* ================================
-   Initialize history
-================================ */
+/* Init history on load */
 renderHistory();
