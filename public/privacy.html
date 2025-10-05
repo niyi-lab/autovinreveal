@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8" />
+  <title>Privacy Policy · AutoVINReveal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/style.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: { colors: { brand: { DEFAULT: '#2563eb', dark: '#1d4ed8' } } } } };
+    // apply dark mode early
+    (() => {
+      const saved = localStorage.getItem('theme');
+      const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
+      if (saved === 'dark' || (!saved && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+</head>
+<body class="h-full">
+  <div class="max-w-3xl mx-auto p-6">
+    <header class="flex items-center justify-between">
+      <a href="/" class="text-2xl font-semibold text-[rgb(153,120,77)]">AutoVINReveal</a>
+      <a href="/" class="btn-outline text-sm">← Back</a>
+    </header>
+
+    <main class="card mt-6">
+      <article class="prose">
+        <h1 class="text-2xl font-bold">Privacy Policy</h1>
+        <p><strong>Last updated:</strong> <span id="pp-date"></span></p>
+
+        <p>AutoVINReveal (“we”, “our”, “us”) respects your privacy. This policy explains what we collect, how we use it, and your choices.</p>
+
+        <h2>Information We Collect</h2>
+        <ul class="list-disc ml-6">
+          <li><strong>Account data:</strong> Email address and authentication metadata managed by our auth provider (Supabase Auth). We do not store your password ourselves.</li>
+          <li><strong>Payment data:</strong> Payments are processed by Stripe. We do not store full card numbers on our servers.</li>
+          <li><strong>Usage data:</strong> VINs/plates you submit, report type/format, success/failure logs, basic analytics, and cached report files for faster retrieval.</li>
+          <li><strong>Technical data:</strong> IP address, device/browser information, and cookies or local storage for session and UI preferences (e.g., theme).</li>
+        </ul>
+
+        <h2>How We Use Information</h2>
+        <ul class="list-disc ml-6">
+          <li>Authenticate users and maintain sessions.</li>
+          <li>Process payments and manage credit balances.</li>
+          <li>Retrieve, generate, and cache vehicle history reports.</li>
+          <li>Detect fraud/abuse, enhance security, and improve our service.</li>
+          <li>Respond to support requests and communicate about the service.</li>
+        </ul>
+
+        <h2>Sharing</h2>
+        <p>We share data with service providers only as needed to operate the service:
+          <ul class="list-disc ml-6">
+            <li><strong>Supabase</strong> (authentication, database, storage).</li>
+            <li><strong>Stripe</strong> (payments and billing).</li>
+            <li>Our vehicle data provider(s) used to fetch reports.</li>
+          </ul>
+        </p>
+
+        <h2>Data Retention</h2>
+        <p>We retain account/payment records as required for legal, tax, and accounting purposes. Report files may be cached to speed up repeat access; you can contact us to request deletion of cached items tied to your account.</p>
+
+        <h2>Security</h2>
+        <p>We implement reasonable technical and organizational measures. No method of transmission or storage is 100% secure.</p>
+
+        <h2>Your Choices & Rights</h2>
+        <ul class="list-disc ml-6">
+          <li>You can sign in to view/update your account email, or contact us to delete your account.</li>
+          <li>You can clear local history on the site via the “Clear all” button.</li>
+          <li>To request access, correction, or deletion of your data, contact us.</li>
+        </ul>
+
+        <h2>Children’s Privacy</h2>
+        <p>Our service is not directed to children under 13, and we do not knowingly collect their data.</p>
+
+        <h2>International Transfers</h2>
+        <p>Data may be processed in the United States or other regions where our providers operate.</p>
+
+        <h2>Contact</h2>
+        <p>Email: <a href="mailto:support@autovinreveal.com">support@autovinreveal.com</a></p>
+
+        <h2>Changes</h2>
+        <p>We may update this policy. We’ll revise the “Last updated” date and, if changes are significant, provide additional notice.</p>
+      </article>
+    </main>
+
+    <footer class="mt-6 text-sm text-center" style="color:var(--muted)">
+      © <span id="year"></span> AutoVINReveal ·
+      <a href="/terms.html" class="link">Terms of Use</a> ·
+      <a href="/privacy.html" class="link">Privacy Policy</a>
+    </footer>
+  </div>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    document.getElementById('pp-date').textContent = new Date().toLocaleDateString();
+  </script>
+</body>
+</html>

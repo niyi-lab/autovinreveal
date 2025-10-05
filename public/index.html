@@ -9,10 +9,7 @@
   <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: { extend: { colors: { brand: { DEFAULT: '#2563eb', dark: '#1d4ed8' } } } }
-    };
+    tailwind.config = { darkMode: 'class', theme: { extend: { colors: { brand: { DEFAULT: '#2563eb', dark: '#1d4ed8' } } } } };
   </script>
 
   <!-- Apply dark mode BEFORE paint -->
@@ -26,7 +23,6 @@
     })();
   </script>
 </head>
-
 <body class="h-full">
   <div class="max-w-3xl mx-auto p-6">
     <!-- Header -->
@@ -36,7 +32,7 @@
         <button id="themeBtn" class="theme-btn">
           <span class="icon">🌙</span><span class="label">Dark</span>
         </button>
-        <button id="loginBtn" class="btn-outline">🔑 Login</button>
+         <!--   <button id="loginBtn" class="btn-outline">🔑 Login</button>  -->
       </div>
     </div>
 
@@ -59,7 +55,6 @@
             <label class="lbl">State</label>
             <select name="state" class="select">
               <option value="">Select a state…</option>
-              <!-- 50 U.S. states -->
               <option value="AL">Alabama</option>
               <option value="AK">Alaska</option>
               <option value="AZ">Arizona</option>
@@ -68,6 +63,7 @@
               <option value="CO">Colorado</option>
               <option value="CT">Connecticut</option>
               <option value="DE">Delaware</option>
+              <option value="DC">District of Columbia</option>
               <option value="FL">Florida</option>
               <option value="GA">Georgia</option>
               <option value="HI">Hawaii</option>
@@ -110,6 +106,8 @@
               <option value="WV">West Virginia</option>
               <option value="WI">Wisconsin</option>
               <option value="WY">Wyoming</option>
+              <!-- Optionally add Canadian provinces if you want -->
+              <!-- <option value="ON">Ontario</option> -->
             </select>
           </div>
           <div>
@@ -127,13 +125,7 @@
               <option value="auctions">Auctions</option>
             </select>
           </div>
-          <div>
-            <label class="lbl">Format</label>
-            <select name="as" class="select">
-              <option value="html">HTML</option>
-              <option value="pdf">PDF</option>
-            </select>
-          </div>
+          <!-- Format dropdown removed -->
         </div>
 
         <div class="pt-2">
@@ -163,16 +155,16 @@
       <div class="card max-w-sm text-center">
         <h2 class="text-lg font-bold mb-2">Not Enough Credits</h2>
         <p class="mb-4 text-sm" style="color:var(--muted)">You need credits to view a report.</p>
-        <button id="buyNowBtn" class="btn btn-primary w-full">Buy 5 Credits ($8)</button>
+        <button id="buyNowBtn" class="btn btn-primary w-full">Buy 1 Credits ($10)</button>
         <button id="closeModalBtn" class="btn-outline w-full mt-3">Cancel</button>
       </div>
     </div>
 
-    <!-- Login / Signup Modal -->
+    <!-- Login Modal -->
     <div id="loginModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
       <div class="card w-[420px] max-w-[92vw]">
         <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-semibold">Account</h2>
+          <h2 class="text-lg font-semibold">Sign in</h2>
           <button id="closeLoginModal" class="btn-outline text-xs">✕</button>
         </div>
 
@@ -184,16 +176,18 @@
           <input id="loginPassword" type="password" class="input" placeholder="••••••••" />
         </div>
 
-        <p id="authHint" class="text-xs mt-2 hidden" style="color:var(--muted)"></p>
-
         <div class="mt-4 grid grid-cols-2 gap-2">
           <button id="doLogin" class="btn btn-primary">Sign in</button>
           <button id="doSignup" class="btn-outline">Create account</button>
         </div>
+
+        <p class="text-xs mt-3" style="color:var(--muted)">
+          Tip: you can also buy credits without signing in — Stripe will just ask for your card info.
+        </p>
       </div>
     </div>
 
-    <!-- Results History -->
+    <!-- History -->
     <div class="mt-8">
       <div class="flex items-center justify-between mb-2">
         <h2 class="text-lg font-semibold">Results History</h2>
@@ -205,7 +199,7 @@
             <tr>
               <th class="th">VIN</th>
               <th class="th">Type</th>
-              <th class="th">Format</th>
+              <th class="th">Available</th>
               <th class="th">Time</th>
               <th class="th">Action</th>
             </tr>
@@ -215,27 +209,12 @@
       </div>
     </div>
 
-    <!-- Purchase History (visible when signed in) -->
-    <div id="purchasesWrap" class="mt-8 hidden">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="text-lg font-semibold">Purchase History</h2>
-        <button id="refreshPurchases" class="btn-outline text-sm">Refresh</button>
-      </div>
-      <div class="table-wrap rounded-xl">
-        <table class="min-w-full text-sm">
-          <thead>
-            <tr>
-              <th class="th">Date</th>
-              <th class="th">Amount</th>
-              <th class="th">Currency</th>
-              <th class="th">Status</th>
-            </tr>
-          </thead>
-          <tbody id="purchasesBody"></tbody>
-        </table>
-      </div>
+    <!-- Footer -->
+    <div class="mt-8 flex items-center justify-center gap-4 text-sm" style="color:var(--muted)">
+      <a class="underline" href="/privacy.html">Privacy Policy</a>
+      <span>•</span>
+      <a class="underline" href="/terms.html">Terms of Use</a>
     </div>
-
   </div>
 
   <!-- Toasts -->
@@ -245,8 +224,24 @@
     window.VITE_SUPABASE_URL = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
     window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
   </script>
-
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Boot/Warmup Overlay -->
+<div id="bootOverlay" class="hidden fixed inset-0 bg-black/60 z-[1000] flex items-center justify-center">
+  <div class="card max-w-sm w-[92%] text-center">
+    <div class="mb-3 flex items-center justify-center">
+      <svg class="w-8 h-8 animate-spin" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" fill="none" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+      </svg>
+    </div>
+    <h2 class="text-lg font-semibold mb-1">Warming up…</h2>
+    <p class="text-sm" style="color:var(--muted)">
+      Our free server may take 20–60s to start. Thanks for your patience.
+    </p>
+  </div>
+</div>
+
   <script type="module" src="/app.js"></script>
 </body>
 </html>

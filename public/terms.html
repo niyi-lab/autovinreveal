@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8" />
+  <title>Terms of Service · AutoVINReveal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/style.css" />
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { colors: { brand: { DEFAULT: '#2563eb', dark: '#1d4ed8' } } } }
+    };
+  </script>
+
+  <!-- Apply dark mode BEFORE paint -->
+  <script>
+    (() => {
+      const saved = localStorage.getItem('theme');
+      const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
+      if (saved === 'dark' || (!saved && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+</head>
+<body class="h-full">
+  <div class="max-w-3xl mx-auto p-6">
+    <!-- Header -->
+    <header class="flex items-center justify-between">
+      <a href="/" class="text-2xl font-semibold text-[rgb(153,120,77)]">AutoVINReveal</a>
+      <a href="/" class="btn-outline text-sm">← Back</a>
+    </header>
+
+    <!-- Terms -->
+    <main class="card mt-6">
+      <article class="prose">
+        <h1 class="text-2xl font-bold">Terms of Service</h1>
+        <p><strong>Last updated:</strong> <span id="to-date"></span></p>
+
+        <h2>1) General Use</h2>
+        <p>Welcome to <strong>AutoVINReveal</strong>. These Terms of Service (“Terms”) govern your access to and use of the AutoVINReveal website, any subdomains, and related products and services (collectively, the “Service”). By accessing or using the Service, you agree to be bound by these Terms. If you do not agree, do not use the Service.</p>
+
+        <h2>2) Registered Accounts</h2>
+        <p>You are responsible for maintaining the confidentiality and security of your account and for all activities under it. AutoVINReveal may reclaim, suspend, or terminate an account at any time at its discretion for violations of these Terms or suspected abuse. Account sharing is prohibited unless explicitly supported through a team or multi-user feature.</p>
+
+        <h2>3) Purchases &amp; Refunds</h2>
+        <p>All purchases on AutoVINReveal are final and non-refundable. Vehicle history reports are eligible for a full refund only if a report fails to generate through the Service. Refunds will not be issued for duplicates or user error. Credit purchases are final and non-refundable, including if the Service is later modified or discontinued.</p>
+        <p>Initiating a payment dispute or chargeback without first contacting support may result in service suspension and payment card blocks. Unpaid invoices may be referred to collections where permitted by law.</p>
+
+        <h2>4) User Content &amp; Marketplace</h2>
+        <p>You retain ownership of any content you upload or submit. By posting or sharing content through the Service, you grant AutoVINReveal a worldwide, non-exclusive, royalty-free license to use, host, store, reproduce, display, and create derivative works of that content as reasonably necessary to operate and improve the Service. AutoVINReveal may remove content that violates these Terms or applicable law.</p>
+        <p>AutoVINReveal is not a party to any in-person meetups or transactions arranged by users and is not responsible for any accidents, damages, or disputes arising from such activities.</p>
+
+        <h2>5) Independent Operators</h2>
+        <p>Users, contributors, and third-party sellers on AutoVINReveal act as independent contractors and are not partners, joint venturers, or employees of AutoVINReveal. AutoVINReveal does not control or direct their activities.</p>
+
+       
+
+        <h2>6) Trademarks &amp; Third-Party Content</h2>
+        <p>Third-party names, trademarks, and logos (e.g., CARFAX, AutoCheck) are the property of their respective owners. Any use on the Service is for identification, reference, or compatibility purposes and does not imply endorsement or affiliation.</p>
+
+       
+
+        <h2>8) Disclaimers &amp; Limitation of Liability</h2>
+        <p>The Service is provided “as is” and “as available,” without warranties of any kind, express or implied, including (without limitation) merchantability, fitness for a particular purpose, title, or non-infringement. AutoVINReveal does not guarantee that reports, data, or results will be accurate, complete, or error-free, or that the Service will be uninterrupted.</p>
+        <p>To the maximum extent permitted by law, AutoVINReveal, its owners, and its operators will not be liable for any indirect, incidental, special, consequential, exemplary, or punitive damages, or any loss of profits, revenues, data, or goodwill, arising out of or related to your use of the Service. Nothing here limits liability for fraud, gross negligence, or other liability that cannot be excluded under applicable law.</p>
+
+        <h2>9) Changes to the Service or Terms</h2>
+        <p>We may update these Terms or the Service at any time. Material changes will be posted on the site or provided through another reasonable method. Your continued use of the Service after changes become effective constitutes acceptance of the updated Terms.</p>
+
+        <h2>10) Agreement</h2>
+        <p>By accessing or using AutoVINReveal, you acknowledge that you have read, understood, and agree to be bound by these Terms, which constitute a binding agreement between you and AutoVINReveal.</p>
+
+     
+      </article>
+    </main>
+
+    <!-- Footer -->
+    <footer class="mt-6 text-sm text-center" style="color:var(--muted)">
+      © <span id="year"></span> AutoVINReveal ·
+      <a href="/terms.html" class="link">Terms of Use</a> ·
+      <a href="/privacy.html" class="link">Privacy Policy</a>
+    </footer>
+  </div>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    document.getElementById('to-date').textContent = new Date().toLocaleDateString();
+  </script>
+</body>
+</html>

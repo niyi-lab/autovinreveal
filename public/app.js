@@ -7,6 +7,8 @@ const API = {
   credits: (uid) => `/api/credits/${uid}`,
 };
 
+const PENDING_KEY = 'pendingReport'; // what report to open after Stripe success
+
 function $id(id) { return document.getElementById(id); }
 
 function showToast(message, type = 'error') {
@@ -22,6 +24,17 @@ function showToast(message, type = 'error') {
   }, 4000);
 }
 
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /* ================================
    Supabase init (single source)
 ================================ */
@@ -33,13 +46,129 @@ if (window.supabase && SB_URL && SB_ANON) {
   supabase = window.supabase.createClient(SB_URL, SB_ANON);
 }
 
-/* Detect Stripe success & capture session_id for guest one-time use */
+/* ================================
+   Backend warmup overlay + ping
+   (helps when Render free service wakes up)
+================================ */
+const bootOverlay = $id('bootOverlay');
+let backendReadyOnce = false;
+
+function showBootOverlay() { bootOverlay?.classList.remove('hidden'); }
+function hideBootOverlay() { bootOverlay?.classList.add('hidden'); }
+
+async function pingBackendOnce(timeoutMs = 2000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch('/healthz', { cache: 'no-store', signal: ctrl.signal });
+    clearTimeout(t);
+    return r.ok;
+  } catch {
+    clearTimeout(t);
+    return false;
+  }
+}
+
+async function ensureBackendReady({ timeoutMs = 2000, maxWaitMs = 60000 } = {}) {
+  if (backendReadyOnce) return true;
+
+  // quick probe (avoid flashing overlay if it's already up)
+  let ok = await pingBackendOnce(timeoutMs);
+  if (ok) { backendReadyOnce = true; return true; }
+
+  // show overlay & poll with backoff
+  showBootOverlay();
+  const start = Date.now();
+  let delay = 700;
+  while (Date.now() - start < maxWaitMs) {
+    ok = await pingBackendOnce(timeoutMs);
+    if (ok) {
+      backendReadyOnce = true;
+      hideBootOverlay();
+      return true;
+    }
+    await new Promise(res => setTimeout(res, delay));
+    delay = Math.min(Math.round(delay * 1.7), 4000);
+  }
+  hideBootOverlay();
+  return false;
+}
+
+// small warm ping on load (doesn't show overlay unless truly slow)
+ensureBackendReady({ timeoutMs: 800, maxWaitMs: 3000 });
+
+/* ================================
+   Stripe return handling (guest use)
+================================ */
 const urlParams = new URLSearchParams(window.location.search);
 const checkoutSuccess = urlParams.get('checkout') === 'success';
 const stripeSessionId = urlParams.get('session_id') || null;
+
+function tryLoadPending() {
+  try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); }
+  catch { return null; }
+}
+function clearPending() { localStorage.removeItem(PENDING_KEY); }
+
+async function resumePendingPurchase() {
+  const pending = tryLoadPending();
+  if (!pending) return;
+
+  await ensureBackendReady();
+
+  const headers = { 'Content-Type': 'application/json' };
+  const { token, user } = await getSession();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  // guests must attach the Stripe receipt, logged-in users rely on credits
+  if (!user && stripeSessionId) {
+    pending.oneTimeSession = stripeSessionId;
+  }
+
+  try {
+    const r = await fetch(API.report, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(pending),
+    });
+
+    if (!r.ok) {
+      const t = await r.text();
+      showToast(t || ('HTTP ' + r.status), 'error');
+      return;
+    }
+
+    // Always open HTML immediately after purchase; history lets them grab PDF too
+    const html = await r.text();
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
+
+    showToast('Report ready!', 'ok');
+
+    // Record to history (format not stored; actions provide both HTML/PDF)
+    addToHistory({
+      vin: pending.vin || '(from plate)',
+      type: pending.type || 'carfax',
+      ts: Date.now(),
+      state: pending.state || '',
+      plate: pending.plate || ''
+    });
+    renderHistory();
+  } catch (e) {
+    showToast(e.message || 'Failed to resume purchase', 'error');
+  } finally {
+    clearPending();
+  }
+}
+
+// If we returned from Stripe with a session, clean URL and resume
 if (stripeSessionId) {
-  history.replaceState({}, '', window.location.pathname); // clean URL
-  if (checkoutSuccess) showToast('Payment confirmed. You can now fetch a report.', 'ok');
+  history.replaceState({}, '', window.location.pathname);
+  if (checkoutSuccess) {
+    showToast('Payment confirmed. Preparing your report…', 'ok');
+  }
+  resumePendingPurchase();
 }
 
 /* ================================
@@ -82,34 +211,25 @@ function closeLogin() { loginModal?.classList.add('hidden'); }
 
 closeLoginModal?.addEventListener('click', closeLogin);
 
-// Disable/enable create button helper
-function setCreateButtonDisabled(disabled) {
-  if (doSignupBtn) {
-    doSignupBtn.disabled = !!disabled;
-    doSignupBtn.classList.toggle('opacity-50', !!disabled);
-    doSignupBtn.classList.toggle('cursor-not-allowed', !!disabled);
-  }
+// Disable/enable "Create account" while we validate inputs
+function setSignupDisabled(disabled) {
+  if (!doSignupBtn) return;
+  doSignupBtn.disabled = disabled;
+  doSignupBtn.style.opacity = disabled ? '0.6' : '1';
+  doSignupBtn.style.cursor = disabled ? 'not-allowed' : 'pointer';
 }
 
-// Check if email already exists (using sign-in attempt without password)
-async function emailExists(address) {
-  if (!supabase) return false;
-  // Try signInWithPassword with impossible password; Supabase returns specific error if user exists
-  try {
-    const { error } = await supabase.auth.signInWithPassword({
-      email: address,
-      password: '__definitely_wrong_password__',
-    });
-    if (!error) return true; // somehow signed in (unlikely)
-    // "Invalid login credentials" => user exists but wrong pw
-    if (error.message && /invalid login credentials/i.test(error.message)) return true;
-    // "Email not confirmed" still indicates the user exists
-    if (error.message && /email not confirmed/i.test(error.message)) return true;
-    return false;
-  } catch {
-    return false;
-  }
+// basic enable/disable by input completeness
+function reflectSignupAvailability() {
+  const email = (emailEl?.value || '').trim();
+  const pw = pwEl?.value || '';
+  // must have valid-ish email and 6+ chars password
+  const enabled = !!email && pw.length >= 6;
+  setSignupDisabled(!enabled);
 }
+emailEl?.addEventListener('input', reflectSignupAvailability);
+pwEl?.addEventListener('input', reflectSignupAvailability);
+reflectSignupAvailability();
 
 async function doSignup() {
   if (!supabase) { showToast('Supabase not loaded', 'error'); return; }
@@ -119,22 +239,24 @@ async function doSignup() {
   if (!email) return showToast('Enter your email', 'error');
   if (password.length < 6) return showToast('Password must be at least 6 characters', 'error');
 
-  // Check existence first and block the button if already registered
-  setCreateButtonDisabled(true);
-  const exists = await emailExists(email);
-  if (exists) {
-    showToast('An account with this email already exists. Try signing in.', 'error');
-    setCreateButtonDisabled(false);
-    return;
-  }
-
   try {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { emailRedirectTo: window.location.origin }
     });
-    if (error) throw error;
+
+    if (error) {
+      const msg = String(error.message || '').toLowerCase();
+      // Common supabase error message for existing users
+      if (msg.includes('already') || msg.includes('registered') || msg.includes('exists')) {
+        showToast('An account with this email already exists. Please sign in instead.', 'error');
+        // Lock create button to prevent repeated attempts
+        setSignupDisabled(true);
+        return;
+      }
+      throw error;
+    }
 
     if (!data.session) {
       showToast('Check your email to confirm your account.', 'ok');
@@ -144,8 +266,6 @@ async function doSignup() {
     }
   } catch (e) {
     showToast(e.message || 'Sign up failed', 'error');
-  } finally {
-    setCreateButtonDisabled(false);
   }
 }
 
@@ -171,7 +291,6 @@ async function doLogout() {
   showToast('Signed out', 'ok');
 }
 
-// Hook up buttons
 doSignupBtn?.addEventListener('click', doSignup);
 doLoginBtn?.addEventListener('click', doLogin);
 
@@ -213,20 +332,6 @@ function reflectAuthUI(session) {
 })();
 
 /* ================================
-   Helper: download Blob as file
-================================ */
-function downloadBlob(blob, filename = 'AutoVINReveal.pdf') {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-/* ================================
    Supabase session helper
 ================================ */
 async function getSession() {
@@ -238,6 +343,7 @@ async function getSession() {
 
 /* ================================
    History (localStorage)
+   (No format stored; actions provide HTML/PDF)
 ================================ */
 const HISTORY_KEY = 'reportHistory';
 function loadHistory() { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } }
@@ -245,13 +351,13 @@ function saveHistory(list) { localStorage.setItem(HISTORY_KEY, JSON.stringify(li
 function addToHistory(item) { const list = loadHistory(); list.unshift(item); saveHistory(list.slice(0, 20)); }
 function formatTime(ts) { return new Date(ts).toLocaleString(); }
 
-async function replayRequest(item) {
+async function openHistoryHTML(item) {
   const data = {
     vin: item.vin && item.vin !== '(from plate)' ? item.vin : '',
     state: item.state || '',
     plate: item.plate || '',
     type: item.type,
-    as: item.as,
+    as: 'html',
     allowLive: false
   };
   const headers = { 'Content-Type': 'application/json' };
@@ -259,32 +365,36 @@ async function replayRequest(item) {
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   try {
+    await ensureBackendReady();
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
     if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
+    const html = await r.text();
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
+  } catch (e) { showToast(e.message || 'Request failed', 'error'); }
+}
 
-    if (item.as === 'pdf') {
-      const blob = await r.blob();
+async function downloadHistoryPDF(item) {
+  const data = {
+    vin: item.vin && item.vin !== '(from plate)' ? item.vin : '',
+    state: item.state || '',
+    plate: item.plate || '',
+    type: item.type,
+    as: 'pdf',
+    allowLive: false
+  };
+  const headers = { 'Content-Type': 'application/json' };
+  const { token } = await getSession();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      let filename = 'AutoVINReveal.pdf';
-      const cd = r.headers.get('content-disposition'); // exposed by server
-      if (cd) {
-        const m = /filename\*?=(?:UTF-8''|")?([^;"']+)/i.exec(cd);
-        if (m && m[1]) {
-          try { filename = decodeURIComponent(m[1].replace(/"/g, '')); }
-          catch { filename = m[1].replace(/"/g, ''); }
-        }
-      } else {
-        const tag = data.vin || (data.state && data.plate ? `${data.state}-${data.plate}` : 'report');
-        filename = `${tag}-${data.type}.pdf`;
-      }
-
-      downloadBlob(blob, filename);
-    } else {
-      const html = await r.text();
-      const w = window.open('', '_blank');
-      w.document.write(html);
-      w.document.close();
-    }
+  try {
+    await ensureBackendReady();
+    const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
+    if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
+    const blob = await r.blob();
+    const nameBase = (data.vin || item.plate || 'report').replace(/\W+/g, '_');
+    downloadBlob(blob, `${nameBase}_${item.type}.pdf`);
   } catch (e) { showToast(e.message || 'Request failed', 'error'); }
 }
 
@@ -301,25 +411,32 @@ function renderHistory() {
     tr.innerHTML = `
       <td class="px-4 py-3" style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">${item.vin}</td>
       <td class="px-4 py-3">${item.type}</td>
-      <td class="px-4 py-3" style="text-transform:uppercase">${item.as}</td>
       <td class="px-4 py-3">${formatTime(item.ts)}</td>
       <td class="px-4 py-3">
-        <button data-idx="${idx}" class="btn-outline" style="font-size:.8rem">Open</button>
-        <button data-idx="${idx}" class="btn-outline" style="font-size:.8rem;margin-left:.5rem;color:#dc2626;border-color:#fecaca">Delete</button>
+        <div class="flex gap-2">
+          <button data-idx="${idx}" data-action="open" class="btn-outline" style="font-size:.8rem">Open HTML</button>
+          <button data-idx="${idx}" data-action="pdf" class="btn-outline" style="font-size:.8rem">Download PDF</button>
+          <button data-idx="${idx}" data-action="del" class="btn-outline" style="font-size:.8rem;color:#dc2626;border-color:#fecaca">Delete</button>
+        </div>
       </td>`;
     body.appendChild(tr);
   });
 
   body.querySelectorAll('button.btn-outline').forEach(btn => {
-    if (btn.textContent.trim() === 'Open') {
-      btn.addEventListener('click', e => {
-        const i = +e.currentTarget.dataset.idx; replayRequest(loadHistory()[i]);
-      });
-    } else {
-      btn.addEventListener('click', e => {
-        const i = +e.currentTarget.dataset.idx; const list = loadHistory(); list.splice(i,1); saveHistory(list); renderHistory();
-      });
-    }
+    const action = btn.getAttribute('data-action');
+    btn.addEventListener('click', async (e) => {
+      const i = +e.currentTarget.getAttribute('data-idx');
+      const item = loadHistory()[i];
+      if (!item) return;
+
+      if (action === 'open') {
+        openHistoryHTML(item);
+      } else if (action === 'pdf') {
+        downloadHistoryPDF(item);
+      } else if (action === 'del') {
+        const list = loadHistory(); list.splice(i,1); saveHistory(list); renderHistory();
+      }
+    });
   });
 }
 $id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(HISTORY_KEY); renderHistory(); });
@@ -336,9 +453,15 @@ closeBuyBtn?.addEventListener('click', closeBuyModal);
 
 /* ================================
    Purchase flow (guest or user)
+   - If we were blocked for credits, we stash the intended report in localStorage
+   - After Stripe success, we auto-open that report
 ================================ */
-async function startPurchase(user) {
+async function startPurchase(user, pendingReport = null) {
   try {
+    await ensureBackendReady();
+    if (pendingReport) {
+      localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport));
+    }
     const body = { user_id: user?.id || null }; // null => guest checkout
     const r = await fetch(API.checkout, {
       method: 'POST',
@@ -353,19 +476,24 @@ async function startPurchase(user) {
   }
 }
 buyNowBtn?.addEventListener('click', async () => {
-  const { user } = await getSession(); // can be null -> guest
+  const { user } = await getSession(); // may be null -> guest
   closeBuyModal();
-  startPurchase(user);
+  // No specific pending report here; it’s a generic top-up
+  startPurchase(user, null);
 });
 
 /* ================================
    Fetch report (main form)
+   - No "format" dropdown; default open HTML
+   - If credits required -> open modal and remember desired report
 ================================ */
 const f = $id('f');
 const go = $id('go');
 const loading = $id('loading');
 
 const looksVin = (v) => /^[A-HJ-NPR-Z0-9]{17}$/i.test(v || '');
+
+let lastFormData = null; // to remember intent if we prompt purchase
 
 f?.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -378,10 +506,11 @@ f?.addEventListener('submit', async (e) => {
     state: (formData.state || '').trim(),
     plate: (formData.plate || '').trim(),
     type: formData.type || 'carfax',
-    as:   formData.as || 'html',
+    as:   'html',        // default open HTML immediately
     allowLive: true
   };
 
+  // basic validation
   if (!data.vin && !(data.state && data.plate)) {
     showToast('Enter a VIN or a State + Plate', 'error');
     go.disabled = false; loading.classList.add('hidden'); return;
@@ -395,6 +524,9 @@ f?.addEventListener('submit', async (e) => {
   let currentUser = null;
   let token = null;
 
+  // Make sure backend is up before credit checks or requests
+  await ensureBackendReady();
+
   if (supabase) {
     const sess = await getSession();
     currentUser = sess.user;
@@ -402,11 +534,13 @@ f?.addEventListener('submit', async (e) => {
     if (token) headers['Authorization'] = `Bearer ${token}`;
   }
 
+  // If logged-in, check credits (non-blocking errors ignored)
   if (currentUser && currentUser.id) {
     try {
       const r = await fetch(API.credits(currentUser.id));
       const { balance = 0 } = await r.json();
       if (balance <= 0) {
+        lastFormData = data;
         openBuyModal();
         go.disabled = false; loading.classList.add('hidden');
         return;
@@ -415,57 +549,43 @@ f?.addEventListener('submit', async (e) => {
   }
 
   try {
-    const body = {
-      vin:  data.vin,
-      state:data.state,
-      plate:data.plate,
-      type: data.type,
-      as:   data.as,
-      allowLive: true
-    };
-
-    // Guest + returned from Stripe => attach receipt
-    if (!currentUser && stripeSessionId) body.oneTimeSession = stripeSessionId;
+    // If GUEST and we just returned from Stripe, attach the receipt
+    if (!currentUser && stripeSessionId) {
+      data.oneTimeSession = stripeSessionId;
+    }
 
     const r = await fetch(API.report, {
       method: 'POST',
       headers,
-      body: JSON.stringify(body)
+      body: JSON.stringify(data)
     });
 
-    if (r.status === 401 || r.status === 402) { openBuyModal(); return; }
-    if (r.status === 409) { showToast('That receipt was already used. Please purchase again.', 'error'); return; }
-    if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
-
-    if (data.as === 'pdf') {
-      const blob = await r.blob();
-
-      let filename = 'AutoVINReveal.pdf';
-      const cd = r.headers.get('content-disposition'); // exposed by server
-      if (cd) {
-        const m = /filename\*?=(?:UTF-8''|")?([^;"']+)/i.exec(cd);
-        if (m && m[1]) {
-          try { filename = decodeURIComponent(m[1].replace(/"/g, '')); }
-          catch { filename = m[1].replace(/"/g, ''); }
-        }
-      } else {
-        const tag = data.vin || (data.state && data.plate ? `${data.state}-${data.plate}` : 'report');
-        filename = `${tag}-${data.type}.pdf`;
-      }
-
-      downloadBlob(blob, filename);
-    } else {
-      const html = await r.text();
-      const w = window.open('', '_blank');
-      w.document.write(html);
-      w.document.close();
+    if (r.status === 401 || r.status === 402) {
+      // need purchase; remember desired report and prompt buy
+      lastFormData = data;
+      openBuyModal();
+      return;
     }
+    if (r.status === 409) {
+      showToast('That receipt was already used. Please purchase again.', 'error');
+      return;
+    }
+    if (!r.ok) {
+      const t = await r.text();
+      showToast(t || ('HTTP ' + r.status), 'error');
+      return;
+    }
+
+    // Open HTML immediately
+    const html = await r.text();
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
 
     showToast('Report fetched successfully!', 'ok');
     addToHistory({
       vin: data.vin || '(from plate)',
       type: data.type,
-      as:   data.as,
       ts: Date.now(),
       state: data.state || '',
       plate: data.plate || ''
@@ -478,6 +598,17 @@ f?.addEventListener('submit', async (e) => {
     go.disabled = false;
     loading.classList.add('hidden');
   }
+});
+
+/* If user clicks “Buy Now” from the modal after a blocked attempt,
+   store the intended report so we can auto-open after Stripe returns. */
+buyNowBtn?.addEventListener('click', async () => {
+  const { user } = await getSession();
+  closeBuyModal();
+  const pending = lastFormData
+    ? { ...lastFormData, as: 'html', allowLive: true } // ensure HTML open
+    : null;
+  startPurchase(user, pending);
 });
 
 /* ================================
