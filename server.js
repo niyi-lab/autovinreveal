@@ -1,6 +1,6 @@
 // project-echo / server.js
 import dotenv from 'dotenv';
-dotenv.config({ path: '/etc/secrets/.env' }); // Render Secret Files
+dotenv.config({ path: '/etc/secrets/.env' }); // Render Secret Files (if used)
 dotenv.config(); // fallback to .env in repo if present
 
 import express from 'express';
@@ -188,15 +188,28 @@ app.post('/api/report', async (req, res) => {
     if (!raw) return res.status(404).send('No cached or archive report found.');
 
     if (as === 'pdf') {
+      // Convert base64 HTML to PDF via upstream and force download
       const form = new FormData();
       form.append('base64_content', raw);
       form.append('vin', targetVin);
       form.append('report_type', type);
+
       const pdf = await axios.post(`${CS}/pdf`, form, {
         headers: { ...H, ...form.getHeaders() },
         responseType: 'arraybuffer',
       });
+
+      const fnameBase =
+        (targetVin && `${targetVin}-${type}`) ||
+        (state && plate ? `${state}-${plate}-${type}` : `report-${type}`);
+      const filename = `${fnameBase}.pdf`;
+
       res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      // Allow browser JS to read filename
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+      res.setHeader('Cache-Control', 'no-store');
+
       return res.send(Buffer.from(pdf.data));
     } else {
       const html = Buffer.from(raw, 'base64').toString('utf8');
