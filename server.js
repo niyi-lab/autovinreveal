@@ -15,6 +15,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
 import Stripe from 'stripe';
+import { gunzipSync } from 'zlib';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,10 +24,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
-// Basic health check (Render Settings → Health Check Path = /healthz)
+// -------------------------------
+// Health check (Render: /healthz)
+// -------------------------------
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
-// Static + middleware
+// -------------------------------
+// Static & middleware
+// -------------------------------
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
@@ -34,7 +39,9 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan('dev'));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
+// -------------------------------
 // Supabase
+// -------------------------------
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY;
@@ -55,12 +62,16 @@ async function getUser(req) {
   return { token, user: data.user };
 }
 
+// -------------------------------
 // Stripe
+// -------------------------------
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
-const PRICE_ID = process.env.STRIPE_PRICE_ID;
+const PRICE_ID = process.env.STRIPE_PRICE_ID; // default price id
 const SITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
 
+// -------------------------------
 // CarSimulcast
+// -------------------------------
 const CS = 'https://connect.carsimulcast.com';
 const KEY = process.env.API_KEY;
 const SECRET = process.env.API_SECRET;
@@ -68,17 +79,21 @@ const H = { 'API-KEY': KEY, 'API-SECRET': SECRET };
 
 async function csGet(url) {
   const r = await axios.get(url, { headers: H, responseType: 'text', timeout: 30000 });
-  return r.data;
+  return r.data; // base64 string (gzipped HTML OR raw HTML-base64 OR raw PDF-base64)
 }
 
-// Cache
+// -------------------------------
+// Cache (base64 payloads as-is)
+// -------------------------------
 const CACHE_DIR = path.join(__dirname, 'cache');
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 const ck = (vin, type) => path.join(CACHE_DIR, `${vin}-${type}.b64`);
 const readCache = (vin, type) => (fs.existsSync(ck(vin, type)) ? fs.readFileSync(ck(vin, type), 'utf8') : null);
 const writeCache = (vin, type, data) => fs.writeFileSync(ck(vin, type), data, 'utf8');
 
+// -------------------------------
 // One-time guest session tracker
+// -------------------------------
 const CONSUMED_FILE = path.join(__dirname, '.consumed_sessions.json');
 let CONSUMED = new Set();
 try {
@@ -88,10 +103,48 @@ try {
   }
 } catch {}
 function saveConsumed() {
-  try { fs.writeFileSync(CONSUMED_FILE, JSON.stringify([...CONSUMED], null, 2)); } catch {}
+  try {
+    fs.writeFileSync(CONSUMED_FILE, JSON.stringify([...CONSUMED], null, 2));
+  } catch {}
 }
 
-// Credits (logged-in)
+// -------------------------------
+// Helpers: decode base64 report
+// -------------------------------
+function decodeReportBase64(rawB64) {
+  const buf = Buffer.from(rawB64, 'base64');
+
+  // GZIP header: 1F 8B
+  if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+    try {
+      const unzipped = gunzipSync(buf);
+      const html = unzipped.toString('utf8');
+      return { kind: 'html', html };
+    } catch {
+      return { kind: 'unknown', buffer: buf, error: 'gunzip-failed' };
+    }
+  }
+
+  // PDF magic: %PDF-
+  if (buf.slice(0, 5).toString() === '%PDF-') {
+    return { kind: 'pdf', buffer: buf };
+  }
+
+  // Try plain UTF-8 HTML
+  const asText = buf.toString('utf8');
+  if (/<!DOCTYPE html|<html[\s>]/i.test(asText.slice(0, 2048))) {
+    return { kind: 'html', html: asText };
+  }
+
+  return { kind: 'unknown', buffer: buf };
+}
+
+// -------------------------------
+/**
+ * Credits (logged-in)
+ * GET /api/credits/:user_id  ->  { balance: number }
+ */
+// -------------------------------
 app.get('/api/credits/:user_id', async (req, res) => {
   try {
     const { user_id } = req.params;
@@ -109,7 +162,9 @@ app.get('/api/credits/:user_id', async (req, res) => {
   }
 });
 
+// -------------------------------
 // Stripe Checkout
+// -------------------------------
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
     const { user_id, price_id } = req.body || {};
@@ -128,7 +183,9 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
+// -------------------------------
 // VIN Report
+// -------------------------------
 app.post('/api/report', async (req, res) => {
   try {
     const {
@@ -143,6 +200,7 @@ app.post('/api/report', async (req, res) => {
 
     const allowLive = allowLiveRaw !== false;
 
+    // Normalize VIN via plate if needed
     let targetVin = (vin || '').trim().toUpperCase();
     if (!targetVin && state && plate) {
       const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
@@ -151,8 +209,10 @@ app.post('/api/report', async (req, res) => {
     }
     if (!targetVin) return res.status(400).send('VIN or Plate+State required');
 
+    // Load cached copy first
     let raw = readCache(targetVin, type);
 
+    // If no cache & live allowed, enforce credits / guest receipt, then fetch upstream
     if (!raw && allowLive) {
       const { token, user } = await getUser(req);
 
@@ -167,6 +227,7 @@ app.post('/api/report', async (req, res) => {
           return res.status(402).send('Insufficient credits');
         }
       } else {
+        // Guest: must present a one-time paid Stripe session
         if (!oneTimeSession) return res.status(401).send('Complete purchase to view this report.');
         if (CONSUMED.has(oneTimeSession)) return res.status(409).send('This receipt was already used.');
         try {
@@ -180,6 +241,7 @@ app.post('/api/report', async (req, res) => {
         }
       }
 
+      // Fetch fresh base64 (may be gzipped HTML or PDF)
       const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
       raw = live;
       writeCache(targetVin, type, raw);
@@ -187,42 +249,68 @@ app.post('/api/report', async (req, res) => {
 
     if (!raw) return res.status(404).send('No cached or archive report found.');
 
+    // Decode (gzipped HTML / raw HTML / raw PDF) from base64
+    const decoded = decodeReportBase64(raw);
+
+    // === PDF requested ===
     if (as === 'pdf') {
-      // Convert base64 HTML to PDF via upstream and force download
-      const form = new FormData();
-      form.append('base64_content', raw);
-      form.append('vin', targetVin);
-      form.append('report_type', type);
+      // If upstream is already a PDF, send as a file download
+      if (decoded.kind === 'pdf') {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${targetVin}-${type}.pdf"`);
+        return res.send(decoded.buffer);
+      }
 
-      const pdf = await axios.post(`${CS}/pdf`, form, {
-        headers: { ...H, ...form.getHeaders() },
-        responseType: 'arraybuffer',
-      });
+      // If HTML, convert via CS /pdf and force download
+      if (decoded.kind === 'html') {
+        try {
+          const form = new FormData();
+          // Re-encode the clean HTML to base64 for pdf service
+          form.append('base64_content', Buffer.from(decoded.html, 'utf8').toString('base64'));
+          form.append('vin', targetVin);
+          form.append('report_type', type);
 
-      const fnameBase =
-        (targetVin && `${targetVin}-${type}`) ||
-        (state && plate ? `${state}-${plate}-${type}` : `report-${type}`);
-      const filename = `${fnameBase}.pdf`;
+          const pdf = await axios.post(`${CS}/pdf`, form, {
+            headers: { ...H, ...form.getHeaders() },
+            responseType: 'arraybuffer',
+            timeout: 60000,
+          });
 
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      // Allow browser JS to read filename
-      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
-      res.setHeader('Cache-Control', 'no-store');
+          res.setHeader('Content-Type', 'application/pdf');
+          res.setHeader('Content-Disposition', `attachment; filename="${targetVin}-${type}.pdf"`);
+          return res.send(Buffer.from(pdf.data));
+        } catch (e) {
+          console.error('pdf conversion error:', e?.response?.status, e?.message);
+          return res.status(502).send('Could not generate PDF from this report.');
+        }
+      }
 
-      return res.send(Buffer.from(pdf.data));
-    } else {
-      const html = Buffer.from(raw, 'base64').toString('utf8');
-      res.setHeader('Content-Type', 'text/html');
-      return res.send(html);
+      return res.status(500).send('Unsupported report content.');
     }
+
+    // === HTML requested ===
+    if (decoded.kind === 'html') {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(decoded.html);
+    }
+
+    // If upstream content is PDF but user asked for HTML, show inline PDF so they still see something
+    if (decoded.kind === 'pdf') {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${targetVin}-${type}.pdf"`);
+      return res.send(decoded.buffer);
+    }
+
+    return res.status(500).send('Unsupported report content.');
   } catch (err) {
     console.error('report error:', err);
     res.status(500).send('Server error');
   }
 });
 
-// Make Render’s proxy happier with slow upstreams
+// -------------------------------
+// Boot server (tune proxy timeouts)
+// -------------------------------
 const server = app.listen(PORT, HOST, () =>
   console.log(`✅ Server running on ${process.env.SITE_URL || `http://${HOST}:${PORT}`}`)
 );
