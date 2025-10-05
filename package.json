@@ -8,17 +8,20 @@
     "dev": "node server.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.58.0",
-    "axios": "^1.12.2",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "express-rate-limit": "^6.11.2",
-    "form-data": "^4.0.4",
-    "helmet": "^7.1.0",
-    "stripe": "^19.1.0"
+    "@supabase/supabase-js": "2.58.0",
+    "axios": "1.12.2",
+    "cors": "2.8.5",
+    "express": "4.19.2",
+    "express-rate-limit": "6.11.2",
+    "form-data": "4.0.4",
+    "helmet": "7.1.0",
+    "stripe": "19.1.0",
+    "debug": "4.3.4"
+  },
+  "overrides": {
+    "debug": "4.3.4"
   },
   "engines": {
-    "node": ">=18"
+    "node": "20.x"
   }
 }
