@@ -1,7 +1,7 @@
 /********************************************************************/
-// Server: project-echo backend
-// Purpose: VIN reports + Supabase auth + Stripe checkout + credits.
-// Supports guest checkout: one paid Stripe session = one live fetch.
+/* Server: project-echo backend
+   Purpose: VIN reports + Supabase auth + Stripe checkout + credits.
+   Supports guest checkout: one paid Stripe session = one live fetch. */
 /********************************************************************/
 
 import 'dotenv/config';
@@ -18,19 +18,15 @@ import FormData from 'form-data';
 import fs from 'fs';
 import Stripe from 'stripe';
 
-/********************************************************************/
-// Setup
-/********************************************************************/
+/* ----------------------------- Setup ---------------------------- */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.set('trust proxy', 1); // respect x-forwarded-* on Render/Proxies
+app.set('trust proxy', 1); // respect x-forwarded-* on Render/proxies
 const PORT = process.env.PORT || 3000;
 
-/********************************************************************/
-// Middleware + Static Files
-/********************************************************************/
+/* ---------------------- Middleware & Static --------------------- */
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
@@ -38,9 +34,7 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan('dev'));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
-/********************************************************************/
-// Supabase Setup
-/********************************************************************/
+/* --------------------------- Supabase --------------------------- */
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY;
@@ -61,15 +55,11 @@ async function getUser(req) {
   return { token, user: data.user };
 }
 
-/********************************************************************/
-// Stripe Setup
-/********************************************************************/
+/* ---------------------------- Stripe ---------------------------- */
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 const PRICE_ID = process.env.STRIPE_PRICE_ID;
 
-/********************************************************************/
-// External API (CarSimulcast)
-/********************************************************************/
+/* ---------------------- CarSimulcast client --------------------- */
 const CS = 'https://connect.carsimulcast.com';
 const KEY = process.env.API_KEY;
 const SECRET = process.env.API_SECRET;
@@ -80,18 +70,19 @@ async function csGet(url) {
   return r.data;
 }
 
-/********************************************************************/
-// Cache (use /tmp on serverless; fallback to local for dev)
-/********************************************************************/
-const CACHE_DIR = process.env.NODE_ENV === 'production' ? '/tmp/cache' : path.join(__dirname, 'cache');
+/* ------------------------------ Cache --------------------------- */
+// Use /tmp in production (ephemeral on Render) and local folder in dev
+const CACHE_DIR = process.env.NODE_ENV === 'production'
+  ? '/tmp/cache'
+  : path.join(__dirname, 'cache');
 try { if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
+
 const ck = (vin, type) => path.join(CACHE_DIR, `${vin}-${type}.b64`);
 const readCache = (vin, type) => (fs.existsSync(ck(vin, type)) ? fs.readFileSync(ck(vin, type), 'utf8') : null);
 const writeCache = (vin, type, data) => { try { fs.writeFileSync(ck(vin, type), data, 'utf8'); } catch {} };
 
-/********************************************************************/
-// One-time guest session tracker (ephemeral; use DB if you need durable)
-/********************************************************************/
+/* ----------------------- One-time guest receipt ----------------- */
+// Ephemeral file; for durability, store in DB table instead.
 const CONSUMED_FILE = (process.env.NODE_ENV === 'production' ? '/tmp' : __dirname) + '/.consumed_sessions.json';
 let CONSUMED = new Set();
 try {
@@ -104,14 +95,10 @@ function saveConsumed() {
   try { fs.writeFileSync(CONSUMED_FILE, JSON.stringify([...CONSUMED], null, 2)); } catch {}
 }
 
-/********************************************************************/
-// Health check
-/********************************************************************/
+/* --------------------------- Healthcheck ------------------------ */
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-/********************************************************************/
-// Credits Endpoint (logged-in users)
-/********************************************************************/
+/* --------------------------- Credits API ------------------------ */
 app.get('/api/credits/:user_id', async (req, res) => {
   try {
     const { user_id } = req.params;
@@ -129,14 +116,12 @@ app.get('/api/credits/:user_id', async (req, res) => {
   }
 });
 
-/********************************************************************/
-// Stripe Checkout (Guest or Authenticated)
-/********************************************************************/
+/* -------------------- Stripe Checkout endpoint ------------------ */
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
     const { user_id, price_id } = req.body || {};
 
-    // Auto-detect base (works on Render and on custom domain)
+    // Auto-detect base URL (works on Render and custom domain)
     const proto = (req.headers['x-forwarded-proto'] || req.protocol) || 'https';
     const host  = req.get('host');
     const base  = process.env.SITE_URL || `${proto}://${host}`;
@@ -157,11 +142,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
-/********************************************************************/
-// VIN Report Endpoint
-// - Logged-in: consumes 1 credit via RPC
-// - Guest: must provide a paid Stripe session_id (one-time access)
-/********************************************************************/
+/* -------------------------- VIN Report API ---------------------- */
 app.post('/api/report', async (req, res) => {
   try {
     const {
@@ -176,6 +157,7 @@ app.post('/api/report', async (req, res) => {
 
     const allowLive = allowLiveRaw !== false;
 
+    // VIN resolution (plate -> VIN)
     let targetVin = (vin || '').trim().toUpperCase();
     if (!targetVin && state && plate) {
       const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
@@ -184,16 +166,17 @@ app.post('/api/report', async (req, res) => {
     }
     if (!targetVin) return res.status(400).send('VIN or Plate+State required');
 
+    // Try cache
     let raw = readCache(targetVin, type);
 
-    // Only fetch live if allowed (no cache)
+    // Live fetch path (charge credit or validate guest payment)
     if (!raw && allowLive) {
       const { token, user } = await getUser(req);
 
       if (user) {
-        // Logged-in: deduct 1 credit
-        const supabaseUser = supabaseForToken(token);
-        const { error: rpcErr } = await supabaseUser.rpc('use_credit_for_vin', {
+        // Logged-in user: consume 1 credit via RPC
+        const sb = supabaseForToken(token);
+        const { error: rpcErr } = await sb.rpc('use_credit_for_vin', {
           p_vin: targetVin,
           p_result_url: null,
         });
@@ -202,28 +185,22 @@ app.post('/api/report', async (req, res) => {
           return res.status(402).send('Insufficient credits');
         }
       } else {
-        // Guest: must present a paid Stripe session (one-time)
-        if (!oneTimeSession) {
-          return res.status(401).send('Complete purchase to view this report.');
-        }
-        if (CONSUMED.has(oneTimeSession)) {
-          return res.status(409).send('This receipt was already used.');
-        }
+        // Guest must present paid Stripe session_id (single-use)
+        if (!oneTimeSession) return res.status(401).send('Complete purchase to view this report.');
+        if (CONSUMED.has(oneTimeSession)) return res.status(409).send('This receipt was already used.');
+
         try {
           const s = await stripe.checkout.sessions.retrieve(oneTimeSession);
-          if (s.payment_status !== 'paid') {
-            return res.status(402).send('Payment not completed.');
-          }
-          // Mark consumed
+          if (s.payment_status !== 'paid') return res.status(402).send('Payment not completed.');
           CONSUMED.add(oneTimeSession);
           saveConsumed();
-        } catch (err) {
-          console.error('Stripe verify session error:', err?.message || err);
+        } catch (e) {
+          console.error('Stripe verify session error:', e?.message || e);
           return res.status(400).send('Invalid purchase receipt.');
         }
       }
 
-      // Fetch & cache live report
+      // Fetch & cache fresh
       const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
       raw = live;
       writeCache(targetVin, type, raw);
@@ -253,10 +230,10 @@ app.post('/api/report', async (req, res) => {
   }
 });
 
-/********************************************************************/
-// Start
-/********************************************************************/
-app.listen(PORT, () => {
-  // If SITE_URL unset, show the detected host in logs after first request.
-  console.log(`✅ Server listening on port ${PORT}`);
+/* ----------------------------- Start ---------------------------- */
+const server = app.listen(process.env.PORT || 3000, '0.0.0.0', () => {
+  console.log('✅ Server listening on', process.env.PORT || 3000);
 });
+// prevent “connection reset by peer” on slow responses
+server.keepAliveTimeout = 120000;   // 120s
+server.headersTimeout   = 130000;   // keepAliveTimeout + cushion
