@@ -1,19 +1,11 @@
 /* ================================
    Config & Utilities
 ================================ */
-const SUPABASE_URL  = window.VITE_SUPABASE_URL  || (typeof process !== 'undefined' ? process.env.VITE_SUPABASE_URL  : undefined) || '';
-const SUPABASE_ANON = window.VITE_SUPABASE_ANON_KEY || (typeof process !== 'undefined' ? process.env.VITE_SUPABASE_ANON_KEY : undefined) || '';
-
 const API = {
   report: '/api/report',
   checkout: '/api/create-checkout-session',
   credits: (uid) => `/api/credits/${uid}`,
 };
-
-let supabase = null;
-if (window.supabase && SUPABASE_URL && SUPABASE_ANON) {
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-}
 
 function $id(id) { return document.getElementById(id); }
 
@@ -30,16 +22,24 @@ function showToast(message, type = 'error') {
   }, 4000);
 }
 
+/* ================================
+   Supabase init (single source)
+================================ */
+const SB_URL  = window.VITE_SUPABASE_URL  || (typeof process !== 'undefined' ? process?.env?.VITE_SUPABASE_URL  : '') || '';
+const SB_ANON = window.VITE_SUPABASE_ANON_KEY || (typeof process !== 'undefined' ? process?.env?.VITE_SUPABASE_ANON_KEY : '') || '';
+
+let supabase = null;
+if (window.supabase && SB_URL && SB_ANON) {
+  supabase = window.supabase.createClient(SB_URL, SB_ANON);
+}
+
 /* Detect Stripe success & capture session_id for guest one-time use */
 const urlParams = new URLSearchParams(window.location.search);
 const checkoutSuccess = urlParams.get('checkout') === 'success';
 const stripeSessionId = urlParams.get('session_id') || null;
 if (stripeSessionId) {
-  // Optional: clean URL
-  history.replaceState({}, '', window.location.pathname);
-  if (checkoutSuccess) {
-    showToast('Payment confirmed. You can now fetch a report.', 'ok');
-  }
+  history.replaceState({}, '', window.location.pathname); // clean URL
+  if (checkoutSuccess) showToast('Payment confirmed. You can now fetch a report.', 'ok');
 }
 
 /* ================================
@@ -67,17 +67,6 @@ themeBtn?.addEventListener('click', () => {
 })();
 
 /* ================================
-   Login modal (magic link)
-================================ */
-/* ================================
-   Supabase client (make sure this runs first)
-================================ */
-let supabase = null;
-if (window.supabase && window.VITE_SUPABASE_URL && window.VITE_SUPABASE_ANON_KEY) {
-  supabase = window.supabase.createClient(window.VITE_SUPABASE_URL, window.VITE_SUPABASE_ANON_KEY);
-}
-
-/* ================================
    Login modal (email + password)
 ================================ */
 const loginBtn         = $id('loginBtn');
@@ -98,7 +87,7 @@ async function doSignup() {
   const email = (emailEl.value || '').trim();
   const password = pwEl.value || '';
 
-  if (!email)    return showToast('Enter your email', 'error');
+  if (!email) return showToast('Enter your email', 'error');
   if (password.length < 6) return showToast('Password must be at least 6 characters', 'error');
 
   try {
@@ -108,8 +97,6 @@ async function doSignup() {
       options: { emailRedirectTo: window.location.origin }
     });
     if (error) throw error;
-
-    // If email confirmations are ON, no session yet:
     if (!data.session) {
       showToast('Check your email to confirm your account.', 'ok');
     } else {
@@ -125,13 +112,11 @@ async function doLogin() {
   if (!supabase) { showToast('Supabase not loaded', 'error'); return; }
   const email = (emailEl.value || '').trim();
   const password = pwEl.value || '';
-
   if (!email || !password) return showToast('Enter email and password', 'error');
 
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
-
     showToast('Signed in!', 'ok');
     closeLogin();
   } catch (e) {
@@ -145,21 +130,21 @@ async function doLogout() {
   showToast('Signed out', 'ok');
 }
 
-/* Toggle header button behavior based on auth */
-function reflectAuthUI(session) {
-  if (!loginBtn) return;
-  if (session?.user) {
-    loginBtn.textContent = 'Sign out';
-    loginBtn.onclick = doLogout;
-  } else {
-    loginBtn.textContent = '🔑 Login';
-    loginBtn.onclick = openLogin;
-  }
-}
-
-/* Hook up buttons */
 doSignupBtn?.addEventListener('click', doSignup);
 doLoginBtn?.addEventListener('click', doLogin);
+
+/* Toggle header button using a single click handler */
+let currentSession = null;
+loginBtn?.addEventListener('click', () => {
+  if (currentSession?.user) doLogout();
+  else openLogin();
+});
+
+function reflectAuthUI(session) {
+  currentSession = session;
+  if (!loginBtn) return;
+  loginBtn.textContent = session?.user ? 'Sign out' : '🔑 Login';
+}
 
 /* ================================
    Auth callback & listener
@@ -167,34 +152,26 @@ doLoginBtn?.addEventListener('click', doLogin);
 (async () => {
   if (!supabase) return;
 
-  // If returning from email link (confirmation/reset/etc)
-  const fromAuthLink =
-    /[?&]code=/.test(location.search) || /access_token=/.test(location.hash);
-
+  // Handle email confirmation / reset links
+  const fromAuthLink = /[?&]code=/.test(location.search) || /access_token=/.test(location.hash);
   if (fromAuthLink) {
     const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
-
     // Clean URL
     const url = new URL(location.href);
     url.searchParams.delete('code');
     url.searchParams.delete('state');
     history.replaceState({}, '', url.pathname + url.search);
-
-    if (error) {
-      showToast(error.message || 'Auth callback failed', 'error');
-    } else {
-      showToast('You’re signed in!', 'ok');
-    }
+    if (error) showToast(error.message || 'Auth callback failed', 'error');
+    else showToast('You’re signed in!', 'ok');
   }
 
-  // Initial UI state + live updates
   const { data } = await supabase.auth.getSession();
   reflectAuthUI(data.session);
   supabase.auth.onAuthStateChange((_event, session) => reflectAuthUI(session));
 })();
 
 /* ================================
-   Supabase session helpers
+   Supabase session helper
 ================================ */
 async function getSession() {
   if (!supabase) return { session: null, user: null, token: null };
@@ -219,18 +196,14 @@ async function replayRequest(item) {
     plate: item.plate || '',
     type: item.type,
     as: item.as,
-    allowLive: false     // reopen from cache only
+    allowLive: false
   };
   const headers = { 'Content-Type': 'application/json' };
   const { token } = await getSession();
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   try {
-    const r = await fetch(API.report, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(data)
-    });
+    const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
     if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
     if (item.as === 'pdf') {
       const blob = await r.blob(); const url = URL.createObjectURL(blob); window.open(url, '_blank');
@@ -277,13 +250,14 @@ function renderHistory() {
 $id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(HISTORY_KEY); renderHistory(); });
 
 /* ================================
-   Buy Credits modal (existing HTML)
+   Buy Credits modal
 ================================ */
-const buyModal   = $id('buyCreditsModal');
-const buyNowBtn  = $id('buyNowBtn');
-const closeBuyBtn= $id('closeModalBtn');
+const buyModal    = $id('buyCreditsModal');
+const buyNowBtn   = $id('buyNowBtn');
+const closeBuyBtn = $id('closeModalBtn');
 function openBuyModal(){ buyModal?.classList.remove('hidden'); }
 function closeBuyModal(){ buyModal?.classList.add('hidden'); }
+closeBuyBtn?.addEventListener('click', closeBuyModal);
 
 /* ================================
    Purchase flow (guest or user)
@@ -303,13 +277,11 @@ async function startPurchase(user) {
     showToast(e.message || 'Failed to start checkout', 'error');
   }
 }
-
 buyNowBtn?.addEventListener('click', async () => {
   const { user } = await getSession(); // can be null -> guest
   closeBuyModal();
   startPurchase(user);
 });
-closeBuyBtn?.addEventListener('click', closeBuyModal);
 
 /* ================================
    Fetch report (main form)
@@ -335,7 +307,6 @@ f?.addEventListener('submit', async (e) => {
     allowLive: true
   };
 
-  // basic validation
   if (!data.vin && !(data.state && data.plate)) {
     showToast('Enter a VIN or a State + Plate', 'error');
     go.disabled = false; loading.classList.add('hidden'); return;
@@ -345,7 +316,6 @@ f?.addEventListener('submit', async (e) => {
     go.disabled = false; loading.classList.add('hidden'); return;
   }
 
-  // if logged-in, add Authorization + (optional) check credits
   let headers = { 'Content-Type': 'application/json' };
   let currentUser = null;
   let token = null;
@@ -369,7 +339,6 @@ f?.addEventListener('submit', async (e) => {
     } catch (_) { /* ignore balance errors */ }
   }
 
-  // proceed request
   try {
     const body = {
       vin:  data.vin,
@@ -380,10 +349,8 @@ f?.addEventListener('submit', async (e) => {
       allowLive: true
     };
 
-    // If GUEST and we just returned from Stripe, attach the receipt
-    if (!currentUser && stripeSessionId) {
-      body.oneTimeSession = stripeSessionId;
-    }
+    // Guest + returned from Stripe => attach receipt
+    if (!currentUser && stripeSessionId) body.oneTimeSession = stripeSessionId;
 
     const r = await fetch(API.report, {
       method: 'POST',
@@ -391,19 +358,9 @@ f?.addEventListener('submit', async (e) => {
       body: JSON.stringify(body)
     });
 
-    if (r.status === 401 || r.status === 402) {
-      openBuyModal();
-      return;
-    }
-    if (r.status === 409) {
-      showToast('That receipt was already used. Please purchase again.', 'error');
-      return;
-    }
-    if (!r.ok) {
-      const t = await r.text();
-      showToast(t || ('HTTP ' + r.status), 'error');
-      return;
-    }
+    if (r.status === 401 || r.status === 402) { openBuyModal(); return; }
+    if (r.status === 409) { showToast('That receipt was already used. Please purchase again.', 'error'); return; }
+    if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
 
     if (data.as === 'pdf') {
       const blob = await r.blob(); const url = URL.createObjectURL(blob); window.open(url, '_blank');
