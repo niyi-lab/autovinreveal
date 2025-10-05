@@ -69,59 +69,129 @@ themeBtn?.addEventListener('click', () => {
 /* ================================
    Login modal (magic link)
 ================================ */
-const loginBtn = $id('loginBtn');
-
-function buildLoginModal() {
-  if ($id('loginModal')) return;
-  const container = document.createElement('div');
-  container.id = 'loginModal';
-  container.className = 'hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50';
-
-  container.innerHTML = `
-    <div class="card max-w-md w-[92%]">
-      <h2 class="text-lg font-bold mb-2">Sign in</h2>
-      <p class="text-sm" style="color:var(--muted)">
-        Use your email to sign in. We’ll send a magic link.
-      </p>
-      <div class="mt-4">
-        <label class="lbl">Email</label>
-        <input id="loginEmail" type="email" placeholder="you@example.com" class="input" />
-      </div>
-      <div class="mt-4 flex gap-2">
-        <button id="loginSubmit" class="btn btn-primary w-full">Send Magic Link</button>
-        <button id="loginCancel" class="btn-outline w-full">Cancel</button>
-      </div>
-      <p class="mt-3 text-xs" style="color:var(--muted)">
-        You can also buy without signing in — Stripe will just ask for your card.
-      </p>
-    </div>
-  `;
-  document.body.appendChild(container);
-
-  $id('loginCancel').addEventListener('click', () => hideLoginModal());
-  $id('loginSubmit').addEventListener('click', doLogin);
+/* ================================
+   Supabase client (make sure this runs first)
+================================ */
+let supabase = null;
+if (window.supabase && window.VITE_SUPABASE_URL && window.VITE_SUPABASE_ANON_KEY) {
+  supabase = window.supabase.createClient(window.VITE_SUPABASE_URL, window.VITE_SUPABASE_ANON_KEY);
 }
-function showLoginModal() { buildLoginModal(); $id('loginModal').classList.remove('hidden'); }
-function hideLoginModal() { const el = $id('loginModal'); if (el) el.classList.add('hidden'); }
 
-async function doLogin() {
-  if (!supabase) { showToast('Supabase client not loaded.', 'error'); return; }
-  const email = ($id('loginEmail').value || '').trim();
-  if (!email) { showToast('Enter your email.', 'error'); return; }
+/* ================================
+   Login modal (email + password)
+================================ */
+const loginBtn         = $id('loginBtn');
+const loginModal       = $id('loginModal');
+const closeLoginModal  = $id('closeLoginModal');
+const emailEl          = $id('loginEmail');
+const pwEl             = $id('loginPassword');
+const doLoginBtn       = $id('doLogin');
+const doSignupBtn      = $id('doSignup');
+
+function openLogin()  { loginModal?.classList.remove('hidden'); }
+function closeLogin() { loginModal?.classList.add('hidden'); }
+
+closeLoginModal?.addEventListener('click', closeLogin);
+
+async function doSignup() {
+  if (!supabase) { showToast('Supabase not loaded', 'error'); return; }
+  const email = (emailEl.value || '').trim();
+  const password = pwEl.value || '';
+
+  if (!email)    return showToast('Enter your email', 'error');
+  if (password.length < 6) return showToast('Password must be at least 6 characters', 'error');
+
   try {
-    const { error } = await supabase.auth.signInWithOtp({
+    const { data, error } = await supabase.auth.signUp({
       email,
+      password,
       options: { emailRedirectTo: window.location.origin }
     });
     if (error) throw error;
-    showToast('Magic link sent. Check your email!', 'ok');
-    hideLoginModal();
+
+    // If email confirmations are ON, no session yet:
+    if (!data.session) {
+      showToast('Check your email to confirm your account.', 'ok');
+    } else {
+      showToast('Account created — you are signed in!', 'ok');
+      closeLogin();
+    }
   } catch (e) {
-    showToast(e.message || 'Login failed', 'error');
+    showToast(e.message || 'Sign up failed', 'error');
   }
 }
 
-loginBtn?.addEventListener('click', showLoginModal);
+async function doLogin() {
+  if (!supabase) { showToast('Supabase not loaded', 'error'); return; }
+  const email = (emailEl.value || '').trim();
+  const password = pwEl.value || '';
+
+  if (!email || !password) return showToast('Enter email and password', 'error');
+
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+
+    showToast('Signed in!', 'ok');
+    closeLogin();
+  } catch (e) {
+    showToast(e.message || 'Sign in failed', 'error');
+  }
+}
+
+async function doLogout() {
+  if (!supabase) return;
+  await supabase.auth.signOut();
+  showToast('Signed out', 'ok');
+}
+
+/* Toggle header button behavior based on auth */
+function reflectAuthUI(session) {
+  if (!loginBtn) return;
+  if (session?.user) {
+    loginBtn.textContent = 'Sign out';
+    loginBtn.onclick = doLogout;
+  } else {
+    loginBtn.textContent = '🔑 Login';
+    loginBtn.onclick = openLogin;
+  }
+}
+
+/* Hook up buttons */
+doSignupBtn?.addEventListener('click', doSignup);
+doLoginBtn?.addEventListener('click', doLogin);
+
+/* ================================
+   Auth callback & listener
+================================ */
+(async () => {
+  if (!supabase) return;
+
+  // If returning from email link (confirmation/reset/etc)
+  const fromAuthLink =
+    /[?&]code=/.test(location.search) || /access_token=/.test(location.hash);
+
+  if (fromAuthLink) {
+    const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
+
+    // Clean URL
+    const url = new URL(location.href);
+    url.searchParams.delete('code');
+    url.searchParams.delete('state');
+    history.replaceState({}, '', url.pathname + url.search);
+
+    if (error) {
+      showToast(error.message || 'Auth callback failed', 'error');
+    } else {
+      showToast('You’re signed in!', 'ok');
+    }
+  }
+
+  // Initial UI state + live updates
+  const { data } = await supabase.auth.getSession();
+  reflectAuthUI(data.session);
+  supabase.auth.onAuthStateChange((_event, session) => reflectAuthUI(session));
+})();
 
 /* ================================
    Supabase session helpers
