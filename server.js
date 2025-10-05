@@ -10,7 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
 import helmet from 'helmet';
-import morgan from 'morgan';
+// import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import { createClient } from '@supabase/supabase-js';
 import axios from 'axios';
@@ -31,7 +31,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(morgan('dev'));
+// app.use(morgan('dev'));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
 /* --------------------------- Supabase --------------------------- */
