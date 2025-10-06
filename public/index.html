@@ -26,27 +26,25 @@
 </head>
 
 <body class="h-full">
-  <div class="max-w-3xl mx-auto p-6">
-    <!-- Header -->
+<!-- Header -->
+<header class="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-start gap-3">
+  <div>
+    <a href="/"
+       class="text-4xl sm:text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-[rgb(153,120,77)] via-amber-400 to-yellow-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight">
+      AutoVINReveal
+    </a>
+    <p class="mt-1 sm:mt-2 text-sm sm:text-base lg:text-lg" style="color:var(--muted)">
+      Get instant CARFAX & AutoCheck by VIN or Plate — fast, secure, and clear.
+    </p>
+  </div>
 
+  <div class="justify-self-end">
+    <button id="themeBtn" class="theme-btn shrink-0" type="button" aria-label="Toggle theme">
+      <span class="icon">🌙</span><span class="label">Dark</span>
+    </button>
+  </div>
+</header>
 
-    <div class="flex items-center justify-between">
-      <div>
-        <a href="/"
-          class="text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-[rgb(153,120,77)] via-amber-400 to-yellow-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight">
-          AutoVINReveal
-        </a>
-        <p class="mt-2 text-base lg:text-lg" style="color:var(--muted)">
-          Get instant CARFAX & AutoCheck by VIN or Plate — fast, secure, and clear.
-        </p>
-      </div>
-      <div class="flex gap-3">
-        <button id="themeBtn" class="theme-btn">
-          <span class="icon">🌙</span><span class="label">Dark</span>
-        </button>
-        <!--   <button id="loginBtn" class="btn-outline">🔑 Login</button>  -->
-      </div>
-    </div>
 
 
 
@@ -229,6 +227,9 @@
       <a class="underline" href="/privacy.html">Privacy Policy</a>
       <span>•</span>
       <a class="underline" href="/terms.html">Terms of Use</a>
+       <a class="underline" href="https://mail.google.com/mail/?view=cm&fs=1&to=autovinreveal%40gmail.com">
+        Contact Us
+      </a>
     </div>
   </div>
 
