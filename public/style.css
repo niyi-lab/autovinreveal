@@ -76,6 +76,8 @@ thead{ background:var(--tableHead) }
 tbody{ background:var(--card) }
 tbody tr + tr{ border-top:1px solid var(--border) }
 
+
+
 /* ===== Toasts ===== */
 @keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
 .animate-fadeIn{ animation: fadeIn .25s ease-out }
@@ -94,4 +96,35 @@ tbody tr + tr{ border-top:1px solid var(--border) }
 }
 #authModal .btn:hover {
   background: var(--brand-dark);
+}
+
+
+/* Keep header and rows perfectly aligned */
+.table-wrap th, .table-wrap td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+/* VIN should truncate cleanly and stay aligned */
+.table-wrap td:first-child {
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Align the last column to the right for buttons */
+.table-wrap td:last-child {
+  text-align: right;
+}
+
+/* Fix header background contrast */
+.table-wrap thead {
+  background: var(--tableHead);
+}
+
+/* Give subtle hover highlight for rows */
+.table-wrap tbody tr:hover {
+  background-color: rgba(255, 255, 255, 0.05);
 }
