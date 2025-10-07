@@ -138,7 +138,7 @@ async function resumePendingPurchase() {
     showToast(e.message || 'Failed to resume purchase', 'error');
   } finally {
     clearPending();
-    await refreshBalancePill(); // reflect new credits for logged-in users
+    await refreshBalancePill(); // reflect new credits
   }
 }
 if (stripeSessionId) {
@@ -182,11 +182,17 @@ const pwEl             = $id('loginPassword');
 const doLoginBtn       = $id('doLogin');
 const doSignupBtn      = $id('doSignup');
 
+/* user chip elements (optional if present in HTML) */
+const userChip    = $id('userChip');
+const userEmailEl = $id('userEmail');
+const logoutBtn   = $id('logoutBtn');
+
 function openLogin()  { loginModal?.classList.remove('hidden'); }
 function closeLogin() { loginModal?.classList.add('hidden'); }
 closeLoginModal?.addEventListener('click', closeLogin);
+logoutBtn?.addEventListener('click', doLogout);
 
-// Auto-open login if homepage has ?openLogin=1 (used from /email-confirmed link)
+// Auto-open login if homepage has ?openLogin=1 (from /email-confirmed link)
 (() => {
   const p = new URLSearchParams(window.location.search);
   if (p.get('openLogin') === '1') {
@@ -283,8 +289,16 @@ loginBtn?.addEventListener('click', () => {
 });
 function reflectAuthUI(session) {
   currentSession = session;
-  if (!loginBtn) return;
-  loginBtn.textContent = session?.user ? 'Sign out' : '🔑 Login';
+
+  if (session?.user) {
+    if (userEmailEl) userEmailEl.textContent = session.user.email || '';
+    userChip?.classList.remove('hidden');
+    loginBtn?.classList.add('hidden');
+  } else {
+    userChip?.classList.add('hidden');
+    loginBtn?.classList.remove('hidden');
+    if (loginBtn) loginBtn.textContent = '🔑 Login';
+  }
 }
 
 /* ================================
@@ -339,6 +353,7 @@ async function refreshBalancePill() {
   if (!user) {
     pill?.classList.add('hidden');
     setPrimaryCTA('view');           // guest -> show View Report
+    reflectAuthUI(null);
     return;
   }
 
@@ -437,9 +452,9 @@ $id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(H
    Buy Credits modal (tiers)
 ================================ */
 const buyModal    = $id('buyCreditsModal');
-const buy1Btn     = $id('buy1Btn');   // new 1-credit button (if present)
-const buy10Btn    = $id('buy10Btn');  // new 10-pack button (if present)
-const buyNowBtn   = $id('buyNowBtn'); // fallback single-credit (old modal)
+const buy1Btn     = $id('buy1Btn');   // optional new 1-credit button
+const buy10Btn    = $id('buy10Btn');  // optional new 10-pack button
+const buyNowBtn   = $id('buyNowBtn'); // legacy single-buy button
 const closeBuyBtn = $id('closeModalBtn');
 function openBuyModal(){ buyModal?.classList.remove('hidden'); }
 function closeBuyModal(){ buyModal?.classList.add('hidden'); }
@@ -452,7 +467,7 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
   try {
     await ensureBackendReady();
     if (pendingReport) localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport));
-    const body = { user_id: user?.id || null, price_id }; // symbolic id
+    const body = { user_id: user?.id || null, price_id }; // symbolic id or real price_...
     const r = await fetch(API.checkout, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) { const t = await r.text(); throw new Error(t || 'Stripe error'); }
     const { url } = await r.json(); window.location.href = url;
@@ -466,7 +481,6 @@ buy10Btn?.addEventListener('click', async () => {
   const { user } = await getSession(); closeBuyModal();
   startPurchase({ user, price_id: 'STRIPE_PRICE_10PACK', pendingReport: null });
 });
-// Backward-compat: old single-button modal
 buyNowBtn?.addEventListener('click', async () => {
   const { user } = await getSession(); closeBuyModal();
   startPurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: null });
@@ -555,6 +569,6 @@ f?.addEventListener('submit', async (e) => {
    Init
 ================================ */
 (async () => {
-  await refreshBalancePill(); // will set CTA accordingly
+  await refreshBalancePill(); // sets CTA accordingly
   renderHistory();
 })();

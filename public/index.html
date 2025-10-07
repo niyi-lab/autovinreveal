@@ -34,35 +34,48 @@
 <body class="h-full">
   <div class="max-w-5xl mx-auto px-4 py-6">
     <!-- Header -->
-    <header class="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] items-start gap-3">
-      <div>
-        <a href="/"
-          class="text-4xl sm:text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-[rgb(153,120,77)] via-amber-400 to-yellow-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight">
-          AutoVINReveal
-        </a>
-        <p class="mt-1 sm:mt-2 text-sm sm:text-base lg:text-lg" style="color:var(--muted)">
-          Get instant CARFAX & AutoCheck by VIN or Plate — fast, secure, and clear.
-        </p>
-      </div>
+    <header class="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-start gap-3">
+  <div>
+    <!-- your title + subtitle stay the same -->
+    <a href="/" class="text-4xl sm:text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-[rgb(153,120,77)] via-amber-400 to-yellow-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight">
+      AutoVINReveal
+    </a>
+    <p class="mt-1 sm:mt-2 text-sm sm:text-base lg:text-lg" style="color:var(--muted)">
+      Get instant CARFAX & AutoCheck by VIN or Plate — fast, secure, and clear.
+    </p>
+  </div>
 
-      <!-- Balance pill -->
-      <div class="justify-self-end self-center">
-        <span id="balancePill" class="hidden inline-flex items-center gap-2 px-3 py-1 rounded-full border"
-          style="border-color:var(--border);background:var(--card);color:var(--text);">
-          <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 7h18M3 12h18M3 17h18" />
-          </svg>
-          <span id="balanceText">0 credits</span>
-        </span>
-      </div>
+  <!-- RIGHT SIDE -->
+  <div class="justify-self-end flex items-center gap-2">
+    <!-- credits pill (optional; works with your existing JS) -->
+    <div id="balancePill" class="hidden text-xs px-2 py-1 rounded-full border"
+         style="color:var(--brand);border-color:color-mix(in srgb,var(--brand) 60%, transparent);">
+      <span id="balanceText">0 credits</span>
+    </div>
 
-      <div class="justify-self-end flex items-center gap-2">
-        <button id="loginBtn" class="btn-outline shrink-0" type="button">🔑 Login</button>
-        <button id="themeBtn" class="theme-btn shrink-0" type="button" aria-label="Toggle theme">
-          <span class="icon">🌙</span><span class="label">Dark</span>
-        </button>
+    <!-- user chip (shown when logged in) -->
+    <div id="userChip" class="hidden items-center gap-2">
+      <div class="w-8 h-8 rounded-full border border-blue-500/40 bg-blue-500/10 grid place-items-center text-blue-600">
+        <!-- simple person icon -->
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="8" r="4"></circle>
+          <path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke-linecap="round"></path>
+        </svg>
       </div>
-    </header>
+      <span id="userEmail" class="text-sm"></span>
+      <button id="logoutBtn" class="btn-outline text-xs">Sign out</button>
+    </div>
+
+    <!-- login button (shown when logged out) -->
+    <button id="loginBtn" class="btn-outline text-sm">🔑 Login</button>
+
+    <!-- keep your theme button -->
+    <button id="themeBtn" class="theme-btn shrink-0" type="button" aria-label="Toggle theme">
+      <span class="icon">🌙</span><span class="label">Dark</span>
+    </button>
+  </div>
+</header>
+
 
     <!-- Form card -->
     <div class="relative mt-6 card">
