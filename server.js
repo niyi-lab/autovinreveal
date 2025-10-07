@@ -1,7 +1,7 @@
-// project-echo / server.js
+// server.js
 import dotenv from 'dotenv';
-dotenv.config({ path: '/etc/secrets/.env' }); // Render Secret Files (if used)
-dotenv.config(); // fallback to .env in repo if present
+dotenv.config({ path: '/etc/secrets/.env' }); // Render Secret File (if used)
+dotenv.config(); // fallback local .env
 
 import express from 'express';
 import path from 'path';
@@ -24,35 +24,27 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
-// -------------------------------
-// Health check (Render: /healthz)
-// -------------------------------
+// ---------- Health ----------
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
-// -------------------------------
-// Static & middleware
-// -------------------------------
+// ---------- Static ----------
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
-app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(morgan('dev'));
-app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
-// -------------------------------
-// Supabase
-// -------------------------------
+// ---------- Stripe + Prices ----------
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
+const PRICE_SINGLE = process.env.STRIPE_PRICE_SINGLE;   // 1 credit ($10)
+const PRICE_10PACK = process.env.STRIPE_PRICE_10PACK;   // 10 credits ($80)
+const SITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
+
+// ---------- Supabase ----------
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY;
 
 const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const supabaseService = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-
 const supabaseForToken = (token) =>
-  createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
+  createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } });
 
 async function getUser(req) {
   const token = req.headers.authorization?.split(' ')[1];
@@ -62,16 +54,7 @@ async function getUser(req) {
   return { token, user: data.user };
 }
 
-// -------------------------------
-// Stripe
-// -------------------------------
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
-const PRICE_ID = process.env.STRIPE_PRICE_ID; // default price id
-const SITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
-
-// -------------------------------
-// CarSimulcast
-// -------------------------------
+// ---------- CarSimulcast ----------
 const CS = 'https://connect.carsimulcast.com';
 const KEY = process.env.API_KEY;
 const SECRET = process.env.API_SECRET;
@@ -82,69 +65,95 @@ async function csGet(url) {
   return r.data; // base64 string (gzipped HTML OR raw HTML-base64 OR raw PDF-base64)
 }
 
-// -------------------------------
-// Cache (base64 payloads as-is)
-// -------------------------------
+// ---------- Cache ----------
 const CACHE_DIR = path.join(__dirname, 'cache');
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 const ck = (vin, type) => path.join(CACHE_DIR, `${vin}-${type}.b64`);
 const readCache = (vin, type) => (fs.existsSync(ck(vin, type)) ? fs.readFileSync(ck(vin, type), 'utf8') : null);
 const writeCache = (vin, type, data) => fs.writeFileSync(ck(vin, type), data, 'utf8');
 
-// -------------------------------
-// One-time guest session tracker
-// -------------------------------
+// ---------- Guest receipt tracker ----------
 const CONSUMED_FILE = path.join(__dirname, '.consumed_sessions.json');
 let CONSUMED = new Set();
 try {
-  if (fs.existsSync(CONSUMED_FILE)) {
-    const raw = fs.readFileSync(CONSUMED_FILE, 'utf8');
-    CONSUMED = new Set(JSON.parse(raw));
-  }
+  if (fs.existsSync(CONSUMED_FILE)) CONSUMED = new Set(JSON.parse(fs.readFileSync(CONSUMED_FILE, 'utf8')));
 } catch {}
 function saveConsumed() {
-  try {
-    fs.writeFileSync(CONSUMED_FILE, JSON.stringify([...CONSUMED], null, 2));
-  } catch {}
+  try { fs.writeFileSync(CONSUMED_FILE, JSON.stringify([...CONSUMED], null, 2)); } catch {}
 }
 
-// -------------------------------
-// Helpers: decode base64 report
-// -------------------------------
+// ---------- Helpers ----------
 function decodeReportBase64(rawB64) {
   const buf = Buffer.from(rawB64, 'base64');
-
-  // GZIP header: 1F 8B
   if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
-    try {
-      const unzipped = gunzipSync(buf);
-      const html = unzipped.toString('utf8');
-      return { kind: 'html', html };
-    } catch {
-      return { kind: 'unknown', buffer: buf, error: 'gunzip-failed' };
-    }
+    try { return { kind: 'html', html: gunzipSync(buf).toString('utf8') }; }
+    catch { return { kind: 'unknown', buffer: buf, error: 'gunzip-failed' }; }
   }
-
-  // PDF magic: %PDF-
-  if (buf.slice(0, 5).toString() === '%PDF-') {
-    return { kind: 'pdf', buffer: buf };
-  }
-
-  // Try plain UTF-8 HTML
+  if (buf.slice(0, 5).toString() === '%PDF-') return { kind: 'pdf', buffer: buf };
   const asText = buf.toString('utf8');
-  if (/<!DOCTYPE html|<html[\s>]/i.test(asText.slice(0, 2048))) {
-    return { kind: 'html', html: asText };
-  }
-
+  if (/<!DOCTYPE html|<html[\s>]/i.test(asText.slice(0, 2048))) return { kind: 'html', html: asText };
   return { kind: 'unknown', buffer: buf };
 }
 
-// -------------------------------
-/**
- * Credits (logged-in)
- * GET /api/credits/:user_id  ->  { balance: number }
- */
-// -------------------------------
+// ========== STRIPE WEBHOOK (raw body) ==========
+// IMPORTANT: must be before app.use(express.json())
+app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  try {
+    const event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const userId = session.metadata?.user_id || session.client_reference_id || null;
+      const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
+
+      let creditsToAdd = 0;
+      for (const li of lineItems.data) {
+        if (li.price.id === PRICE_SINGLE)      creditsToAdd += (li.quantity || 1) * 1;
+        else if (li.price.id === PRICE_10PACK) creditsToAdd += (li.quantity || 1) * 10;
+      }
+
+      if (!userId || creditsToAdd <= 0) return res.json({ ok: true, guest_or_zero: true });
+
+      // Upsert credits
+      const { data: existing, error: selErr } = await supabaseService
+        .from('credits')
+        .select('user_id,balance')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (selErr) throw selErr;
+
+      if (existing) {
+        const { error: upErr } = await supabaseService
+          .from('credits')
+          .update({ balance: existing.balance + creditsToAdd })
+          .eq('user_id', userId);
+        if (upErr) throw upErr;
+      } else {
+        const { error: insErr } = await supabaseService
+          .from('credits')
+          .insert({ user_id: userId, balance: creditsToAdd });
+        if (insErr) throw insErr;
+      }
+
+      return res.json({ ok: true, added: creditsToAdd });
+    }
+
+    res.json({ received: true });
+  } catch (err) {
+    console.error('Webhook error:', err?.message || err);
+    res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+});
+
+// ========== NORMAL MIDDLEWARE (after webhook) ==========
+app.use(express.json());
+app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(morgan('dev'));
+app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
+
+// ---------- Credits API ----------
 app.get('/api/credits/:user_id', async (req, res) => {
   try {
     const { user_id } = req.params;
@@ -153,7 +162,6 @@ app.get('/api/credits/:user_id', async (req, res) => {
       .select('balance')
       .eq('user_id', user_id)
       .maybeSingle();
-
     if (error) return res.status(500).json({ error: error.message });
     res.json({ balance: data?.balance ?? 0 });
   } catch (err) {
@@ -162,20 +170,24 @@ app.get('/api/credits/:user_id', async (req, res) => {
   }
 });
 
-// -------------------------------
-// Stripe Checkout
-// -------------------------------
+// ---------- Stripe Checkout (maps symbolic ids to env prices) ----------
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
     const { user_id, price_id } = req.body || {};
+    let price;
+    if (price_id === 'STRIPE_PRICE_SINGLE') price = PRICE_SINGLE;
+    else if (price_id === 'STRIPE_PRICE_10PACK') price = PRICE_10PACK;
+    else price = PRICE_SINGLE;
+
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       payment_method_types: ['card'],
-      line_items: [{ price: String(price_id || PRICE_ID), quantity: 1 }],
+      line_items: [{ price, quantity: 1 }],
       success_url: `${SITE_URL}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${SITE_URL}?checkout=cancel`,
       ...(user_id ? { client_reference_id: user_id, metadata: { user_id } } : {}),
     });
+
     res.json({ url: session.url });
   } catch (err) {
     console.error('stripe create session error:', err);
@@ -183,9 +195,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
-// -------------------------------
-// VIN Report
-// -------------------------------
+// ---------- Report API ----------
 app.post('/api/report', async (req, res) => {
   try {
     const {
@@ -200,7 +210,6 @@ app.post('/api/report', async (req, res) => {
 
     const allowLive = allowLiveRaw !== false;
 
-    // Normalize VIN via plate if needed
     let targetVin = (vin || '').trim().toUpperCase();
     if (!targetVin && state && plate) {
       const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
@@ -209,10 +218,8 @@ app.post('/api/report', async (req, res) => {
     }
     if (!targetVin) return res.status(400).send('VIN or Plate+State required');
 
-    // Load cached copy first
     let raw = readCache(targetVin, type);
 
-    // If no cache & live allowed, enforce credits / guest receipt, then fetch upstream
     if (!raw && allowLive) {
       const { token, user } = await getUser(req);
 
@@ -227,21 +234,18 @@ app.post('/api/report', async (req, res) => {
           return res.status(402).send('Insufficient credits');
         }
       } else {
-        // Guest: must present a one-time paid Stripe session
         if (!oneTimeSession) return res.status(401).send('Complete purchase to view this report.');
         if (CONSUMED.has(oneTimeSession)) return res.status(409).send('This receipt was already used.');
         try {
           const s = await stripe.checkout.sessions.retrieve(oneTimeSession);
           if (s.payment_status !== 'paid') return res.status(402).send('Payment not completed.');
-          CONSUMED.add(oneTimeSession);
-          saveConsumed();
+          CONSUMED.add(oneTimeSession); saveConsumed();
         } catch (err) {
           console.error('Stripe verify session error:', err?.message || err);
           return res.status(400).send('Invalid purchase receipt.');
         }
       }
 
-      // Fetch fresh base64 (may be gzipped HTML or PDF)
       const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
       raw = live;
       writeCache(targetVin, type, raw);
@@ -249,33 +253,25 @@ app.post('/api/report', async (req, res) => {
 
     if (!raw) return res.status(404).send('No cached or archive report found.');
 
-    // Decode (gzipped HTML / raw HTML / raw PDF) from base64
     const decoded = decodeReportBase64(raw);
 
-    // === PDF requested ===
     if (as === 'pdf') {
-      // If upstream is already a PDF, send as a file download
       if (decoded.kind === 'pdf') {
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${targetVin}-${type}.pdf"`);
         return res.send(decoded.buffer);
       }
-
-      // If HTML, convert via CS /pdf and force download
       if (decoded.kind === 'html') {
         try {
           const form = new FormData();
-          // Re-encode the clean HTML to base64 for pdf service
           form.append('base64_content', Buffer.from(decoded.html, 'utf8').toString('base64'));
           form.append('vin', targetVin);
           form.append('report_type', type);
-
           const pdf = await axios.post(`${CS}/pdf`, form, {
             headers: { ...H, ...form.getHeaders() },
             responseType: 'arraybuffer',
             timeout: 60000,
           });
-
           res.setHeader('Content-Type', 'application/pdf');
           res.setHeader('Content-Disposition', `attachment; filename="${targetVin}-${type}.pdf"`);
           return res.send(Buffer.from(pdf.data));
@@ -284,23 +280,18 @@ app.post('/api/report', async (req, res) => {
           return res.status(502).send('Could not generate PDF from this report.');
         }
       }
-
       return res.status(500).send('Unsupported report content.');
     }
 
-    // === HTML requested ===
     if (decoded.kind === 'html') {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       return res.send(decoded.html);
     }
-
-    // If upstream content is PDF but user asked for HTML, show inline PDF so they still see something
     if (decoded.kind === 'pdf') {
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${targetVin}-${type}.pdf"`);
       return res.send(decoded.buffer);
     }
-
     return res.status(500).send('Unsupported report content.');
   } catch (err) {
     console.error('report error:', err);
@@ -308,11 +299,9 @@ app.post('/api/report', async (req, res) => {
   }
 });
 
-// -------------------------------
-// Boot server (tune proxy timeouts)
-// -------------------------------
+// ---------- Boot ----------
 const server = app.listen(PORT, HOST, () =>
   console.log(`✅ Server running on ${process.env.SITE_URL || `http://${HOST}:${PORT}`}`)
 );
-server.keepAliveTimeout = 120000;   // 120s
-server.headersTimeout = 125000;     // keep headers timeout > keepAlive
+server.keepAliveTimeout = 120000;
+server.headersTimeout = 125000;

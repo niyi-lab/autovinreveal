@@ -2,25 +2,13 @@
 <html lang="en" class="h-full">
 
 <head>
-
-  <!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-FF0NXRN0Y6"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-FF0NXRN0Y6');
-</script><!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-FF0NXRN0Y6"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-FF0NXRN0Y6');
-</script>
-
+  <!-- Google tag (gtag.js) — single include -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-FF0NXRN0Y6"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+    gtag('js', new Date()); gtag('config', 'G-FF0NXRN0Y6');
+  </script>
 
   <meta charset="utf-8" />
   <title>AutoVINReveal</title>
@@ -38,36 +26,43 @@
     (() => {
       const saved = localStorage.getItem('theme');
       const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
-      if (saved === 'dark' || (!saved && prefersDark)) {
-        document.documentElement.classList.add('dark');
-      }
+      if (saved === 'dark' || (!saved && prefersDark)) document.documentElement.classList.add('dark');
     })();
   </script>
 </head>
 
 <body class="h-full">
-<!-- Header -->
-<header class="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-start gap-3">
-  <div>
-    <a href="/"
-       class="text-4xl sm:text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-[rgb(153,120,77)] via-amber-400 to-yellow-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight">
-      AutoVINReveal
-    </a>
-    <p class="mt-1 sm:mt-2 text-sm sm:text-base lg:text-lg" style="color:var(--muted)">
-      Get instant CARFAX & AutoCheck by VIN or Plate — fast, secure, and clear.
-    </p>
-  </div>
+  <div class="max-w-5xl mx-auto px-4 py-6">
+    <!-- Header -->
+    <header class="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] items-start gap-3">
+      <div>
+        <a href="/"
+          class="text-4xl sm:text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-[rgb(153,120,77)] via-amber-400 to-yellow-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight">
+          AutoVINReveal
+        </a>
+        <p class="mt-1 sm:mt-2 text-sm sm:text-base lg:text-lg" style="color:var(--muted)">
+          Get instant CARFAX & AutoCheck by VIN or Plate — fast, secure, and clear.
+        </p>
+      </div>
 
-  <div class="justify-self-end">
-    <button id="themeBtn" class="theme-btn shrink-0" type="button" aria-label="Toggle theme">
-      <span class="icon">🌙</span><span class="label">Dark</span>
-    </button>
-  </div>
-</header>
+      <!-- Balance pill -->
+      <div class="justify-self-end self-center">
+        <span id="balancePill" class="hidden inline-flex items-center gap-2 px-3 py-1 rounded-full border"
+          style="border-color:var(--border);background:var(--card);color:var(--text);">
+          <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 7h18M3 12h18M3 17h18" />
+          </svg>
+          <span id="balanceText">0 credits</span>
+        </span>
+      </div>
 
-
-
-
+      <div class="justify-self-end flex items-center gap-2">
+        <button id="loginBtn" class="btn-outline shrink-0" type="button">🔑 Login</button>
+        <button id="themeBtn" class="theme-btn shrink-0" type="button" aria-label="Toggle theme">
+          <span class="icon">🌙</span><span class="label">Dark</span>
+        </button>
+      </div>
+    </header>
 
     <!-- Form card -->
     <div class="relative mt-6 card">
@@ -139,8 +134,6 @@
               <option value="WV">West Virginia</option>
               <option value="WI">Wisconsin</option>
               <option value="WY">Wyoming</option>
-              <!-- Optionally add Canadian provinces if you want -->
-              <!-- <option value="ON">Ontario</option> -->
             </select>
           </div>
           <div>
@@ -155,14 +148,12 @@
             <select name="type" class="select">
               <option value="carfax">CARFAX</option>
               <option value="autocheck">AutoCheck</option>
-
             </select>
           </div>
-          <!-- Format dropdown removed -->
         </div>
 
         <div class="pt-2">
-          <button id="go" class="btn btn-primary w-full">
+          <button id="go" class="btn btn-primary w-full" type="submit">
             <svg class="w-5 h-5 opacity-90" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6" />
             </svg>
@@ -175,21 +166,25 @@
       <div id="loading" class="loading hidden">
         <div class="flex items-center gap-3" style="color:var(--brand)">
           <svg class="w-6 h-6 animate-spin" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" fill="none" stroke-width="4" />
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" fill="none" stroke-width="4">
+            </circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
           </svg>
           <span class="font-medium">Fetching report…</span>
         </div>
       </div>
     </div>
 
-    <!-- Buy Credits Modal -->
+    <!-- Buy Credits Modal (tiers) -->
     <div id="buyCreditsModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div class="card max-w-sm text-center">
-        <h2 class="text-lg font-bold mb-2">Not Enough Credits</h2>
-        <p class="mb-4 text-sm" style="color:var(--muted)">You need credits to view a report.</p>
-        <button id="buyNowBtn" class="btn btn-primary w-full">Buy 1 Credits ($10 CAD/ $7 USD)</button>
-        <button id="closeModalBtn" class="btn-outline w-full mt-3">Cancel</button>
+      <div class="card max-w-sm text-center w-[92%]">
+        <h2 class="text-lg font-bold mb-2">Get Credits</h2>
+        <p class="mb-4 text-sm" style="color:var(--muted)">Buy a single credit or save with a 10-pack.</p>
+        <div class="grid gap-2">
+          <button id="buy1Btn" class="btn btn-primary w-full">Buy 1 Credit — $10</button>
+          <button id="buy10Btn" class="btn btn-outline w-full">Buy 10 Credits — $80 ($8 each)</button>
+        </div>
+        <button id="closeModalBtn" class="btn-outline w-full mt-4">Cancel</button>
       </div>
     </div>
 
@@ -199,6 +194,13 @@
         <div class="flex items-center justify-between mb-3">
           <h2 class="text-lg font-semibold">Sign in</h2>
           <button id="closeLoginModal" class="btn-outline text-xs">✕</button>
+        </div>
+
+        <div class="mt-3">
+          <button id="googleLogin" class="btn-outline w-full flex items-center justify-center gap-2">
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="" class="w-5 h-5">
+            Continue with Google
+          </button>
         </div>
 
         <label class="lbl">Email</label>
@@ -236,7 +238,6 @@
               <th class="px-4 py-3 w-[10%] text-right">Action</th>
             </tr>
           </thead>
-
           <tbody id="historyBody"></tbody>
         </table>
       </div>
@@ -247,9 +248,7 @@
       <a class="underline" href="/privacy.html">Privacy Policy</a>
       <span>•</span>
       <a class="underline" href="/terms.html">Terms of Use</a>
-       <a class="underline" href="https://mail.google.com/mail/?view=cm&fs=1&to=autovinreveal%40gmail.com">
-        Contact Us
-      </a>
+      <a class="underline" href="https://mail.google.com/mail/?view=cm&fs=1&to=autovinreveal%40gmail.com">Contact Us</a>
     </div>
   </div>
 
