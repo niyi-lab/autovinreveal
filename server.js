@@ -16,6 +16,7 @@ import FormData from 'form-data';
 import fs from 'fs';
 import Stripe from 'stripe';
 import { gunzipSync } from 'zlib';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,8 +33,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------- Stripe + Prices ----------
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
-const PRICE_SINGLE = process.env.STRIPE_PRICE_SINGLE;   // 1 credit ($10)
-const PRICE_10PACK = process.env.STRIPE_PRICE_10PACK;   // 10 credits ($80)
+const PRICE_SINGLE = process.env.STRIPE_PRICE_SINGLE;   // 1 credit
+const PRICE_10PACK = process.env.STRIPE_PRICE_10PACK;   // 10 credits
 const SITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
 
 // ---------- Supabase ----------
@@ -95,8 +96,26 @@ function decodeReportBase64(rawB64) {
   return { kind: 'unknown', buffer: buf };
 }
 
+// ---------- Share links (24h tokens) ----------
+const SHARE_FILE = path.join(__dirname, '.share_tokens.json');
+let SHARE_TOKENS = {};
+try {
+  if (fs.existsSync(SHARE_FILE)) SHARE_TOKENS = JSON.parse(fs.readFileSync(SHARE_FILE, 'utf8'));
+} catch {}
+function saveShareTokens() { try { fs.writeFileSync(SHARE_FILE, JSON.stringify(SHARE_TOKENS, null, 2)); } catch {} }
+function makeToken() { return Buffer.from(crypto.randomUUID()).toString('base64url').replace(/=/g,''); }
+function pruneShareTokens() {
+  const now = Date.now();
+  let changed = false;
+  for (const [tok, meta] of Object.entries(SHARE_TOKENS)) {
+    if (!meta || meta.exp <= now) { delete SHARE_TOKENS[tok]; changed = true; }
+  }
+  if (changed) saveShareTokens();
+}
+setInterval(pruneShareTokens, 60 * 60 * 1000); // hourly cleanup
+
 // ========== STRIPE WEBHOOK (raw body) ==========
-// IMPORTANT: must be before app.use(express.json())
+// must be before app.use(express.json())
 app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   try {
@@ -170,7 +189,7 @@ app.get('/api/credits/:user_id', async (req, res) => {
   }
 });
 
-// ---------- Stripe Checkout (maps symbolic ids to env prices) ----------
+// ---------- Stripe Checkout ----------
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
     const { user_id, price_id } = req.body || {};
@@ -297,6 +316,51 @@ app.post('/api/report', async (req, res) => {
     console.error('report error:', err);
     res.status(500).send('Server error');
   }
+});
+
+// ---------- Share link APIs ----------
+// Create a share link for a cached report (no extra billing; just serves from cache)
+app.post('/api/share', async (req, res) => {
+  try {
+    const { vin, type = 'carfax' } = req.body || {};
+    if (!vin) return res.status(400).json({ error: 'vin required' });
+
+    const raw = readCache(vin.toUpperCase(), type);
+    if (!raw) return res.status(404).json({ error: 'Report not cached yet. Open it once first.' });
+
+    const token = makeToken();
+    const exp = Date.now() + 24 * 60 * 60 * 1000; // 24h
+    SHARE_TOKENS[token] = { vin: vin.toUpperCase(), type, exp };
+    saveShareTokens();
+
+    const url = `${SITE_URL}/view/${token}`;
+    res.json({ url, expiresAt: exp });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to create share link' });
+  }
+});
+
+// Resolve a share token and stream the cached report
+app.get('/view/:token', async (req, res) => {
+  pruneShareTokens();
+  const t = req.params.token;
+  const meta = SHARE_TOKENS[t];
+  if (!meta || meta.exp <= Date.now()) return res.status(404).send('Link expired or invalid');
+
+  const raw = readCache(meta.vin, meta.type);
+  if (!raw) return res.status(404).send('Report not found in cache');
+
+  const decoded = decodeReportBase64(raw);
+  if (decoded.kind === 'html') {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(decoded.html);
+  }
+  if (decoded.kind === 'pdf') {
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${meta.vin}-${meta.type}.pdf"`);
+    return res.send(decoded.buffer);
+  }
+  return res.status(500).send('Unsupported report content.');
 });
 
 // ---------- Boot ----------

@@ -5,6 +5,7 @@ const API = {
   report: '/api/report',
   checkout: '/api/create-checkout-session',
   credits: (uid) => `/api/credits/${uid}`,
+  share: '/api/share',
 };
 const PENDING_KEY = 'pendingReport';
 
@@ -131,9 +132,26 @@ async function resumePendingPurchase() {
     const html = await r.text();
     const w = window.open('', '_blank'); w.document.write(html); w.document.close();
     showToast('Report ready!', 'ok');
-    addToHistory({ vin: pending.vin || '(from plate)', type: pending.type || 'carfax', ts: Date.now(),
-                   state: pending.state || '', plate: pending.plate || '' });
+
+    addToHistory({
+      vin: pending.vin || '(from plate)', type: pending.type || 'carfax', ts: Date.now(),
+      state: pending.state || '', plate: pending.plate || ''
+    });
     renderHistory();
+
+    // Optional: immediately prepare & copy a share link (best-effort)
+    try {
+      const resp = await fetch(API.share, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vin: pending.vin || pending.plate, type: pending.type || 'carfax' })
+      });
+      if (resp.ok) {
+        const { url } = await resp.json();
+        await navigator.clipboard.writeText(url);
+        showToast('Share link copied to clipboard!', 'ok');
+      }
+    } catch {}
   } catch (e) {
     showToast(e.message || 'Failed to resume purchase', 'error');
   } finally {
@@ -182,7 +200,7 @@ const pwEl             = $id('loginPassword');
 const doLoginBtn       = $id('doLogin');
 const doSignupBtn      = $id('doSignup');
 
-/* user chip elements (optional if present in HTML) */
+/* user chip elements */
 const userChip    = $id('userChip');
 const userEmailEl = $id('userEmail');
 const logoutBtn   = $id('logoutBtn');
@@ -192,7 +210,7 @@ function closeLogin() { loginModal?.classList.add('hidden'); }
 closeLoginModal?.addEventListener('click', closeLogin);
 logoutBtn?.addEventListener('click', doLogout);
 
-// Auto-open login if homepage has ?openLogin=1 (from /email-confirmed link)
+// Auto-open login if homepage has ?openLogin=1
 (() => {
   const p = new URLSearchParams(window.location.search);
   if (p.get('openLogin') === '1') {
@@ -224,7 +242,6 @@ async function doSignup() {
   if (password.length < 6) return showToast('Password must be at least 6 characters', 'error');
 
   try {
-    // Send confirmation link to a friendly page
     const { data, error } = await supabase.auth.signUp({
       email, password,
       options: { emailRedirectTo: `${window.location.origin}/email-confirmed` }
@@ -269,7 +286,7 @@ async function doLogout() {
 doSignupBtn?.addEventListener('click', doSignup);
 doLoginBtn?.addEventListener('click', doLogin);
 
-// Optional Google button (binds only if present in HTML)
+// Optional Google button
 document.getElementById('googleLogin')?.addEventListener('click', async () => {
   try {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -307,7 +324,6 @@ function reflectAuthUI(session) {
 (async () => {
   if (!supabase) return;
 
-  // Handle magic links / OAuth callbacks if they ever hit the homepage
   const fromAuthLink = /[?&]code=/.test(location.search) || /access_token=/.test(location.hash);
   if (fromAuthLink) {
     const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
@@ -412,6 +428,23 @@ async function downloadHistoryPDF(item) {
     downloadBlob(blob, `${nameBase}_${item.type}.pdf`);
   } catch (e) { showToast(e.message || 'Request failed', 'error'); }
 }
+
+async function copyShareLink(vin, type) {
+  try {
+    const r = await fetch(API.share, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vin, type })
+    });
+    if (!r.ok) { const t = await r.text(); throw new Error(t || ('HTTP ' + r.status)); }
+    const { url } = await r.json();
+    await navigator.clipboard.writeText(url);
+    showToast('Share link copied to clipboard!', 'ok');
+  } catch (e) {
+    showToast(e.message || 'Could not create share link', 'error');
+  }
+}
+
 function renderHistory() {
   const body = $id('historyBody');
   const list = loadHistory();
@@ -430,6 +463,7 @@ function renderHistory() {
         <div class="flex gap-2">
           <button data-idx="${idx}" data-action="open" class="btn-outline" style="font-size:.8rem">Open HTML</button>
           <button data-idx="${idx}" data-action="pdf" class="btn-outline" style="font-size:.8rem">Download PDF</button>
+          <button data-idx="${idx}" data-action="share" class="btn-outline" style="font-size:.8rem">Copy Link</button>
           <button data-idx="${idx}" data-action="del" class="btn-outline" style="font-size:.8rem;color:#dc2626;border-color:#fecaca">Delete</button>
         </div>
       </td>`;
@@ -442,6 +476,7 @@ function renderHistory() {
       const item = loadHistory()[i]; if (!item) return;
       if (action === 'open') openHistoryHTML(item);
       else if (action === 'pdf') downloadHistoryPDF(item);
+      else if (action === 'share') copyShareLink(item.vin.replace('(from plate)','').trim() || item.plate, item.type);
       else if (action === 'del') { const list = loadHistory(); list.splice(i,1); saveHistory(list); renderHistory(); }
     });
   });
@@ -452,8 +487,8 @@ $id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(H
    Buy Credits modal (tiers)
 ================================ */
 const buyModal    = $id('buyCreditsModal');
-const buy1Btn     = $id('buy1Btn');   // optional new 1-credit button
-const buy10Btn    = $id('buy10Btn');  // optional new 10-pack button
+const buy1Btn     = $id('buy1Btn');   // 1-credit button
+const buy10Btn    = $id('buy10Btn');  // 10-pack button
 const buyNowBtn   = $id('buyNowBtn'); // legacy single-buy button
 const closeBuyBtn = $id('closeModalBtn');
 function openBuyModal(){ buyModal?.classList.remove('hidden'); }
@@ -473,17 +508,30 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
     const { url } = await r.json(); window.location.href = url;
   } catch (e) { showToast(e.message || 'Failed to start checkout', 'error'); }
 }
+
+let lastFormData = null;
+
+// require login for 10-pack; pass pending for single-credit
 buy1Btn?.addEventListener('click', async () => {
-  const { user } = await getSession(); closeBuyModal();
-  startPurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: null });
+  const { user } = await getSession(); 
+  closeBuyModal();
+  startPurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: lastFormData || null });
 });
 buy10Btn?.addEventListener('click', async () => {
-  const { user } = await getSession(); closeBuyModal();
+  const { user } = await getSession();
+  if (!user) { 
+    closeBuyModal();
+    showToast('Please sign in to buy a 10-pack of credits.', 'error');
+    openLogin();
+    return;
+  }
+  closeBuyModal();
   startPurchase({ user, price_id: 'STRIPE_PRICE_10PACK', pendingReport: null });
 });
 buyNowBtn?.addEventListener('click', async () => {
-  const { user } = await getSession(); closeBuyModal();
-  startPurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: null });
+  const { user } = await getSession(); 
+  closeBuyModal();
+  startPurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: lastFormData || null });
 });
 
 /* ================================
@@ -494,7 +542,6 @@ const go = $id('go');
 const loading = $id('loading');
 
 const looksVin = (v) => /^[A-HJ-NPR-Z0-9]{17}$/i.test(v || '');
-let lastFormData = null;
 
 f?.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -554,9 +601,26 @@ f?.addEventListener('submit', async (e) => {
     const w = window.open('', '_blank'); w.document.write(html); w.document.close();
 
     showToast('Report fetched successfully!', 'ok');
-    addToHistory({ vin: data.vin || '(from plate)', type: data.type, ts: Date.now(),
-                   state: data.state || '', plate: data.plate || '' });
+    addToHistory({
+      vin: data.vin || '(from plate)', type: data.type, ts: Date.now(),
+      state: data.state || '', plate: data.plate || ''
+    });
     renderHistory();
+
+    // Optional: also prepare a share link on success
+    try {
+      const resp = await fetch(API.share, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vin: data.vin || data.plate, type: data.type })
+      });
+      if (resp.ok) {
+        const { url } = await resp.json();
+        await navigator.clipboard.writeText(url);
+        showToast('Share link copied to clipboard!', 'ok');
+      }
+    } catch {}
+
     await refreshBalancePill();
   } catch (err) {
     showToast(err.message || 'Request failed', 'error');
