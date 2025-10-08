@@ -17,7 +17,12 @@ import fs from 'fs';
 import Stripe from 'stripe';
 import { gunzipSync } from 'zlib';
 import crypto from 'crypto';
-import * as paypalSdk from '@paypal/checkout-server-sdk';
+// replace: import * as paypalSdk from '@paypal/checkout-server-sdk';
+// with this:
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const paypalSdk = require('@paypal/checkout-server-sdk');
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
