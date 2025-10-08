@@ -15,7 +15,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="/style.css">
 
-  
   <!-- ✅ SEO Meta -->
   <meta name="description" content="Get instant CARFAX & AutoCheck vehicle history reports by VIN or license plate. Fast, secure, and easy — powered by AutoVINReveal.">
   <meta name="keywords" content="autovinreveal, carfax, autocheck, vin lookup, license plate search, vehicle report, auto history, used car check">
@@ -42,7 +41,6 @@
   <!-- ✅ Preload hero/og image -->
   <link rel="preload" as="image" href="/og-image.png" imagesrcset="/og-image.png 1200w" imagesizes="100vw">
 
-
   <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -57,6 +55,9 @@
       if (saved === 'dark' || (!saved && prefersDark)) document.documentElement.classList.add('dark');
     })();
   </script>
+
+  <!-- ✅ PayPal JS SDK (Sandbox). Swap client-id to LIVE in production -->
+  <script src="https://www.paypal.com/sdk/js?client-id=Aclv8-_pnwQ7RC6rFmyLTxPfEqSNC2yS67N3dFeTwGH2i8-K2LVwwPEMmcfuw-DOxcuDWsPpoaSs7HOU&components=buttons&currency=USD"></script>
 </head>
 
 <body class="h-full">
@@ -64,7 +65,7 @@
     <!-- Header -->
     <header class="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-start gap-3">
   <div>
-    <!-- your title + subtitle stay the same -->
+    <!-- title + subtitle -->
     <a href="/" class="text-4xl sm:text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-[rgb(153,120,77)] via-amber-400 to-yellow-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight">
       AutoVINReveal
     </a>
@@ -75,16 +76,13 @@
 
   <!-- RIGHT SIDE -->
   <div class="justify-self-end flex items-center gap-2">
-    <!-- credits pill (optional; works with your existing JS) -->
     <div id="balancePill" class="hidden text-xs px-2 py-1 rounded-full border"
          style="color:var(--brand);border-color:color-mix(in srgb,var(--brand) 60%, transparent);">
       <span id="balanceText">0 credits</span>
     </div>
 
-    <!-- user chip (shown when logged in) -->
     <div id="userChip" class="hidden items-center gap-2">
       <div class="w-8 h-8 rounded-full border border-blue-500/40 bg-blue-500/10 grid place-items-center text-blue-600">
-        <!-- simple person icon -->
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
           <circle cx="12" cy="8" r="4"></circle>
           <path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke-linecap="round"></path>
@@ -94,10 +92,8 @@
       <button id="logoutBtn" class="btn-outline text-xs">Sign out</button>
     </div>
 
-    <!-- login button (shown when logged out) -->
     <button id="loginBtn" class="btn-outline text-sm">🔑 Login</button>
 
-    <!-- keep your theme button -->
     <button id="themeBtn" class="theme-btn shrink-0" type="button" aria-label="Toggle theme">
       <span class="icon">🌙</span><span class="label">Dark</span>
     </button>
@@ -223,6 +219,7 @@
         <p class="mb-4 text-sm" style="color:var(--muted)">Buy a single credit or save with a 10-pack.</p>
         <div class="grid gap-2">
           <button id="buy1Btn" class="btn btn-primary w-full">Buy 1 Credit — $7 USD </button>
+          <div id="paypalContainer" class="mt-2"></div>
           <button id="buy10Btn" class="btn btn-outline w-full">Buy 10 Credits — $50 USD ($5 each)</button>
         </div>
         <button id="closeModalBtn" class="btn-outline w-full mt-4">Cancel</button>
@@ -258,7 +255,7 @@
         </div>
 
         <p class="text-xs mt-3" style="color:var(--muted)">
-          Tip: you can also buy credits without signing in — Stripe will just ask for your card info.
+          Tip: you can also buy credits without signing in — Stripe or PayPal will just ask for your card info.
         </p>
       </div>
     </div>
@@ -297,6 +294,7 @@
   <div id="toastBox" class="fixed top-4 right-4 space-y-2 z-50"></div>
 
   <script>
+    // PUBLIC keys ok in client
     window.VITE_SUPABASE_URL = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
     window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
   </script>
@@ -320,5 +318,4 @@
 
   <script type="module" src="/app.js"></script>
 </body>
-
 </html>

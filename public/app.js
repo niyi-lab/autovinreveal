@@ -106,11 +106,12 @@ async function ensureBackendReady({ timeoutMs = 2000, maxWaitMs = 60000 } = {}) 
 ensureBackendReady({ timeoutMs: 800, maxWaitMs: 3000 });
 
 /* ================================
-   Stripe return handling
+   Stripe return handling + PayPal flag
 ================================ */
 const urlParams = new URLSearchParams(window.location.search);
 const checkoutSuccess = urlParams.get('checkout') === 'success';
 const stripeSessionId = urlParams.get('session_id') || null;
+const ppSuccess = urlParams.get('pp') === 'success';
 
 function tryLoadPending() { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; } }
 function clearPending() { localStorage.removeItem(PENDING_KEY); }
@@ -125,6 +126,7 @@ async function resumePendingPurchase() {
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   if (!user && stripeSessionId) pending.oneTimeSession = stripeSessionId;
+  // Note: for PayPal, we already stored oneTimeSession = 'pp_<captureId>' during onApprove.
 
   try {
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) });
@@ -139,7 +141,7 @@ async function resumePendingPurchase() {
     });
     renderHistory();
 
-    // Optional: immediately prepare & copy a share link (best-effort)
+    // Optional: share link
     try {
       const resp = await fetch(API.share, {
         method: 'POST',
@@ -159,9 +161,9 @@ async function resumePendingPurchase() {
     await refreshBalancePill(); // reflect new credits
   }
 }
-if (stripeSessionId) {
+if (stripeSessionId || ppSuccess) {
   history.replaceState({}, '', window.location.pathname);
-  if (checkoutSuccess) showToast('Payment confirmed. Preparing your report…', 'ok');
+  if (checkoutSuccess || ppSuccess) showToast('Payment confirmed. Preparing your report…', 'ok');
   resumePendingPurchase();
 }
 
@@ -484,19 +486,71 @@ function renderHistory() {
 $id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(HISTORY_KEY); renderHistory(); });
 
 /* ================================
-   Buy Credits modal (tiers)
+   Buy Credits modal (tiers) + PayPal
 ================================ */
 const buyModal    = $id('buyCreditsModal');
-const buy1Btn     = $id('buy1Btn');   // 1-credit button
-const buy10Btn    = $id('buy10Btn');  // 10-pack button
-const buyNowBtn   = $id('buyNowBtn'); // legacy single-buy button
+const buy1Btn     = $id('buy1Btn');   // 1-credit button (Stripe)
+const buy10Btn    = $id('buy10Btn');  // 10-pack button (Stripe)
+const buyNowBtn   = $id('buyNowBtn'); // legacy single-buy (Stripe)
 const closeBuyBtn = $id('closeModalBtn');
-function openBuyModal(){ buyModal?.classList.remove('hidden'); }
+function openBuyModal(){ buyModal?.classList.remove('hidden'); renderPaypalButton(); }
 function closeBuyModal(){ buyModal?.classList.add('hidden'); }
 closeBuyBtn?.addEventListener('click', closeBuyModal);
 
+// PayPal helpers
+async function createPaypalOrder(user) {
+  const r = await fetch('/api/paypal/create-order', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: user?.id || null })
+  });
+  if (!r.ok) throw new Error(await r.text() || 'PayPal create failed');
+  const { orderID } = await r.json();
+  return orderID;
+}
+
+async function capturePaypalOrder(orderID, user) {
+  const r = await fetch('/api/paypal/capture-order', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orderID, user_id: user?.id || null })
+  });
+  if (!r.ok) throw new Error(await r.text() || 'PayPal capture failed');
+  return r.json(); // { ok, captureId }
+}
+
+// Render PayPal smart button once
+let paypalRendered = false;
+async function renderPaypalButton() {
+  if (paypalRendered || !window.paypal) return;
+  paypalRendered = true;
+
+  const { user } = await getSession();
+
+  paypal.Buttons({
+    createOrder: () => createPaypalOrder(user),
+    onApprove: async (data) => {
+      try {
+        const result = await capturePaypalOrder(data.orderID, user);
+        if (!user && result?.captureId) {
+          const pending = tryLoadPending() || lastFormData || {};
+          pending.oneTimeSession = 'pp_' + result.captureId;
+          localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+        }
+        const url = new URL(location.href);
+        url.searchParams.set('pp', 'success');
+        window.location.href = url.toString();
+      } catch (e) {
+        showToast(e.message || 'PayPal capture failed', 'error');
+      }
+    },
+    onError: (err) => {
+      console.error(err);
+      showToast('PayPal error', 'error');
+    }
+  }).render('#paypalContainer');
+}
+
 /* ================================
-   Purchase flow
+   Purchase flow (Stripe)
 ================================ */
 async function startPurchase({ user, price_id, pendingReport = null }) {
   try {
@@ -607,7 +661,6 @@ f?.addEventListener('submit', async (e) => {
     });
     renderHistory();
 
-    // Optional: also prepare a share link on success
     try {
       const resp = await fetch(API.share, {
         method: 'POST',

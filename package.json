@@ -7,6 +7,7 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@paypal/checkout-server-sdk": "^1.0.3",
     "@supabase/supabase-js": "2.58.0",
     "axios": "1.12.2",
     "cors": "2.8.5",

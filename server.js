@@ -17,6 +17,7 @@ import fs from 'fs';
 import Stripe from 'stripe';
 import { gunzipSync } from 'zlib';
 import crypto from 'crypto';
+import * as paypalSdk from '@paypal/checkout-server-sdk';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -214,6 +215,84 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
+// ---------- PayPal ----------
+const PAYPAL_ENV = (process.env.PAYPAL_ENV || 'sandbox').toLowerCase();
+const ppEnv =
+  PAYPAL_ENV === 'live'
+    ? new paypalSdk.core.LiveEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET)
+    : new paypalSdk.core.SandboxEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET);
+const ppClient = new paypalSdk.core.PayPalHttpClient(ppEnv);
+
+async function verifyPaypalCapture(captureId) {
+  const req = new paypalSdk.payments.CapturesGetRequest(captureId);
+  const res = await ppClient.execute(req);
+  return res?.result; // expect status === 'COMPLETED'
+}
+
+app.post('/api/paypal/create-order', async (req, res) => {
+  try {
+    const { user_id } = req.body || {};
+    const request = new paypalSdk.orders.OrdersCreateRequest();
+    request.prefer('return=representation');
+    request.requestBody({
+      intent: 'CAPTURE',
+      purchase_units: [{
+        amount: { currency_code: 'USD', value: '7.00' } // single-credit price
+      }],
+      application_context: {
+        brand_name: 'AutoVINReveal',
+        shipping_preference: 'NO_SHIPPING',
+        user_action: 'PAY_NOW'
+      }
+    });
+    const order = await ppClient.execute(request);
+    res.json({ orderID: order.result.id });
+  } catch (e) {
+    console.error('paypal create order error:', e);
+    res.status(500).json({ error: 'PayPal create-order failed' });
+  }
+});
+
+app.post('/api/paypal/capture-order', async (req, res) => {
+  try {
+    const { orderID, user_id } = req.body || {};
+    if (!orderID) return res.status(400).json({ error: 'orderID required' });
+
+    const capReq = new paypalSdk.orders.OrdersCaptureRequest(orderID);
+    capReq.requestBody({});
+    const capRes = await ppClient.execute(capReq);
+
+    const unit = capRes?.result?.purchase_units?.[0];
+    const cap  = unit?.payments?.captures?.[0];
+    const captureId = cap?.id || null;
+    const status    = cap?.status || capRes?.result?.status;
+
+    if (!captureId || status !== 'COMPLETED')
+      return res.status(400).json({ error: 'Capture not completed', status });
+
+    // Logged-in: add 1 credit
+    if (user_id) {
+      const { data: existing, error: selErr } = await supabaseService
+        .from('credits').select('user_id,balance').eq('user_id', user_id).maybeSingle();
+      if (selErr) throw selErr;
+      if (existing) {
+        const { error: upErr } = await supabaseService
+          .from('credits').update({ balance: (existing.balance || 0) + 1 }).eq('user_id', user_id);
+        if (upErr) throw upErr;
+      } else {
+        const { error: insErr } = await supabaseService
+          .from('credits').insert({ user_id, balance: 1 });
+        if (insErr) throw insErr;
+      }
+    }
+
+    res.json({ ok: true, captureId });
+  } catch (e) {
+    console.error('paypal capture error:', e?.message || e);
+    res.status(500).json({ error: 'PayPal capture failed' });
+  }
+});
+
 // ---------- Report API ----------
 app.post('/api/report', async (req, res) => {
   try {
@@ -256,11 +335,17 @@ app.post('/api/report', async (req, res) => {
         if (!oneTimeSession) return res.status(401).send('Complete purchase to view this report.');
         if (CONSUMED.has(oneTimeSession)) return res.status(409).send('This receipt was already used.');
         try {
-          const s = await stripe.checkout.sessions.retrieve(oneTimeSession);
-          if (s.payment_status !== 'paid') return res.status(402).send('Payment not completed.');
+          if (oneTimeSession.startsWith('pp_')) {
+            const captureId = oneTimeSession.slice(3);
+            const cap = await verifyPaypalCapture(captureId);
+            if (cap?.status !== 'COMPLETED') return res.status(402).send('Payment not completed.');
+          } else {
+            const s = await stripe.checkout.sessions.retrieve(oneTimeSession);
+            if (s.payment_status !== 'paid') return res.status(402).send('Payment not completed.');
+          }
           CONSUMED.add(oneTimeSession); saveConsumed();
         } catch (err) {
-          console.error('Stripe verify session error:', err?.message || err);
+          console.error('One-time verify error:', err?.message || err);
           return res.status(400).send('Invalid purchase receipt.');
         }
       }
@@ -319,7 +404,6 @@ app.post('/api/report', async (req, res) => {
 });
 
 // ---------- Share link APIs ----------
-// Create a share link for a cached report (no extra billing; just serves from cache)
 app.post('/api/share', async (req, res) => {
   try {
     const { vin, type = 'carfax' } = req.body || {};
