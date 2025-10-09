@@ -38,15 +38,13 @@
   <link rel="apple-touch-icon" href="/favicon.png">
   <meta name="theme-color" content="#1d4ed8">
 
-  <!-- ✅ Preload hero/og image -->
-  <link rel="preload" as="image" href="/og-image.png" imagesrcset="/og-image.png 1200w" imagesizes="100vw">
+  <!-- ✅ Preload hero/og image
+  <link rel="preload" as="image" href="/og-image.png" imagesrcset="/og-image.png 1200w" imagesizes="100vw">  -->
 
   <!-- Tailwind -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = { darkMode: 'class', theme: { extend: { colors: { brand: { DEFAULT: '#2563eb', dark: '#1d4ed8' } } } } };
-  </script>
+<link rel="stylesheet" href="/tw.css">
 
+ 
   <!-- Apply dark mode BEFORE paint -->
   <script>
     (() => {
