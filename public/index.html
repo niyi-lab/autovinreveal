@@ -61,19 +61,18 @@
 <body class="h-full">
 
    <script>
-    fbq('track', 'Purchase', {
-      value: 7.00,
-      currency: 'USD',
-      contents: [
+  fbq('track', 'Purchase', {
+    value: 7.00,
+    currency: 'USD',
+    contents: [
         {
-          id: 'VinReport',
-          quantity: 1
+            id: 'VINReport',
+            quantity: 1
         }
-      ],
-      content_ids: ['VinReport'],
-      content_type: 'product'
-    });
-  </script>
+    ],
+    content_ids: 'VINReport',
+  });
+</script>
 
   
   <div class="max-w-5xl mx-auto px-4 py-6">
