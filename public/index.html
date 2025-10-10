@@ -63,11 +63,12 @@
     src="https://www.paypal.com/sdk/js?client-id=Aclv8-_pnwQ7RC6rFmyLTxPfEqSNC2yS67N3dFeTwGH2i8-K2LVwwPEMmcfuw-DOxcuDWsPpoaSs7HOU&components=buttons&currency=USD"></script>
 
   <!-- Meta Pixel Code -->
+  <!-- Meta Pixel Code -->
   <script>
     !function (f, b, e, v, n, t, s) {
       if (f.fbq) return; n = f.fbq = function () {
         n.callMethod ?
-          n.callMethod.apply(n, arguments) : n.queue.push(arguments)
+        n.callMethod.apply(n, arguments) : n.queue.push(arguments)
       };
       if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = '2.0';
       n.queue = []; t = b.createElement(e); t.async = !0;
@@ -81,22 +82,28 @@
   <noscript><img height="1" width="1" style="display:none"
       src="https://www.facebook.com/tr?id=1059594989434590&ev=PageView&noscript=1" /></noscript>
   <!-- End Meta Pixel Code -->
+
+
+
 </head>
 
 <body class="h-full">
 
-  <script>
-    fbq('track', 'Purchase', {
-      currency: 'USD',
-      contents: [
-        {
-          id: 'Report',
-          quantity: 1
-        }
-      ],
-      content_ids: 'VINReport',
-    });
-  </script>
+ <script>
+  fbq('track', 'Purchase', {
+    value: 7.00,
+    currency: 'USD',
+    contents: [
+      {
+        id: 'VinReport',
+        quantity: 1
+      }
+    ],
+    content_ids: ['VinReport'],
+    content_type: 'product'
+  });
+</script>
+
 
 
   <div class="max-w-5xl mx-auto px-4 py-6">
