@@ -1,13 +1,12 @@
 /********************************************************************/
 // Name:        AutoVINReveal Server
-// Date:        2025-10-11
 // Purpose:     Stripe + PayPal backend with instant report delivery,
 //              credit bundles, safe guest flow, and report caching.
 /********************************************************************/
 
 import dotenv from 'dotenv';
-dotenv.config({ path: '/etc/secrets/.env' });
-dotenv.config();
+dotenv.config({ path: '/etc/secrets/.env' }); // Render secret file (if present)
+dotenv.config(); // local .env fallback
 
 import express from 'express';
 import path from 'path';
@@ -39,9 +38,8 @@ const HOST = '0.0.0.0';
 ================================================================ */
 app.set('trust proxy', 1);
 
-const HTTPS_EXEMPT_PATHS = new Set([
-  '/api/stripe-webhook',
-]);
+// Do not redirect Stripe webhook (prevents 307)
+const HTTPS_EXEMPT_PATHS = new Set(['/api/stripe-webhook']);
 
 if (process.env.NODE_ENV === 'production') {
   app.use((req, res, next) => {
@@ -65,13 +63,12 @@ app.use((req, res, next) => {
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
 /* ================================================================
-   💳 Stripe
+   💳 Stripe Setup
 ================================================================ */
 const stripeLive = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 const STRIPE_TEST_SECRET_KEY = process.env.STRIPE_TEST_SECRET_KEY || null;
 
 const PRICE_SINGLE       = process.env.STRIPE_PRICE_SINGLE;
-the
 const PRICE_10PACK       = process.env.STRIPE_PRICE_10PACK;
 const PRICE_SINGLE_TEST  = process.env.STRIPE_PRICE_SINGLE_TEST || null;
 const PRICE_10PACK_TEST  = process.env.STRIPE_PRICE_10PACK_TEST || null;
@@ -91,7 +88,7 @@ function stripeForId(id) {
 }
 
 /* ================================================================
-   🗄️ Supabase  (SERVER: use process.env)
+   🗄️ Supabase
 ================================================================ */
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
@@ -120,11 +117,11 @@ const H = { 'API-KEY': KEY, 'API-SECRET': SECRET };
 
 async function csGet(url) {
   const r = await axios.get(url, { headers: H, responseType: 'text', timeout: 30000 });
-  return r.data;
+  return r.data; // base64 (gzipped HTML OR raw HTML-base64 OR raw PDF-base64)
 }
 
 /* ================================================================
-   🧠 Cache / tokens / helpers
+   🧠 Cache / receipts / helpers
 ================================================================ */
 const CACHE_DIR = path.join(__dirname, 'cache');
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
@@ -137,10 +134,12 @@ let CONSUMED = new Set();
 try { if (fs.existsSync(CONSUMED_FILE)) CONSUMED = new Set(JSON.parse(fs.readFileSync(CONSUMED_FILE, 'utf8'))); } catch {}
 function saveConsumed() { try { fs.writeFileSync(CONSUMED_FILE, JSON.stringify([...CONSUMED], null, 2)); } catch {} }
 
+// Dedupe for crediting sessions (webhook and finalize)
 const CREDITED_FILE = path.join(__dirname, '.credited_sessions.json');
 let CREDITED = new Set();
 try { if (fs.existsSync(CREDITED_FILE)) CREDITED = new Set(JSON.parse(fs.readFileSync(CREDITED_FILE, 'utf8'))); } catch {}
-function saveCredited() { try { fs.writeFileSync(CREDITED_FILE, JSON.stringify([...CREDITED], null, 2)); } catch {} }
+function markCredited(id) { CREDITED.add(id); try { fs.writeFileSync(CREDITED_FILE, JSON.stringify([...CREDITED], null, 2)); } catch {} }
+function isCredited(id) { return CREDITED.has(id); }
 
 function decodeReportBase64(rawB64) {
   const buf = Buffer.from(rawB64, 'base64');
@@ -161,7 +160,7 @@ async function fetchAndCacheReport(vin, type = 'carfax') {
 }
 
 /* ================================================================
-   🧾 Stripe Webhook (backup)
+   🧾 Stripe Webhook (dual-secret verify + dedupe)
 ================================================================ */
 const WH_LIVE = process.env.STRIPE_WEBHOOK_SECRET_LIVE || process.env.STRIPE_WEBHOOK_SECRET;
 const WH_TEST = process.env.STRIPE_WEBHOOK_SECRET_TEST || null;
@@ -174,17 +173,19 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
   } catch (e1) {
     if (WH_TEST) {
       try { event = stripeLive.webhooks.constructEvent(req.body, sig, WH_TEST); }
-      catch (e2) { console.error('Webhook verify failed (both):', e1?.message, e2?.message); return res.status(400).send('Webhook signature verification failed'); }
+      catch (e2) { console.error('Webhook verify failed (both):', e1?.message, e2?.message); return res.status(400).send('Bad signature'); }
     } else {
-      console.error('Webhook verify failed (live only):', e1?.message); return res.status(400).send('Webhook signature verification failed');
+      console.error('Webhook verify failed (live only):', e1?.message);
+      return res.status(400).send('Bad signature');
     }
   }
 
   try {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      if (CREDITED.has(session.id)) return res.json({ ok: true, deduped: true });
+      if (isCredited(session.id)) { console.log('✅ webhook deduped', session.id); return res.json({ ok: true, deduped: true }); }
 
+      // Compute credits from line items
       const lineItems = await stripeLive.checkout.sessions.listLineItems(session.id, { limit: 10 });
       let creditsToAdd = 0;
       for (const li of lineItems.data) {
@@ -192,7 +193,7 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
         const qty = li.quantity || 1;
         if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) creditsToAdd += qty * CREDITS_PER_SINGLE;
         else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) creditsToAdd += qty * CREDITS_PER_10PACK;
-        else creditsToAdd += qty * CREDITS_PER_SINGLE;
+        else creditsToAdd += qty * CREDITS_PER_SINGLE; // default
       }
 
       const userId = session.metadata?.user_id || session.client_reference_id || null;
@@ -200,14 +201,13 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
         const { data: existing } = await supabaseService
           .from('credits').select('balance').eq('user_id', userId).maybeSingle();
         if (existing) {
-          await supabaseService.from('credits')
-            .update({ balance: (existing.balance || 0) + creditsToAdd }).eq('user_id', userId);
+          await supabaseService.from('credits').update({ balance: (existing.balance || 0) + creditsToAdd }).eq('user_id', userId);
         } else {
           await supabaseService.from('credits').insert({ user_id: userId, balance: creditsToAdd });
         }
       }
 
-      CREDITED.add(session.id); saveCredited();
+      markCredited(session.id);
     }
 
     res.json({ ok: true });
@@ -227,7 +227,7 @@ app.use(morgan('dev'));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
 /* ================================================================
-   💰 Stripe Checkout (prevent re-buy if cached)
+   💰 Stripe Checkout (prevents re-buy for same VIN)
 ================================================================ */
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
@@ -253,7 +253,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
       mode: 'payment',
       payment_method_types: ['card'],
       line_items: [{ price: priceLive, quantity: 1 }],
-      success_url: `${SITE_URL}/?checkout=success&session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ''}`,
+      success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ''}`,
       cancel_url: `${SITE_URL}/?checkout=cancel`,
       ...(userId ? { client_reference_id: userId } : {}),
       metadata: {
@@ -273,55 +273,43 @@ app.post('/api/create-checkout-session', async (req, res) => {
 });
 
 /* ================================================================
-   ✅ Post-success crediting (frontend calls this)
+   🧩 Finalize after success (fallback if webhook is delayed)
 ================================================================ */
 app.post('/api/checkout/finalize', async (req, res) => {
   try {
     const { session_id } = req.body || {};
     if (!session_id) return res.status(400).json({ error: 'session_id required' });
 
-    if (CREDITED.has(session_id)) {
-      return res.json({ ok: true, credited: true, deduped: true });
-    }
+    // Retrieve session (works for live or test)
+    const client = stripeForId(session_id);
+    const session = await client.checkout.sessions.retrieve(session_id);
+    if (session.payment_status !== 'paid') return res.status(402).json({ error: 'Payment not completed' });
 
-    const sStripe = stripeForId(session_id);
-    const session = await sStripe.checkout.sessions.retrieve(session_id);
-    if (!session || session.payment_status !== 'paid') {
-      return res.status(402).json({ error: 'Payment not completed' });
-    }
-
-    const lineItems = await sStripe.checkout.sessions.listLineItems(session_id, { limit: 10 });
-    let creditsToAdd = 0;
-    for (const li of lineItems.data) {
-      const pid = li.price?.id;
-      const qty = li.quantity || 1;
-      if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) creditsToAdd += qty * CREDITS_PER_SINGLE;
-      else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) creditsToAdd += qty * CREDITS_PER_10PACK;
-      else creditsToAdd += qty * CREDITS_PER_SINGLE;
-    }
-
-    const userId = session.metadata?.user_id || session.client_reference_id || null;
-    if (userId && creditsToAdd > 0) {
-      const { data: existing } = await supabaseService
-        .from('credits').select('balance').eq('user_id', userId).maybeSingle();
-      if (existing) {
-        await supabaseService.from('credits')
-          .update({ balance: (existing.balance || 0) + creditsToAdd }).eq('user_id', userId);
-      } else {
-        await supabaseService.from('credits').insert({ user_id: userId, balance: creditsToAdd });
+    if (!isCredited(session.id)) {
+      // Credit based on metadata / line items
+      const lineItems = await client.checkout.sessions.listLineItems(session.id, { limit: 10 });
+      let creditsToAdd = 0;
+      for (const li of lineItems.data) {
+        const pid = li.price?.id;
+        const qty = li.quantity || 1;
+        if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) creditsToAdd += qty * CREDITS_PER_SINGLE;
+        else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) creditsToAdd += qty * CREDITS_PER_10PACK;
+        else creditsToAdd += qty * CREDITS_PER_SINGLE;
       }
+      const userId = session.metadata?.user_id || session.client_reference_id || null;
+      if (userId && creditsToAdd > 0) {
+        const { data: existing } = await supabaseService
+          .from('credits').select('balance').eq('user_id', userId).maybeSingle();
+        if (existing) {
+          await supabaseService.from('credits').update({ balance: (existing.balance || 0) + creditsToAdd }).eq('user_id', userId);
+        } else {
+          await supabaseService.from('credits').insert({ user_id: userId, balance: creditsToAdd });
+        }
+      }
+      markCredited(session.id);
     }
 
-    CREDITED.add(session_id); saveCredited();
-
-    return res.json({
-      ok: true,
-      intent: session.metadata?.intent || null,
-      vin: (session.metadata?.vin || '').toUpperCase() || null,
-      report_type: session.metadata?.report_type || null,
-      user_id: userId || null,
-      credited: creditsToAdd,
-    });
+    res.json({ ok: true });
   } catch (e) {
     console.error('finalize error:', e?.message || e);
     res.status(500).json({ error: 'Finalize failed' });
@@ -357,7 +345,7 @@ const ppClient = new paypalSdk.core.PayPalHttpClient(ppEnv);
 async function verifyPaypalCapture(captureId) {
   const req = new paypalSdk.payments.CapturesGetRequest(captureId);
   const res = await ppClient.execute(req);
-  return res?.result;
+  return res?.result; // status === 'COMPLETED'
 }
 
 app.post('/api/paypal/create-order', async (_req, res) => {
@@ -367,7 +355,11 @@ app.post('/api/paypal/create-order', async (_req, res) => {
     request.requestBody({
       intent: 'CAPTURE',
       purchase_units: [{ amount: { currency_code: 'USD', value: '7.00' } }],
-      application_context: { brand_name: 'AutoVINReveal', shipping_preference: 'NO_SHIPPING', user_action: 'PAY_NOW' }
+      application_context: {
+        brand_name: 'AutoVINReveal',
+        shipping_preference: 'NO_SHIPPING',
+        user_action: 'PAY_NOW'
+      }
     });
     const order = await ppClient.execute(request);
     res.json({ orderID: order.result.id });
@@ -417,12 +409,18 @@ app.post('/api/paypal/capture-order', async (req, res) => {
 app.post('/api/report', async (req, res) => {
   try {
     const {
-      vin, state, plate, type = 'carfax', as = 'html',
-      allowLive: allowLiveRaw, oneTimeSession,
+      vin,
+      state,
+      plate,
+      type = 'carfax',
+      as = 'html',
+      allowLive: allowLiveRaw,
+      oneTimeSession,
     } = req.body || {};
 
     const allowLive = allowLiveRaw !== false;
 
+    // Resolve VIN
     let targetVin = (vin || '').trim().toUpperCase();
     if (!targetVin && state && plate) {
       const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
@@ -431,6 +429,7 @@ app.post('/api/report', async (req, res) => {
     }
     if (!targetVin) return res.status(400).send('VIN or Plate+State required');
 
+    // Verify one-time receipt (guest or logged-in single-use)
     if (oneTimeSession) {
       if (CONSUMED.has(oneTimeSession)) return res.status(409).send('This receipt was already used.');
       try {
@@ -450,8 +449,10 @@ app.post('/api/report', async (req, res) => {
       }
     }
 
+    // Cache check
     let raw = readCache(targetVin, type);
 
+    // If not cached and live allowed, bill then fetch
     if (!raw && allowLive) {
       const { token, user } = await getUser(req);
 
