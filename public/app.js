@@ -106,27 +106,29 @@ async function ensureBackendReady({ timeoutMs = 2000, maxWaitMs = 60000 } = {}) 
 ensureBackendReady({ timeoutMs: 800, maxWaitMs: 3000 });
 
 /* ================================
-   Stripe return handling + PayPal flag
+   Success/return handling (Stripe + PayPal)
 ================================ */
 const urlParams = new URLSearchParams(window.location.search);
 const checkoutSuccess = urlParams.get('checkout') === 'success';
 const stripeSessionId = urlParams.get('session_id') || null;
 const ppSuccess = urlParams.get('pp') === 'success';
+const returnIntent = urlParams.get('intent'); // buy_report | buy_credit_single | buy_credits_bundle
+const returnVin = (urlParams.get('vin') || '').toUpperCase();
 
 function tryLoadPending() { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; } }
 function clearPending() { localStorage.removeItem(PENDING_KEY); }
 
-async function resumePendingPurchase() {
-  const pending = tryLoadPending();
+async function resumePendingPurchase(explicitData = null) {
+  const pending = explicitData || tryLoadPending();
   if (!pending) return;
   await ensureBackendReady();
 
   const headers = { 'Content-Type': 'application/json' };
-  const { token, user } = await getSession();
+  const { token } = await getSession();
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  if (!user && stripeSessionId) pending.oneTimeSession = stripeSessionId;
-  // Note: for PayPal, we already stored oneTimeSession = 'pp_<captureId>' during onApprove.
+  // Attach one-time receipt from the URL if present (Stripe flow)
+  if (!pending.oneTimeSession && stripeSessionId) pending.oneTimeSession = stripeSessionId;
 
   try {
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) });
@@ -158,14 +160,45 @@ async function resumePendingPurchase() {
     showToast(e.message || 'Failed to resume purchase', 'error');
   } finally {
     clearPending();
-    await refreshBalancePill(); // reflect new credits
+    await refreshBalancePill();
   }
 }
-if (stripeSessionId || ppSuccess) {
+
+(async function handleReturn() {
+  if (!(stripeSessionId || ppSuccess || checkoutSuccess || returnIntent)) return;
+
+  // Clean URL (remove noisy params)
   history.replaceState({}, '', window.location.pathname);
-  if (checkoutSuccess || ppSuccess) showToast('Payment confirmed. Preparing your report…', 'ok');
-  resumePendingPurchase();
-}
+
+  const pending = tryLoadPending();
+  const hasPendingVIN = !!(pending && (pending.vin || (pending.state && pending.plate)));
+
+  // Only show the “preparing…” toast if we truly have a report to prepare
+  if ((hasPendingVIN || returnIntent === 'buy_report')) {
+    showToast('Payment confirmed. Preparing your report…', 'ok');
+  }
+
+  // Report purchase path:
+  if (hasPendingVIN) {
+    await resumePendingPurchase(); // uses stored pending + session_id/pp capture
+    return;
+  }
+  if (returnIntent === 'buy_report' && returnVin && stripeSessionId) {
+    // Rare case: you returned with intent+vin but no pending (e.g., direct buy link)
+    await resumePendingPurchase({ vin: returnVin, type: 'carfax', as: 'html', allowLive: true, oneTimeSession: stripeSessionId });
+    return;
+  }
+
+  // Credits path:
+  if (returnIntent === 'buy_credit_single' || returnIntent === 'buy_credits_bundle') {
+    await refreshBalancePill();
+    showToast('✅ Credits added to your account!', 'ok');
+    return;
+  }
+
+  // Fallback: just refresh balance
+  await refreshBalancePill();
+})();
 
 /* ================================
    Theme toggle
@@ -288,7 +321,7 @@ async function doLogout() {
 doSignupBtn?.addEventListener('click', doSignup);
 doLoginBtn?.addEventListener('click', doLogin);
 
-// Optional Google button
+// Google button
 document.getElementById('googleLogin')?.addEventListener('click', async () => {
   try {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -530,15 +563,25 @@ async function renderPaypalButton() {
     onApprove: async (data) => {
       try {
         const result = await capturePaypalOrder(data.orderID, user);
-        if (!user && result?.captureId) {
-          const pending = tryLoadPending() || lastFormData || {};
+        // If this PayPal checkout was triggered from a VIN attempt, persist it for return flow.
+        const pending = tryLoadPending() || lastFormData || null;
+        if (result?.captureId && pending && (pending.vin || (pending.state && pending.plate))) {
           pending.oneTimeSession = 'pp_' + result.captureId;
           localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+          const url = new URL(location.href);
+          url.searchParams.set('pp', 'success');
+          url.searchParams.set('intent', 'buy_report');
+          if (pending.vin) url.searchParams.set('vin', pending.vin);
+          window.location.href = url.toString();
+          return;
         }
+        // Otherwise this was a plain credit top-up.
         const url = new URL(location.href);
         url.searchParams.set('pp', 'success');
+        url.searchParams.set('intent', 'buy_credit_single');
         window.location.href = url.toString();
       } catch (e) {
+        console.error(e);
         showToast(e.message || 'PayPal capture failed', 'error');
       }
     },
@@ -555,8 +598,16 @@ async function renderPaypalButton() {
 async function startPurchase({ user, price_id, pendingReport = null }) {
   try {
     await ensureBackendReady();
-    if (pendingReport) localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport));
-    const body = { user_id: user?.id || null, price_id }; // symbolic id or real price_...
+    // Persist report attempt ONLY if there is a VIN/plate (used to resume report after payment)
+    if (pendingReport && (pendingReport.vin || (pendingReport.state && pendingReport.plate))) {
+      localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport));
+    }
+    const body = { 
+      user_id: user?.id || null, 
+      price_id,
+      // If you want instant webhook fulfillments for report buys, you could also pass vin here.
+      // We keep it client-side so one flow handles both Stripe & PayPal uniformly.
+    };
     const r = await fetch(API.checkout, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) { const t = await r.text(); throw new Error(t || 'Stripe error'); }
     const { url } = await r.json(); window.location.href = url;
@@ -566,12 +617,12 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
 let lastFormData = null;
 
 // require login for 10-pack; pass pending for single-credit
-buy1Btn?.addEventListener('click', async () => {
+const buy1BtnHandler = async () => {
   const { user } = await getSession(); 
   closeBuyModal();
   startPurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: lastFormData || null });
-});
-buy10Btn?.addEventListener('click', async () => {
+};
+const buy10BtnHandler = async () => {
   const { user } = await getSession();
   if (!user) { 
     closeBuyModal();
@@ -581,12 +632,10 @@ buy10Btn?.addEventListener('click', async () => {
   }
   closeBuyModal();
   startPurchase({ user, price_id: 'STRIPE_PRICE_10PACK', pendingReport: null });
-});
-buyNowBtn?.addEventListener('click', async () => {
-  const { user } = await getSession(); 
-  closeBuyModal();
-  startPurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: lastFormData || null });
-});
+};
+buy1Btn?.addEventListener('click', buy1BtnHandler);
+buy10Btn?.addEventListener('click', buy10BtnHandler);
+buyNowBtn?.addEventListener('click', buy1BtnHandler);
 
 /* ================================
    Main form (fetch report)

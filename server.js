@@ -1,6 +1,9 @@
 /********************************************************************/
 // Name:        AutoVINReveal Server
-// Purpose:     Full backend for AutoVINReveal with Stripe + PayPal
+// Date:        2025-10-11
+// Purpose:     Stripe + PayPal backend with instant report delivery
+//              (via oneTimeSession), credit bundles, dual-mode safety,
+//              and report caching.
 /********************************************************************/
 
 import dotenv from 'dotenv';
@@ -35,7 +38,7 @@ const HOST = '0.0.0.0';
 /* ================================================================
    🔒 Secure-by-default
 ================================================================ */
-app.set('trust proxy', 1); // behind Render/Heroku/etc.
+app.set('trust proxy', 1);
 
 if (process.env.NODE_ENV === 'production') {
   app.use((req, res, next) => {
@@ -56,12 +59,26 @@ app.use((req, res, next) => {
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
 /* ================================================================
-   💳 Stripe Setup
+   💳 Stripe Setup (live default, optional test)
 ================================================================ */
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
-const PRICE_SINGLE = process.env.STRIPE_PRICE_SINGLE;
-const PRICE_10PACK = process.env.STRIPE_PRICE_10PACK;
+const stripeLive = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
+const STRIPE_TEST_SECRET_KEY = process.env.STRIPE_TEST_SECRET_KEY || null;
+
+const PRICE_SINGLE       = process.env.STRIPE_PRICE_SINGLE;
+const PRICE_10PACK       = process.env.STRIPE_PRICE_10PACK;
+const PRICE_SINGLE_TEST  = process.env.STRIPE_PRICE_SINGLE_TEST || null;
+const PRICE_10PACK_TEST  = process.env.STRIPE_PRICE_10PACK_TEST || null;
+
 const SITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
+
+function stripeForId(id) {
+  const isTest = typeof id === 'string' && id.startsWith('cs_test_');
+  if (isTest) {
+    if (!STRIPE_TEST_SECRET_KEY) throw new Error('Test session but STRIPE_TEST_SECRET_KEY not set.');
+    return new Stripe(STRIPE_TEST_SECRET_KEY, { apiVersion: '2024-06-20' });
+  }
+  return stripeLive;
+}
 
 /* ================================================================
    🗄️ Supabase
@@ -93,7 +110,7 @@ const H = { 'API-KEY': KEY, 'API-SECRET': SECRET };
 
 async function csGet(url) {
   const r = await axios.get(url, { headers: H, responseType: 'text', timeout: 30000 });
-  return r.data; // base64 string (gzipped HTML OR raw HTML-base64 OR raw PDF-base64)
+  return r.data; // base64 (gzipped HTML OR raw HTML-base64 OR raw PDF-base64)
 }
 
 /* ================================================================
@@ -126,25 +143,55 @@ function decodeReportBase64(rawB64) {
   return { kind: 'unknown', buffer: buf };
 }
 
+async function fetchAndCacheReport(vin, type = 'carfax') {
+  const live = await csGet(`${CS}/getrecord/${type}/${vin}`);
+  writeCache(vin, type, live);
+  return true;
+}
+
 /* ================================================================
-   🧾 Stripe Webhook (RAW body!)
+   🧾 Stripe Webhook (RAW body! dual-secret verify)
 ================================================================ */
+const WH_LIVE = process.env.STRIPE_WEBHOOK_SECRET_LIVE || process.env.STRIPE_WEBHOOK_SECRET;
+const WH_TEST = process.env.STRIPE_WEBHOOK_SECRET_TEST || null;
+
 app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
-  try {
-    const event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
 
+  let event;
+  try {
+    event = stripeLive.webhooks.constructEvent(req.body, sig, WH_LIVE);
+  } catch (e1) {
+    if (WH_TEST) {
+      try { event = stripeLive.webhooks.constructEvent(req.body, sig, WH_TEST); }
+      catch (e2) { console.error('Webhook verify failed (both):', e1?.message, e2?.message); return res.status(400).send('Webhook signature verification failed'); }
+    } else {
+      console.error('Webhook verify failed (live only):', e1?.message);
+      return res.status(400).send('Webhook signature verification failed');
+    }
+  }
+
+  try {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      const userId = session.metadata?.user_id || session.client_reference_id || null;
-      const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
 
+      // Compute credits from line items
+      const lineItems = await stripeLive.checkout.sessions.listLineItems(session.id, { limit: 10 });
       let creditsToAdd = 0;
       for (const li of lineItems.data) {
-        if (li.price.id === PRICE_SINGLE)      creditsToAdd += (li.quantity || 1) * 1;
-        else if (li.price.id === PRICE_10PACK) creditsToAdd += (li.quantity || 1) * 10;
+        if (li.price?.id === PRICE_SINGLE || li.price?.id === PRICE_SINGLE_TEST) {
+          creditsToAdd += (li.quantity || 1) * 1;
+        } else if (li.price?.id === PRICE_10PACK || li.price?.id === PRICE_10PACK_TEST) {
+          creditsToAdd += (li.quantity || 1) * 10;
+        }
       }
 
+      const userId = session.metadata?.user_id || session.client_reference_id || null;
+      const intent = session.metadata?.intent || '';
+      const metaVin = (session.metadata?.vin || '').toUpperCase();
+      const metaType = session.metadata?.report_type || 'carfax';
+
+      // Credit account (if known user)
       if (userId && creditsToAdd > 0) {
         const { data: existing } = await supabaseService
           .from('credits').select('balance').eq('user_id', userId).maybeSingle();
@@ -152,16 +199,30 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
           await supabaseService.from('credits')
             .update({ balance: (existing.balance || 0) + creditsToAdd }).eq('user_id', userId);
         } else {
-          await supabaseService.from('credits')
-            .insert({ user_id: userId, balance: creditsToAdd });
+          await supabaseService.from('credits').insert({ user_id: userId, balance: creditsToAdd });
+        }
+      }
+
+      // Instant fulfillment ONLY for report purchases (intent === 'buy_report' and VIN present)
+      if (intent === 'buy_report' && metaVin) {
+        try {
+          await fetchAndCacheReport(metaVin, metaType);
+          if (userId) {
+            await supabaseService.from('transactions').insert({
+              user_id: userId, vin: metaVin, session_id: session.id, provider: 'stripe'
+            });
+          }
+          console.log(`✅ Webhook fulfilled report for ${metaVin}`);
+        } catch (e) {
+          console.error('Instant fulfillment error:', e?.message || e);
         }
       }
     }
 
     res.json({ ok: true });
   } catch (e) {
-    console.error('Webhook error:', e?.message || e);
-    res.status(400).send(`Webhook Error: ${e.message}`);
+    console.error('Webhook handler error:', e?.message || e);
+    res.status(500).send('Webhook handler error');
   }
 });
 
@@ -175,20 +236,38 @@ app.use(morgan('dev'));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
 /* ================================================================
-   💰 Stripe Checkout
+   💰 Stripe Checkout (intent + metadata + user inference)
 ================================================================ */
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
-    const { user_id, price_id } = req.body || {};
-    const price = price_id === 'STRIPE_PRICE_10PACK' ? PRICE_10PACK : PRICE_SINGLE;
+    const { user_id: userIdFromBody, price_id, vin, report_type } = req.body || {};
+    let userId = userIdFromBody;
+    if (!userId) {
+      const { user } = await getUser(req);
+      if (user?.id) userId = user.id;
+    }
 
-    const session = await stripe.checkout.sessions.create({
+    const isTenPack = (price_id === 'STRIPE_PRICE_10PACK' || price_id === '10pack');
+    const priceLive = isTenPack ? PRICE_10PACK : PRICE_SINGLE;
+
+    // INTENT: report vs credits
+    const intent = vin ? 'buy_report' : (isTenPack ? 'buy_credits_bundle' : 'buy_credit_single');
+
+    const session = await stripeLive.checkout.sessions.create({
       mode: 'payment',
       payment_method_types: ['card'],
-      line_items: [{ price, quantity: 1 }],
-      success_url: `${SITE_URL}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${SITE_URL}?checkout=cancel`,
-      ...(user_id ? { client_reference_id: user_id, metadata: { user_id } } : {}),
+      line_items: [{ price: priceLive, quantity: 1 }],
+      // Dedicated success page (simpler logic)
+      success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ''}`,
+      cancel_url: `${SITE_URL}/?checkout=cancel`,
+      ...(userId ? { client_reference_id: userId } : {}),
+      metadata: {
+        ...(userId ? { user_id: userId } : {}),
+        ...(vin ? { vin } : {}),
+        ...(report_type ? { report_type } : {}),
+        intent,
+        purchase_kind: isTenPack ? 'bundle' : 'single'
+      }
     });
 
     res.json({ url: session.url });
@@ -288,7 +367,7 @@ app.post('/api/paypal/capture-order', async (req, res) => {
 });
 
 /* ================================================================
-   📄 Report API
+   📄 Report API (instant fulfillment with oneTimeSession)
 ================================================================ */
 app.post('/api/report', async (req, res) => {
   try {
@@ -313,15 +392,34 @@ app.post('/api/report', async (req, res) => {
     }
     if (!targetVin) return res.status(400).send('VIN or Plate+State required');
 
+    // Verify one-time receipt FIRST (works for logged-in OR guest)
+    if (oneTimeSession) {
+      if (CONSUMED.has(oneTimeSession)) return res.status(409).send('This receipt was already used.');
+      try {
+        if (oneTimeSession.startsWith('pp_')) {
+          const captureId = oneTimeSession.slice(3);
+          const cap = await verifyPaypalCapture(captureId);
+          if (cap?.status !== 'COMPLETED') return res.status(402).send('Payment not completed.');
+        } else {
+          const sStripe = stripeForId(oneTimeSession);
+          const s = await sStripe.checkout.sessions.retrieve(oneTimeSession);
+          if (s.payment_status !== 'paid') return res.status(402).send('Payment not completed.');
+        }
+        CONSUMED.add(oneTimeSession); saveConsumed();
+      } catch (err) {
+        console.error('One-time verify error:', err?.message || err);
+        return res.status(400).send('Invalid purchase receipt.');
+      }
+    }
+
     // Check cache
     let raw = readCache(targetVin, type);
 
-    // If not cached and live allowed, charge a credit/receipt and fetch
+    // If not cached and allowed, bill correctly then fetch
     if (!raw && allowLive) {
       const { token, user } = await getUser(req);
 
-      if (user) {
-        // Deduct 1 credit via RPC (must exist in your Supabase db)
+      if (user && !oneTimeSession) {
         const supabaseUser = supabaseForToken(token);
         const { error: rpcErr } = await supabaseUser.rpc('use_credit_for_vin', {
           p_vin: targetVin,
@@ -331,27 +429,10 @@ app.post('/api/report', async (req, res) => {
           console.error('use_credit_for_vin error:', rpcErr);
           return res.status(402).send('Insufficient credits');
         }
-      } else {
-        // One-time purchase flow (Stripe or PayPal)
-        if (!oneTimeSession) return res.status(401).send('Complete purchase to view this report.');
-        if (CONSUMED.has(oneTimeSession)) return res.status(409).send('This receipt was already used.');
-        try {
-          if (oneTimeSession.startsWith('pp_')) {
-            const captureId = oneTimeSession.slice(3);
-            const cap = await verifyPaypalCapture(captureId);
-            if (cap?.status !== 'COMPLETED') return res.status(402).send('Payment not completed.');
-          } else {
-            const s = await stripe.checkout.sessions.retrieve(oneTimeSession);
-            if (s.payment_status !== 'paid') return res.status(402).send('Payment not completed.');
-          }
-          CONSUMED.add(oneTimeSession); saveConsumed();
-        } catch (err) {
-          console.error('One-time verify error:', err?.message || err);
-          return res.status(400).send('Invalid purchase receipt.');
-        }
+      } else if (!user && !oneTimeSession) {
+        return res.status(401).send('Complete purchase to view this report.');
       }
 
-      // Fetch live from CarSimulcast and cache
       const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
       raw = live;
       writeCache(targetVin, type, raw);
@@ -359,7 +440,6 @@ app.post('/api/report', async (req, res) => {
 
     if (!raw) return res.status(404).send('No cached or archive report found.');
 
-    // Output as HTML or PDF
     const decoded = decodeReportBase64(raw);
 
     if (as === 'pdf') {
@@ -407,7 +487,7 @@ app.post('/api/report', async (req, res) => {
 });
 
 /* ================================================================
-   🔗 Share link APIs (serve from cache; no billing)
+   🔗 Share links (cache-only)
 ================================================================ */
 const SHARE_FILE = path.join(__dirname, '.share_tokens.json');
 let SHARE_TOKENS = {};
