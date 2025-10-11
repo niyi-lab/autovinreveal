@@ -5,30 +5,65 @@
   <title>Processing…</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;display:grid;place-items:center;height:100vh;margin:0}
+    :root{color-scheme:light dark}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0}
     .card{max-width:560px;width:92%;border:1px solid #e5e7eb;border-radius:14px;padding:20px;box-shadow:0 6px 24px rgba(0,0,0,.06)}
     .muted{color:#64748b}
     .spin{width:22px;height:22px;border:3px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;animation:sp 1s linear infinite}
     @keyframes sp{to{transform:rotate(1turn)}}
     .row{display:flex;align-items:center;gap:10px}
     a{color:#2563eb}
+    .err{color:#b91c1c}
   </style>
 </head>
 <body>
   <div class="card">
     <div class="row"><div class="spin"></div><h3>Finishing up…</h3></div>
     <p class="muted" id="msg">Confirming your payment.</p>
+    <div id="actions" style="margin-top:10px;display:none">
+      <a href="/">Go back home</a>
+    </div>
   </div>
 
   <script>
+    async function finalizeCredits(sessionId) {
+      try {
+        const r = await fetch('/api/checkout/finalize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId })
+        });
+        // Don’t throw on non-200 here; we still try to proceed
+        return r.ok;
+      } catch { return false; }
+    }
+
+    function goHomeWith(flag) {
+      const u = new URL('/', location.origin);
+      if (flag) u.searchParams.set('checkout', flag);
+      location.replace(u.toString());
+    }
+
     (async () => {
       const p = new URLSearchParams(location.search);
       const sessionId = p.get('session_id') || '';
       const intent = p.get('intent') || '';
       const vin = (p.get('vin') || '').toUpperCase();
 
-      // If this was a report purchase with a VIN, render it now via oneTimeSession:
-      if (intent === 'buy_report' && sessionId && vin) {
+      const msg = document.getElementById('msg');
+      const actions = document.getElementById('actions');
+
+      if (!sessionId) {
+        // Nothing to do here
+        goHomeWith('success');
+        return;
+      }
+
+      // Always kick off finalize in the background (credits safety net)
+      const finalizePromise = finalizeCredits(sessionId);
+
+      if (intent === 'buy_report' && vin) {
+        // Primary path: use one-time receipt to open the report
         try {
           const r = await fetch('/api/report', {
             method: 'POST',
@@ -40,15 +75,29 @@
           document.open(); document.write(html); document.close();
           return;
         } catch (e) {
-          document.getElementById('msg').textContent = (e.message || 'Failed to fetch report') + ' — ';
+          // Fallback: wait for finalize (credits/caching), then try to open cached report
+          await finalizePromise;
+          try {
+            const r2 = await fetch('/api/report', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ vin, type: 'carfax', as: 'html', allowLive: false })
+            });
+            if (!r2.ok) throw new Error(await r2.text());
+            const html2 = await r2.text();
+            document.open(); document.write(html2); document.close();
+            return;
+          } catch (e2) {
+            msg.innerHTML = `<span class="err">We received your payment, but couldn't open the report automatically.</span> You can try again from the homepage.`;
+            actions.style.display = 'block';
+            return;
+          }
         }
       }
 
-      // Otherwise this was just a credit purchase, send them home w/ success flag
-      const u = new URL('/', location.origin);
-      u.searchParams.set('checkout','success');
-      history.replaceState({},'',u.pathname + u.search);
-      location.href = u.toString();
+      // Credit-only purchase: ensure credits are applied, then go home
+      await finalizePromise;
+      goHomeWith('success');
     })();
   </script>
 </body>
