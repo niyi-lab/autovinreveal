@@ -31,6 +31,12 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+function setUseCreditVisible(show) {
+  const el = $id('useCreditBtn');
+  if (!el) return;
+  el.classList.toggle('hidden', !show);
+}
+
 /* Primary CTA switcher: 'view' | 'buy' */
 function setPrimaryCTA(mode = 'view') {
   const btn = $id('go');
@@ -106,29 +112,29 @@ async function ensureBackendReady({ timeoutMs = 2000, maxWaitMs = 60000 } = {}) 
 ensureBackendReady({ timeoutMs: 800, maxWaitMs: 3000 });
 
 /* ================================
-   Success/return handling (Stripe + PayPal)
+   Stripe/PayPal success handling
 ================================ */
-const urlParams = new URLSearchParams(window.location.search);
-const checkoutSuccess = urlParams.get('checkout') === 'success';
-const stripeSessionId = urlParams.get('session_id') || null;
-const ppSuccess = urlParams.get('pp') === 'success';
-const returnIntent = urlParams.get('intent'); // buy_report | buy_credit_single | buy_credits_bundle
-const returnVin = (urlParams.get('vin') || '').toUpperCase();
+function onSuccessPage() { return location.pathname.endsWith('/success.html'); }
+function params() { return new URLSearchParams(location.search); }
+const p = params();
+const stripeSessionId = p.get('session_id') || null;
+const ppSuccess = p.get('pp') === 'success';
+const intentParam = p.get('intent') || null;
+const vinParam = (p.get('vin') || '').toUpperCase();
 
 function tryLoadPending() { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; } }
 function clearPending() { localStorage.removeItem(PENDING_KEY); }
 
-async function resumePendingPurchase(explicitData = null) {
-  const pending = explicitData || tryLoadPending();
+async function resumePendingPurchase() {
+  const pending = tryLoadPending();
   if (!pending) return;
   await ensureBackendReady();
 
   const headers = { 'Content-Type': 'application/json' };
-  const { token } = await getSession();
+  const { token, user } = await getSession();
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  // Attach one-time receipt from the URL if present (Stripe flow)
-  if (!pending.oneTimeSession && stripeSessionId) pending.oneTimeSession = stripeSessionId;
+  if (!user && stripeSessionId) pending.oneTimeSession = stripeSessionId;
 
   try {
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) });
@@ -143,7 +149,6 @@ async function resumePendingPurchase(explicitData = null) {
     });
     renderHistory();
 
-    // Optional: share link
     try {
       const resp = await fetch(API.share, {
         method: 'POST',
@@ -164,41 +169,41 @@ async function resumePendingPurchase(explicitData = null) {
   }
 }
 
-(async function handleReturn() {
-  if (!(stripeSessionId || ppSuccess || checkoutSuccess || returnIntent)) return;
+async function handleSuccessIfNeeded() {
+  const isSuccessContext = onSuccessPage() || stripeSessionId || ppSuccess;
+  if (!isSuccessContext) return;
 
-  // Clean URL (remove noisy params)
-  history.replaceState({}, '', window.location.pathname);
-
-  const pending = tryLoadPending();
-  const hasPendingVIN = !!(pending && (pending.vin || (pending.state && pending.plate)));
-
-  // Only show the “preparing…” toast if we truly have a report to prepare
-  if ((hasPendingVIN || returnIntent === 'buy_report')) {
+  // Direct “buy_report” (guest) -> fetch via one-time receipt
+  if (intentParam === 'buy_report' && stripeSessionId && vinParam) {
     showToast('Payment confirmed. Preparing your report…', 'ok');
+    try {
+      const r = await fetch(API.report, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vin: vinParam, type: 'carfax', as: 'html', oneTimeSession: stripeSessionId })
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const html = await r.text();
+      document.open(); document.write(html); document.close();
+      return;
+    } catch (e) {
+      showToast(e.message || 'Failed to fetch report', 'error');
+    }
   }
 
-  // Report purchase path:
-  if (hasPendingVIN) {
-    await resumePendingPurchase(); // uses stored pending + session_id/pp capture
-    return;
-  }
-  if (returnIntent === 'buy_report' && returnVin && stripeSessionId) {
-    // Rare case: you returned with intent+vin but no pending (e.g., direct buy link)
-    await resumePendingPurchase({ vin: returnVin, type: 'carfax', as: 'html', allowLive: true, oneTimeSession: stripeSessionId });
-    return;
-  }
-
-  // Credits path:
-  if (returnIntent === 'buy_credit_single' || returnIntent === 'buy_credits_bundle') {
-    await refreshBalancePill();
-    showToast('✅ Credits added to your account!', 'ok');
-    return;
-  }
-
-  // Fallback: just refresh balance
+  if (ppSuccess) showToast('Payment confirmed.', 'ok');
   await refreshBalancePill();
-})();
+
+  // If we’re on /success.html, bounce back to home
+  if (onSuccessPage()) {
+    setTimeout(() => { window.location.href = '/'; }, 1200);
+  } else {
+    const url = new URL(location.href);
+    ['session_id','intent','vin','pp'].forEach(k => url.searchParams.delete(k));
+    history.replaceState({}, '', url.pathname + url.search);
+  }
+}
+handleSuccessIfNeeded();
 
 /* ================================
    Theme toggle
@@ -210,7 +215,7 @@ function setTheme(mode) {
   const label = themeBtn?.querySelector('.label');
   const icon  = themeBtn?.querySelector('.icon');
   if (label) label.textContent = mode === 'dark' ? 'Light' : 'Dark';
-  if (icon) icon.textContent   = mode === 'dark' ? '☀️' : '🌙';
+  if (icon)  icon.textContent  = mode === 'dark' ? '☀️' : '🌙';
 }
 themeBtn?.addEventListener('click', () => {
   const nowDark = !document.documentElement.classList.contains('dark');
@@ -234,16 +239,17 @@ const emailEl          = $id('loginEmail');
 const pwEl             = $id('loginPassword');
 const doLoginBtn       = $id('doLogin');
 const doSignupBtn      = $id('doSignup');
-
-/* user chip elements */
-const userChip    = $id('userChip');
-const userEmailEl = $id('userEmail');
-const logoutBtn   = $id('logoutBtn');
+const userChip         = $id('userChip');
+const userEmailEl      = $id('userEmail');
+const logoutBtn        = $id('logoutBtn');
 
 function openLogin()  { loginModal?.classList.remove('hidden'); }
 function closeLogin() { loginModal?.classList.add('hidden'); }
 closeLoginModal?.addEventListener('click', closeLogin);
 logoutBtn?.addEventListener('click', doLogout);
+
+// Always open the modal on button click
+loginBtn?.addEventListener('click', () => openLogin());
 
 // Auto-open login if homepage has ?openLogin=1
 (() => {
@@ -321,7 +327,7 @@ async function doLogout() {
 doSignupBtn?.addEventListener('click', doSignup);
 doLoginBtn?.addEventListener('click', doLogin);
 
-// Google button
+// Optional Google button
 document.getElementById('googleLogin')?.addEventListener('click', async () => {
   try {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -335,10 +341,6 @@ document.getElementById('googleLogin')?.addEventListener('click', async () => {
 });
 
 let currentSession = null;
-loginBtn?.addEventListener('click', () => {
-  if (currentSession?.user) doLogout();
-  else openLogin();
-});
 function reflectAuthUI(session) {
   currentSession = session;
 
@@ -346,10 +348,12 @@ function reflectAuthUI(session) {
     if (userEmailEl) userEmailEl.textContent = session.user.email || '';
     userChip?.classList.remove('hidden');
     loginBtn?.classList.add('hidden');
+    setUseCreditVisible(true);
   } else {
     userChip?.classList.add('hidden');
     loginBtn?.classList.remove('hidden');
     if (loginBtn) loginBtn.textContent = '🔑 Login';
+    setUseCreditVisible(false);
   }
 }
 
@@ -403,8 +407,9 @@ async function refreshBalancePill() {
 
   if (!user) {
     pill?.classList.add('hidden');
-    setPrimaryCTA('view');           // guest -> show View Report
+    setPrimaryCTA('view');
     reflectAuthUI(null);
+    setUseCreditVisible(false);
     return;
   }
 
@@ -414,9 +419,10 @@ async function refreshBalancePill() {
     pill.classList.remove('hidden');
   }
 
-  // Switch main CTA based on balance
-  if (balance <= 0) setPrimaryCTA('buy');  // logged-in with 0 -> Buy Credits
-  else setPrimaryCTA('view');              // have credits -> View Report
+  if (balance <= 0) setPrimaryCTA('buy');
+  else setPrimaryCTA('view');
+
+  setUseCreditVisible(true);
 }
 
 /* ================================
@@ -524,7 +530,6 @@ $id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(H
 const buyModal    = $id('buyCreditsModal');
 const buy1Btn     = $id('buy1Btn');   // 1-credit button (Stripe)
 const buy10Btn    = $id('buy10Btn');  // 10-pack button (Stripe)
-const buyNowBtn   = $id('buyNowBtn'); // legacy single-buy (Stripe)
 const closeBuyBtn = $id('closeModalBtn');
 function openBuyModal(){ buyModal?.classList.remove('hidden'); renderPaypalButton(); }
 function closeBuyModal(){ buyModal?.classList.add('hidden'); }
@@ -558,30 +563,20 @@ async function renderPaypalButton() {
 
   const { user } = await getSession();
 
-  paypal.Buttons({
+  window.paypal.Buttons({
     createOrder: () => createPaypalOrder(user),
     onApprove: async (data) => {
       try {
         const result = await capturePaypalOrder(data.orderID, user);
-        // If this PayPal checkout was triggered from a VIN attempt, persist it for return flow.
-        const pending = tryLoadPending() || lastFormData || null;
-        if (result?.captureId && pending && (pending.vin || (pending.state && pending.plate))) {
+        if (!user && result?.captureId) {
+          const pending = tryLoadPending() || lastFormData || {};
           pending.oneTimeSession = 'pp_' + result.captureId;
           localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
-          const url = new URL(location.href);
-          url.searchParams.set('pp', 'success');
-          url.searchParams.set('intent', 'buy_report');
-          if (pending.vin) url.searchParams.set('vin', pending.vin);
-          window.location.href = url.toString();
-          return;
         }
-        // Otherwise this was a plain credit top-up.
-        const url = new URL(location.href);
+        const url = new URL('/success.html', window.location.origin);
         url.searchParams.set('pp', 'success');
-        url.searchParams.set('intent', 'buy_credit_single');
         window.location.href = url.toString();
       } catch (e) {
-        console.error(e);
         showToast(e.message || 'PayPal capture failed', 'error');
       }
     },
@@ -594,35 +589,58 @@ async function renderPaypalButton() {
 
 /* ================================
    Purchase flow (Stripe)
+   — handles 409 “already purchased” by opening archive
+   — only stores pending when we have a VIN
 ================================ */
 async function startPurchase({ user, price_id, pendingReport = null }) {
   try {
     await ensureBackendReady();
-    // Persist report attempt ONLY if there is a VIN/plate (used to resume report after payment)
-    if (pendingReport && (pendingReport.vin || (pendingReport.state && pendingReport.plate))) {
+
+    const body = { user_id: user?.id || null, price_id };
+    if (pendingReport?.vin) {
+      // store pending only for report purchases
       localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport));
+      body.vin = pendingReport.vin;
+      body.report_type = pendingReport.type || 'carfax';
     }
-    const body = { 
-      user_id: user?.id || null, 
-      price_id,
-      // If you want instant webhook fulfillments for report buys, you could also pass vin here.
-      // We keep it client-side so one flow handles both Stripe & PayPal uniformly.
-    };
-    const r = await fetch(API.checkout, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    const r = await fetch(API.checkout, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (r.status === 409) {
+      // VIN already cached: open from archive without charging again
+      const pr = pendingReport || tryLoadPending();
+      if (!pr?.vin) { showToast('Report already available.', 'ok'); return; }
+      const headers = { 'Content-Type': 'application/json' };
+      const { token } = await getSession();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const data = { vin: pr.vin, state: pr.state || '', plate: pr.plate || '', type: pr.type || 'carfax', as: 'html', allowLive: false };
+      const rr = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
+      if (!rr.ok) { const t = await rr.text(); throw new Error(t || 'Failed to open archived report'); }
+      const html = await rr.text();
+      const w = window.open('', '_blank'); w.document.write(html); w.document.close();
+      showToast('Opened your previously purchased report from archive.', 'ok');
+      return;
+    }
+
     if (!r.ok) { const t = await r.text(); throw new Error(t || 'Stripe error'); }
-    const { url } = await r.json(); window.location.href = url;
+    const { url } = await r.json();
+    window.location.href = url;
   } catch (e) { showToast(e.message || 'Failed to start checkout', 'error'); }
 }
 
 let lastFormData = null;
 
-// require login for 10-pack; pass pending for single-credit
-const buy1BtnHandler = async () => {
+// Buttons
+buy1Btn?.addEventListener('click', async () => {
   const { user } = await getSession(); 
   closeBuyModal();
   startPurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: lastFormData || null });
-};
-const buy10BtnHandler = async () => {
+});
+buy10Btn?.addEventListener('click', async () => {
   const { user } = await getSession();
   if (!user) { 
     closeBuyModal();
@@ -632,10 +650,60 @@ const buy10BtnHandler = async () => {
   }
   closeBuyModal();
   startPurchase({ user, price_id: 'STRIPE_PRICE_10PACK', pendingReport: null });
-};
-buy1Btn?.addEventListener('click', buy1BtnHandler);
-buy10Btn?.addEventListener('click', buy10BtnHandler);
-buyNowBtn?.addEventListener('click', buy1BtnHandler);
+});
+
+/* ================================
+   “Use 1 Credit & View”
+================================ */
+const useCreditBtn = $id('useCreditBtn');
+async function updateUseCreditBtn() {
+  if (!useCreditBtn || !f) return;
+  const { user } = await getSession();
+  if (!user) { setUseCreditVisible(false); return; }
+  setUseCreditVisible(true);
+
+  const formData = Object.fromEntries(new FormData(f).entries());
+  const vin = (formData.vin || '').trim().toUpperCase();
+  const state = (formData.state || '').trim();
+  const plate = (formData.plate || '').trim();
+  const hasInput = (vin && looksVin(vin)) || (state && plate);
+
+  let enable = false;
+  if (hasInput) {
+    try {
+      const r = await fetch(API.credits(user.id));
+      const { balance = 0 } = await r.json();
+      enable = balance > 0;
+    } catch {}
+  }
+  useCreditBtn.disabled = !enable;
+}
+useCreditBtn?.addEventListener('click', async () => {
+  if (!f) return;
+  const formData = Object.fromEntries(new FormData(f).entries());
+  const data = {
+    vin: (formData.vin || '').trim().toUpperCase(),
+    state: (formData.state || '').trim(),
+    plate: (formData.plate || '').trim(),
+    type: formData.type || 'carfax',
+    as: 'html',
+    allowLive: true
+  };
+  try {
+    await ensureBackendReady();
+    const headers = { 'Content-Type': 'application/json' };
+    const { token } = await getSession();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
+    if (!r.ok) throw new Error(await r.text());
+    const html = await r.text();
+    const w = window.open('', '_blank'); w.document.write(html); w.document.close();
+    showToast('Report fetched using 1 credit.', 'ok');
+    await refreshBalancePill();
+  } catch (e) {
+    showToast(e.message || 'Could not fetch using credit', 'error');
+  }
+});
 
 /* ================================
    Main form (fetch report)
@@ -645,6 +713,8 @@ const go = $id('go');
 const loading = $id('loading');
 
 const looksVin = (v) => /^[A-HJ-NPR-Z0-9]{17}$/i.test(v || '');
+
+f?.addEventListener('input', updateUseCreditBtn);
 
 f?.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -681,6 +751,7 @@ f?.addEventListener('submit', async (e) => {
     if (token) headers['Authorization'] = `Bearer ${token}`;
   }
 
+  // Logged-in with zero credits? Prompt to buy.
   if (currentUser && currentUser.id) {
     try {
       const r = await fetch(API.credits(currentUser.id));
@@ -689,7 +760,7 @@ f?.addEventListener('submit', async (e) => {
         lastFormData = data; openBuyModal();
         go.disabled = false; loading.classList.add('hidden'); return;
       }
-    } catch { /* ignore */ }
+    } catch {}
   }
 
   try {
@@ -735,6 +806,20 @@ f?.addEventListener('submit', async (e) => {
    Init
 ================================ */
 (async () => {
-  await refreshBalancePill(); // sets CTA accordingly
+  setUseCreditVisible(false); // hidden by default for guests
+  await refreshBalancePill();
   renderHistory();
+
+  // If we came back with pending one-time (e.g., PayPal guest), finish it
+  if (stripeSessionId || ppSuccess) {
+    if (!intentParam || intentParam !== 'buy_report') {
+      const pending = tryLoadPending();
+      if (pending) {
+        showToast('Payment confirmed. Preparing your report…', 'ok');
+        await resumePendingPurchase();
+      }
+    }
+  }
+
+  updateUseCreditBtn();
 })();

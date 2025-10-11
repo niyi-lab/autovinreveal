@@ -2,8 +2,7 @@
 // Name:        AutoVINReveal Server
 // Date:        2025-10-11
 // Purpose:     Stripe + PayPal backend with instant report delivery
-//              (via oneTimeSession), credit bundles, dual-mode safety,
-//              and report caching.
+//              credit bundles, safe guest flow, and report caching.
 /********************************************************************/
 
 import dotenv from 'dotenv';
@@ -40,14 +39,28 @@ const HOST = '0.0.0.0';
 ================================================================ */
 app.set('trust proxy', 1);
 
+/** Exempt machine callbacks from HTTPS redirects (esp. Stripe). */
+const HTTPS_EXEMPT_RE = /^\/api\/stripe-webhook(?:\/|$)/i;
+
 if (process.env.NODE_ENV === 'production') {
   app.use((req, res, next) => {
-    if (!req.secure && req.get('x-forwarded-proto') !== 'https') {
-      return res.redirect(301, 'https://' + req.headers.host + req.url);
-    }
-    next();
+    // Never redirect the Stripe webhook
+    if (HTTPS_EXEMPT_RE.test(req.originalUrl)) return next();
+
+    // Some hosts send "https,http" — only the first value matters.
+    const xfProto = String(req.headers['x-forwarded-proto'] || '')
+      .split(',')[0]
+      .trim()
+      .toLowerCase();
+
+    if (req.secure || xfProto === 'https') return next();
+
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    return res.redirect(301, `https://${host}${req.originalUrl}`);
   });
 }
+
+// This header is fine; it doesn't affect the webhook.
 app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy', 'upgrade-insecure-requests');
   next();
@@ -64,10 +77,13 @@ app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 const stripeLive = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 const STRIPE_TEST_SECRET_KEY = process.env.STRIPE_TEST_SECRET_KEY || null;
 
-const PRICE_SINGLE       = process.env.STRIPE_PRICE_SINGLE;
-const PRICE_10PACK       = process.env.STRIPE_PRICE_10PACK;
-const PRICE_SINGLE_TEST  = process.env.STRIPE_PRICE_SINGLE_TEST || null;
-const PRICE_10PACK_TEST  = process.env.STRIPE_PRICE_10PACK_TEST || null;
+const PRICE_SINGLE      = process.env.STRIPE_PRICE_SINGLE;       // e.g. price_XXXX
+const PRICE_10PACK      = process.env.STRIPE_PRICE_10PACK;       // e.g. price_YYYY
+const PRICE_SINGLE_TEST = process.env.STRIPE_PRICE_SINGLE_TEST || null;
+const PRICE_10PACK_TEST = process.env.STRIPE_PRICE_10PACK_TEST || null;
+
+const CREDITS_PER_SINGLE = Number(process.env.CREDITS_PER_SINGLE || '1');
+const CREDITS_PER_10PACK = Number(process.env.CREDITS_PER_10PACK || '10');
 
 const SITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
 
@@ -150,7 +166,8 @@ async function fetchAndCacheReport(vin, type = 'carfax') {
 }
 
 /* ================================================================
-   🧾 Stripe Webhook (RAW body! dual-secret verify)
+   🧾 Stripe Webhook (dual-secret verify)
+   NOTE: This MUST stay before express.json()
 ================================================================ */
 const WH_LIVE = process.env.STRIPE_WEBHOOK_SECRET_LIVE || process.env.STRIPE_WEBHOOK_SECRET;
 const WH_TEST = process.env.STRIPE_WEBHOOK_SECRET_TEST || null;
@@ -175,21 +192,29 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
 
-      // Compute credits from line items
-      const lineItems = await stripeLive.checkout.sessions.listLineItems(session.id, { limit: 10 });
+      // Use matching Stripe key to read line items (works for test & live).
+      const stripeForSession = stripeForId(session.id);
+      const lineItems = await stripeForSession.checkout.sessions.listLineItems(session.id, { limit: 10 });
+
+      // Compute credits explicitly
       let creditsToAdd = 0;
       for (const li of lineItems.data) {
-        if (li.price?.id === PRICE_SINGLE || li.price?.id === PRICE_SINGLE_TEST) {
-          creditsToAdd += (li.quantity || 1) * 1;
-        } else if (li.price?.id === PRICE_10PACK || li.price?.id === PRICE_10PACK_TEST) {
-          creditsToAdd += (li.quantity || 1) * 10;
+        const pid = li.price?.id;
+        const qty = li.quantity || 1;
+        if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) {
+          creditsToAdd += qty * CREDITS_PER_SINGLE;
+        } else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) {
+          creditsToAdd += qty * CREDITS_PER_10PACK;
+        } else {
+          // Unknown price => treat as 1 credit
+          creditsToAdd += qty * CREDITS_PER_SINGLE;
         }
       }
 
-      const userId = session.metadata?.user_id || session.client_reference_id || null;
-      const intent = session.metadata?.intent || '';
+      const userId  = session.metadata?.user_id || session.client_reference_id || null;
+      const intent  = session.metadata?.intent || '';
       const metaVin = (session.metadata?.vin || '').toUpperCase();
-      const metaType = session.metadata?.report_type || 'carfax';
+      const metaType = (session.metadata?.report_type || 'carfax').toLowerCase();
 
       // Credit account (if known user)
       if (userId && creditsToAdd > 0) {
@@ -203,7 +228,7 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
         }
       }
 
-      // Instant fulfillment ONLY for report purchases (intent === 'buy_report' and VIN present)
+      // Instant fulfillment for direct report purchases
       if (intent === 'buy_report' && metaVin) {
         try {
           await fetchAndCacheReport(metaVin, metaType);
@@ -236,7 +261,7 @@ app.use(morgan('dev'));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
 /* ================================================================
-   💰 Stripe Checkout (intent + metadata + user inference)
+   💰 Stripe Checkout (prevent re-buy for cached VIN)
 ================================================================ */
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
@@ -247,17 +272,33 @@ app.post('/api/create-checkout-session', async (req, res) => {
       if (user?.id) userId = user.id;
     }
 
-    const isTenPack = (price_id === 'STRIPE_PRICE_10PACK' || price_id === '10pack');
-    const priceLive = isTenPack ? PRICE_10PACK : PRICE_SINGLE;
+    // Determine price to use: allow direct price_... or symbolic alias.
+    const isTenPackAlias = price_id === 'STRIPE_PRICE_10PACK' || price_id === '10pack';
+    const isSingleAlias  = price_id === 'STRIPE_PRICE_SINGLE' || price_id === 'single';
+    const priceToUse =
+      price_id?.startsWith('price_')
+        ? price_id
+        : (isTenPackAlias ? PRICE_10PACK : PRICE_SINGLE);
 
-    // INTENT: report vs credits
-    const intent = vin ? 'buy_report' : (isTenPack ? 'buy_credits_bundle' : 'buy_credit_single');
+    if (!priceToUse) {
+      return res.status(500).json({ error: 'Missing Stripe price id' });
+    }
+
+    // If VIN present and report already cached => don't sell it again
+    if (vin) {
+      const type = (report_type || 'carfax').toLowerCase();
+      const cached = readCache((vin || '').toUpperCase(), type);
+      if (cached) {
+        return res.status(409).json({ alreadyCached: true, vin, report_type: type });
+      }
+    }
+
+    const intent = vin ? 'buy_report' : (isTenPackAlias ? 'buy_credits_bundle' : 'buy_credit_single');
 
     const session = await stripeLive.checkout.sessions.create({
       mode: 'payment',
       payment_method_types: ['card'],
-      line_items: [{ price: priceLive, quantity: 1 }],
-      // Dedicated success page (simpler logic)
+      line_items: [{ price: priceToUse, quantity: 1 }],
       success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ''}`,
       cancel_url: `${SITE_URL}/?checkout=cancel`,
       ...(userId ? { client_reference_id: userId } : {}),
@@ -266,7 +307,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
         ...(vin ? { vin } : {}),
         ...(report_type ? { report_type } : {}),
         intent,
-        purchase_kind: isTenPack ? 'bundle' : 'single'
+        purchase_kind: isTenPackAlias ? 'bundle' : 'single'
       }
     });
 
@@ -367,7 +408,7 @@ app.post('/api/paypal/capture-order', async (req, res) => {
 });
 
 /* ================================================================
-   📄 Report API (instant fulfillment with oneTimeSession)
+   📄 Report API
 ================================================================ */
 app.post('/api/report', async (req, res) => {
   try {
@@ -392,7 +433,7 @@ app.post('/api/report', async (req, res) => {
     }
     if (!targetVin) return res.status(400).send('VIN or Plate+State required');
 
-    // Verify one-time receipt FIRST (works for logged-in OR guest)
+    // One-time receipt verification (guest or logged-in single-use)
     if (oneTimeSession) {
       if (CONSUMED.has(oneTimeSession)) return res.status(409).send('This receipt was already used.');
       try {
@@ -412,7 +453,7 @@ app.post('/api/report', async (req, res) => {
       }
     }
 
-    // Check cache
+    // Cache check
     let raw = readCache(targetVin, type);
 
     // If not cached and allowed, bill correctly then fetch
@@ -440,6 +481,7 @@ app.post('/api/report', async (req, res) => {
 
     if (!raw) return res.status(404).send('No cached or archive report found.');
 
+    // Output
     const decoded = decodeReportBase64(raw);
 
     if (as === 'pdf') {

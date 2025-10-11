@@ -1,14 +1,55 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>Redirecting...</title>
-    <script src="/app.js" defer></script>
-  </head>
-  <body>
-    <div id="toastBox"></div>
-    <p style="text-align:center;margin-top:2rem;font-family:sans-serif">
-      Processing your payment...
-    </p>
-  </body>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Processing…</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;display:grid;place-items:center;height:100vh;margin:0}
+    .card{max-width:560px;width:92%;border:1px solid #e5e7eb;border-radius:14px;padding:20px;box-shadow:0 6px 24px rgba(0,0,0,.06)}
+    .muted{color:#64748b}
+    .spin{width:22px;height:22px;border:3px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;animation:sp 1s linear infinite}
+    @keyframes sp{to{transform:rotate(1turn)}}
+    .row{display:flex;align-items:center;gap:10px}
+    a{color:#2563eb}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="row"><div class="spin"></div><h3>Finishing up…</h3></div>
+    <p class="muted" id="msg">Confirming your payment.</p>
+  </div>
+
+  <script>
+    (async () => {
+      const p = new URLSearchParams(location.search);
+      const sessionId = p.get('session_id') || '';
+      const intent = p.get('intent') || '';
+      const vin = (p.get('vin') || '').toUpperCase();
+
+      // If this was a report purchase with a VIN, render it now via oneTimeSession:
+      if (intent === 'buy_report' && sessionId && vin) {
+        try {
+          const r = await fetch('/api/report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vin, type: 'carfax', as: 'html', oneTimeSession: sessionId })
+          });
+          if (!r.ok) throw new Error(await r.text());
+          const html = await r.text();
+          document.open(); document.write(html); document.close();
+          return;
+        } catch (e) {
+          document.getElementById('msg').textContent = (e.message || 'Failed to fetch report') + ' — ';
+        }
+      }
+
+      // Otherwise this was just a credit purchase, send them home w/ success flag
+      const u = new URL('/', location.origin);
+      u.searchParams.set('checkout','success');
+      history.replaceState({},'',u.pathname + u.search);
+      location.href = u.toString();
+    })();
+  </script>
+</body>
 </html>
