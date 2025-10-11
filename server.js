@@ -1,12 +1,11 @@
 /********************************************************************/
-// Name:        AutoVINReveal Server
-// Purpose:     Stripe + PayPal backend with instant delivery,
-//              credit bundles, safe guest flow, caching & idempotency.
+/* AutoVINReveal Server – Stripe + PayPal + Supabase + Caching      */
+/* Last updated: 2025-10-11                                         */
 /********************************************************************/
 
 import dotenv from 'dotenv';
-dotenv.config({ path: '/etc/secrets/.env' }); // Render Secret File (if used)
-dotenv.config(); // fallback local .env
+dotenv.config({ path: '/etc/secrets/.env' }); // (Render) secret file if present
+dotenv.config();                              // fallback .env
 
 import express from 'express';
 import path from 'path';
@@ -29,30 +28,48 @@ const paypalSdk = require('@paypal/checkout-server-sdk');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
+const app  = express();
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
 /* ================================================================
-   🔒 Secure-by-default
+   🔒 Secure-by-default (but do NOT redirect webhook)
 ================================================================ */
 app.set('trust proxy', 1);
 
-const HTTPS_EXEMPT_PATHS = new Set([
-  '/api/stripe-webhook', // must not redirect and must get RAW body
-]);
+// Paths that must never be redirected or have bodies parsed before raw:
+const WEBHOOK_PATHS = new Set(['/api/stripe-webhook', '/api/stripe-webhook/']);
 
-if (process.env.NODE_ENV === 'production') {
-  app.use((req, res, next) => {
-    if (HTTPS_EXEMPT_PATHS.has(req.path)) return next();
+// One early middleware that handles https/www redirects for everything
+// EXCEPT webhook paths.
+app.use((req, res, next) => {
+  if (WEBHOOK_PATHS.has(req.path)) return next(); // let Stripe through untouched
+
+  // Force HTTPS behind proxies
+  if (process.env.NODE_ENV === 'production') {
     const xfProto = req.get('x-forwarded-proto');
     if (!req.secure && xfProto !== 'https') {
-      return res.redirect(301, `https://${req.headers.host}${req.url}`);
+      return res.redirect(308, `https://${req.headers.host}${req.url}`);
     }
-    next();
-  });
-}
+  }
 
+  // Optional: force www (again not for webhook)
+  if (process.env.FORCE_WWW === '1' && req.headers.host && !req.headers.host.startsWith('www.')) {
+    return res.redirect(308, `https://www.${req.headers.host}${req.url}`);
+  }
+
+  next();
+});
+
+// (Nice to have: still safe for all other routes)
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy', 'upgrade-insecure-requests');
+  next();
+});
+
+/* ================================================================
+   🩺 Health
+================================================================ */
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
 /* ================================================================
@@ -61,33 +78,33 @@ app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 const stripeLive = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 const STRIPE_TEST_SECRET_KEY = process.env.STRIPE_TEST_SECRET_KEY || null;
 
-const PRICE_SINGLE       = process.env.STRIPE_PRICE_SINGLE;       // live price_***
-const PRICE_10PACK       = process.env.STRIPE_PRICE_10PACK;       // live price_***
+const PRICE_SINGLE       = process.env.STRIPE_PRICE_SINGLE;
+const PRICE_10PACK       = process.env.STRIPE_PRICE_10PACK;
 const PRICE_SINGLE_TEST  = process.env.STRIPE_PRICE_SINGLE_TEST || null;
 const PRICE_10PACK_TEST  = process.env.STRIPE_PRICE_10PACK_TEST || null;
 
 const CREDITS_PER_SINGLE = Number(process.env.CREDITS_PER_SINGLE || '1');
 const CREDITS_PER_10PACK = Number(process.env.CREDITS_PER_10PACK || '10');
 
-const SITE_URL = process.env.SITE_URL || '';
+const SITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
 
 function stripeForId(id) {
   const isTest = typeof id === 'string' && id.startsWith('cs_test_');
   if (isTest) {
     if (!STRIPE_TEST_SECRET_KEY) throw new Error('Test session but STRIPE_TEST_SECRET_KEY not set.');
     return new Stripe(STRIPE_TEST_SECRET_KEY, { apiVersion: '2024-06-20' });
-    }
+  }
   return stripeLive;
 }
 
 /* ================================================================
    🗄️ Supabase
 ================================================================ */
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
-const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY;
+const SUPABASE_URL       = process.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY  = process.env.VITE_SUPABASE_ANON_KEY;
+const SERVICE_ROLE_KEY   = process.env.SERVICE_ROLE_KEY;
 
-const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseAnon    = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const supabaseService = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const supabaseForToken = (token) =>
   createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } });
@@ -103,10 +120,10 @@ async function getUser(req) {
 /* ================================================================
    🚗 CarSimulcast API
 ================================================================ */
-const CS = 'https://connect.carsimulcast.com';
-const KEY = process.env.API_KEY;
+const CS     = 'https://connect.carsimulcast.com';
+const KEY    = process.env.API_KEY;
 const SECRET = process.env.API_SECRET;
-const H = { 'API-KEY': KEY, 'API-SECRET': SECRET };
+const H      = { 'API-KEY': KEY, 'API-SECRET': SECRET };
 
 async function csGet(url) {
   const r = await axios.get(url, { headers: H, responseType: 'text', timeout: 30000 });
@@ -114,23 +131,22 @@ async function csGet(url) {
 }
 
 /* ================================================================
-   🧠 Cache / idempotency / helpers
+   🧠 Cache / tokens / helpers
 ================================================================ */
 const CACHE_DIR = path.join(__dirname, 'cache');
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 const ck = (vin, type) => path.join(CACHE_DIR, `${vin}-${type}.b64`);
-const readCache = (vin, type) => (fs.existsSync(ck(vin, type)) ? fs.readFileSync(ck(vin, type), 'utf8') : null);
+const readCache  = (vin, type) => (fs.existsSync(ck(vin, type)) ? fs.readFileSync(ck(vin, type), 'utf8') : null);
 const writeCache = (vin, type, data) => fs.writeFileSync(ck(vin, type), data, 'utf8');
 
-const CONSUMED_FILE = path.join(__dirname, '.consumed_sessions.json'); // one-time receipts (guests)
+const CONSUMED_FILE = path.join(__dirname, '.consumed_sessions.json');
 let CONSUMED = new Set();
-try { if (fs.existsSync(CONSUMED_FILE)) CONSUMED = new Set(JSON.parse(fs.readFileSync(CONSUMED_FILE, 'utf8'))); } catch {}
-function saveConsumed() { try { fs.writeFileSync(CONSUMED_FILE, JSON.stringify([...CONSUMED], null, 2)); } catch {} }
-
-const CREDITED_FILE = path.join(__dirname, '.credited_sessions.json'); // idempotent crediting (webhook/finalize)
-let CREDITED = new Set();
-try { if (fs.existsSync(CREDITED_FILE)) CREDITED = new Set(JSON.parse(fs.readFileSync(CREDITED_FILE, 'utf8'))); } catch {}
-function saveCredited() { try { fs.writeFileSync(CREDITED_FILE, JSON.stringify([...CREDITED], null, 2)); } catch {} }
+try {
+  if (fs.existsSync(CONSUMED_FILE)) CONSUMED = new Set(JSON.parse(fs.readFileSync(CONSUMED_FILE, 'utf8')));
+} catch {}
+function saveConsumed() {
+  try { fs.writeFileSync(CONSUMED_FILE, JSON.stringify([...CONSUMED], null, 2)); } catch {}
+}
 
 function decodeReportBase64(rawB64) {
   const buf = Buffer.from(rawB64, 'base64');
@@ -151,79 +167,94 @@ async function fetchAndCacheReport(vin, type = 'carfax') {
 }
 
 /* ================================================================
-   🧾 Stripe Webhook (RAW body, dual-secret verify, idempotent)
+   🧾 Stripe Webhook (raw body; no redirects)
+   NOTE: must be defined BEFORE express.json()
 ================================================================ */
 const WH_LIVE = process.env.STRIPE_WEBHOOK_SECRET_LIVE || process.env.STRIPE_WEBHOOK_SECRET;
 const WH_TEST = process.env.STRIPE_WEBHOOK_SECRET_TEST || null;
 
-app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
+// Quick GET so you can curl -i the final URL and see 200 (Stripe uses POST).
+app.get(['/api/stripe-webhook', '/api/stripe-webhook/'], (_req, res) => res.status(200).send('ok'));
 
-  let event;
-  try {
-    event = stripeLive.webhooks.constructEvent(req.body, sig, WH_LIVE);
-  } catch (e1) {
-    if (WH_TEST) {
-      try { event = stripeLive.webhooks.constructEvent(req.body, sig, WH_TEST); }
-      catch (e2) { console.error('Webhook verify failed:', e1?.message, e2?.message); return res.status(400).send('Bad signature'); }
-    } else {
-      console.error('Webhook verify failed:', e1?.message);
-      return res.status(400).send('Bad signature');
-    }
-  }
+app.post(['/api/stripe-webhook', '/api/stripe-webhook/'],
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    // Helpful for debugging endpoint reachability/host header
+    console.log('Stripe webhook hit:', req.method, req.originalUrl, 'host=', req.headers.host);
 
-  try {
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      if (CREDITED.has(session.id)) { return res.json({ ok: true, dedup: true }); }
-
-      // Derive credits from the actual line items
-      const lineItems = await stripeLive.checkout.sessions.listLineItems(session.id, { limit: 10 });
-      let creditsToAdd = 0;
-      for (const li of lineItems.data) {
-        const pid = li.price?.id;
-        const qty = li.quantity || 1;
-        if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) {
-          creditsToAdd += qty * CREDITS_PER_SINGLE;
-        } else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) {
-          creditsToAdd += qty * CREDITS_PER_10PACK;
-        } else {
-          creditsToAdd += qty * CREDITS_PER_SINGLE; // unknown price => treat as 1 credit each
+    const sig = req.headers['stripe-signature'];
+    let event;
+    try {
+      // Try live first
+      event = stripeLive.webhooks.constructEvent(req.body, sig, WH_LIVE);
+    } catch (e1) {
+      if (WH_TEST) {
+        try {
+          event = stripeLive.webhooks.constructEvent(req.body, sig, WH_TEST);
+        } catch (e2) {
+          console.error('Webhook verify failed (both):', e1?.message, e2?.message);
+          return res.status(400).send('Webhook signature verification failed');
         }
-      }
-
-      const userId = session.metadata?.user_id || session.client_reference_id || null;
-
-      // Credit account (if known user)
-      if (userId && creditsToAdd > 0) {
-        const { data: existing } = await supabaseService
-          .from('credits').select('balance').eq('user_id', userId).maybeSingle();
-        if (existing) {
-          await supabaseService.from('credits')
-            .update({ balance: (existing.balance || 0) + creditsToAdd }).eq('user_id', userId);
-        } else {
-          await supabaseService.from('credits').insert({ user_id: userId, balance: creditsToAdd });
-        }
-      }
-
-      CREDITED.add(session.id); saveCredited();
-
-      // Optional: instant VIN fulfillment if metadata contains vin + intent
-      const metaVin = (session.metadata?.vin || '').toUpperCase();
-      const metaType = (session.metadata?.report_type || 'carfax').toLowerCase();
-      const intent = session.metadata?.intent || '';
-      if (intent === 'buy_report' && metaVin) {
-        try { await fetchAndCacheReport(metaVin, metaType); }
-        catch (e) { console.error('Instant fetch error:', e?.message || e); }
+      } else {
+        console.error('Webhook verify failed (live only):', e1?.message);
+        return res.status(400).send('Webhook signature verification failed');
       }
     }
 
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('Webhook handler error:', e?.message || e);
-    res.status(500).send('Webhook error');
+    try {
+      if (event.type === 'checkout.session.completed') {
+        const session = event.data.object;
+
+        // Calculate credits strictly from line items
+        const lineItems = await stripeLive.checkout.sessions.listLineItems(session.id, { limit: 10 });
+        let creditsToAdd = 0;
+        for (const li of lineItems.data) {
+          const pid = li.price?.id;
+          const qty = li.quantity || 1;
+          if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) {
+            creditsToAdd += qty * CREDITS_PER_SINGLE;
+          } else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) {
+            creditsToAdd += qty * CREDITS_PER_10PACK;
+          } else {
+            creditsToAdd += qty * CREDITS_PER_SINGLE; // default
+          }
+        }
+
+        const userId = session.metadata?.user_id || session.client_reference_id || null;
+        const intent = session.metadata?.intent || '';
+        const metaVin = (session.metadata?.vin || '').toUpperCase();
+        const metaType = session.metadata?.report_type || 'carfax';
+
+        if (userId && creditsToAdd > 0) {
+          const { data: existing } = await supabaseService
+            .from('credits').select('balance').eq('user_id', userId).maybeSingle();
+          if (existing) {
+            await supabaseService
+              .from('credits').update({ balance: (existing.balance || 0) + creditsToAdd }).eq('user_id', userId);
+          } else {
+            await supabaseService
+              .from('credits').insert({ user_id: userId, balance: creditsToAdd });
+          }
+        }
+
+        // If it was a direct "buy_report" and VIN present, prefetch/cache it
+        if (intent === 'buy_report' && metaVin) {
+          try {
+            await fetchAndCacheReport(metaVin, metaType);
+            console.log(`✅ Prefetched report for ${metaVin}`);
+          } catch (e) {
+            console.error('Instant prefetch error:', e?.message || e);
+          }
+        }
+      }
+
+      return res.status(200).json({ ok: true });
+    } catch (e) {
+      console.error('Webhook handler error:', e?.message || e);
+      return res.status(500).send('Webhook handler error');
+    }
   }
-});
+);
 
 /* ================================================================
    ⚙️ Normal middleware (after webhook)
@@ -235,7 +266,7 @@ app.use(morgan('dev'));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
 /* ================================================================
-   💰 Checkout session (prevents re-buy for same VIN)
+   💰 Stripe Checkout (prevents re-buy for same VIN if cached)
 ================================================================ */
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
@@ -249,24 +280,22 @@ app.post('/api/create-checkout-session', async (req, res) => {
     const isTenPack = (price_id === 'STRIPE_PRICE_10PACK' || price_id === '10pack');
     const priceLive = isTenPack ? PRICE_10PACK : PRICE_SINGLE;
 
-    // If VIN present, and report already cached => do not create session
     if (vin) {
       const type = (report_type || 'carfax').toLowerCase();
       const cached = readCache((vin || '').toUpperCase(), type);
-      if (cached) return res.status(409).json({ alreadyCached: true, vin, report_type: type });
+      if (cached) {
+        return res.status(409).json({ alreadyCached: true, vin, report_type: type });
+      }
     }
 
     const intent = vin ? 'buy_report' : (isTenPack ? 'buy_credits_bundle' : 'buy_credit_single');
-    const baseUrl =
-      SITE_URL ||
-      `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
 
     const session = await stripeLive.checkout.sessions.create({
       mode: 'payment',
       payment_method_types: ['card'],
       line_items: [{ price: priceLive, quantity: 1 }],
-      success_url: `${baseUrl}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ''}`,
-      cancel_url: `${baseUrl}/?checkout=cancel`,
+      success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ''}`,
+      cancel_url: `${SITE_URL}/?checkout=cancel`,
       ...(userId ? { client_reference_id: userId } : {}),
       metadata: {
         ...(userId ? { user_id: userId } : {}),
@@ -281,66 +310,6 @@ app.post('/api/create-checkout-session', async (req, res) => {
   } catch (err) {
     console.error('stripe create session error:', err);
     res.status(500).json({ error: 'Stripe error' });
-  }
-});
-
-/* ================================================================
-   ✅ Finalize (client fallback if webhook is delayed)
-================================================================ */
-app.post('/api/checkout/finalize', async (req, res) => {
-  try {
-    const { session_id } = req.body || {};
-    if (!session_id) return res.status(400).json({ error: 'session_id required' });
-
-    if (CREDITED.has(session_id)) return res.json({ ok: true, credited: true, dedup: true });
-
-    const sStripe = stripeForId(session_id);
-    const session = await sStripe.checkout.sessions.retrieve(session_id, {
-      expand: ['line_items.data.price'],
-    });
-    if (session.payment_status !== 'paid') return res.status(402).json({ error: 'Not paid' });
-
-    // Compute credits from line items
-    let creditsToAdd = 0;
-    for (const li of (session.line_items?.data || [])) {
-      const pid = li.price?.id;
-      const qty = li.quantity || 1;
-      if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) {
-        creditsToAdd += qty * CREDITS_PER_SINGLE;
-      } else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) {
-        creditsToAdd += qty * CREDITS_PER_10PACK;
-      } else {
-        creditsToAdd += qty * CREDITS_PER_SINGLE;
-      }
-    }
-
-    const userId = session.metadata?.user_id || session.client_reference_id || null;
-    if (userId && creditsToAdd > 0) {
-      const { data: existing } = await supabaseService
-        .from('credits').select('balance').eq('user_id', userId).maybeSingle();
-      if (existing) {
-        await supabaseService.from('credits')
-          .update({ balance: (existing.balance || 0) + creditsToAdd }).eq('user_id', userId);
-      } else {
-        await supabaseService.from('credits').insert({ user_id: userId, balance: creditsToAdd });
-      }
-    }
-
-    CREDITED.add(session_id); saveCredited();
-
-    // If this was a report purchase, try to fetch+cache now
-    const metaVin = (session.metadata?.vin || '').toUpperCase();
-    const metaType = (session.metadata?.report_type || 'carfax').toLowerCase();
-    const intent = session.metadata?.intent || '';
-    if (intent === 'buy_report' && metaVin) {
-      try { await fetchAndCacheReport(metaVin, metaType); }
-      catch (e) { /* non-fatal */ }
-    }
-
-    res.json({ ok: true, credited: true });
-  } catch (e) {
-    console.error('finalize error:', e?.message || e);
-    res.status(500).json({ error: 'Finalize failed' });
   }
 });
 
@@ -373,7 +342,7 @@ const ppClient = new paypalSdk.core.PayPalHttpClient(ppEnv);
 async function verifyPaypalCapture(captureId) {
   const req = new paypalSdk.payments.CapturesGetRequest(captureId);
   const res = await ppClient.execute(req);
-  return res?.result; // status === 'COMPLETED'
+  return res?.result; // COMPLETED
 }
 
 app.post('/api/paypal/create-order', async (_req, res) => {
@@ -383,7 +352,11 @@ app.post('/api/paypal/create-order', async (_req, res) => {
     request.requestBody({
       intent: 'CAPTURE',
       purchase_units: [{ amount: { currency_code: 'USD', value: '7.00' } }],
-      application_context: { brand_name: 'AutoVINReveal', shipping_preference: 'NO_SHIPPING', user_action: 'PAY_NOW' }
+      application_context: {
+        brand_name: 'AutoVINReveal',
+        shipping_preference: 'NO_SHIPPING',
+        user_action: 'PAY_NOW'
+      }
     });
     const order = await ppClient.execute(request);
     res.json({ orderID: order.result.id });
@@ -414,9 +387,11 @@ app.post('/api/paypal/capture-order', async (req, res) => {
       const { data: existing } = await supabaseService
         .from('credits').select('balance').eq('user_id', user_id).maybeSingle();
       if (existing) {
-        await supabaseService.from('credits').update({ balance: (existing.balance || 0) + 1 }).eq('user_id', user_id);
+        await supabaseService
+          .from('credits').update({ balance: (existing.balance || 0) + 1 }).eq('user_id', user_id);
       } else {
-        await supabaseService.from('credits').insert({ user_id, balance: 1 });
+        await supabaseService
+          .from('credits').insert({ user_id, balance: 1 });
       }
     }
 
@@ -433,7 +408,9 @@ app.post('/api/paypal/capture-order', async (req, res) => {
 app.post('/api/report', async (req, res) => {
   try {
     const {
-      vin, state, plate,
+      vin,
+      state,
+      plate,
       type = 'carfax',
       as = 'html',
       allowLive: allowLiveRaw,
@@ -451,7 +428,7 @@ app.post('/api/report', async (req, res) => {
     }
     if (!targetVin) return res.status(400).send('VIN or Plate+State required');
 
-    // One-time receipt verification for guests (or logged-in single-use)
+    // One-time receipt verification (guest or logged-in single-use)
     if (oneTimeSession) {
       if (CONSUMED.has(oneTimeSession)) return res.status(409).send('This receipt was already used.');
       try {
@@ -499,7 +476,6 @@ app.post('/api/report', async (req, res) => {
 
     if (!raw) return res.status(404).send('No cached or archive report found.');
 
-    // Output
     const decoded = decodeReportBase64(raw);
 
     if (as === 'pdf') {
@@ -576,8 +552,7 @@ app.post('/api/share', async (req, res) => {
     SHARE_TOKENS[token] = { vin: vin.toUpperCase(), type, exp };
     saveShareTokens();
 
-    const baseUrl = SITE_URL || '';
-    const url = `${baseUrl || ''}/view/${token}`.replace(/([^:]\/)\/+/g, '$1');
+    const url = `${SITE_URL}/view/${token}`;
     res.json({ url, expiresAt: exp });
   } catch {
     res.status(500).json({ error: 'Failed to create share link' });
@@ -607,6 +582,27 @@ app.get('/view/:token', async (req, res) => {
 });
 
 /* ================================================================
+   🔍 Route dump (debug)
+================================================================ */
+function dumpRoutes() {
+  const routes = [];
+  app._router?.stack?.forEach((m) => {
+    if (m.route && m.route.path) {
+      const methods = Object.keys(m.route.methods).map(k => k.toUpperCase()).join(',');
+      routes.push(`${methods} ${m.route.path}`);
+    } else if (m.name === 'router' && m.handle.stack) {
+      m.handle.stack.forEach((h) => {
+        if (h.route && h.route.path) {
+          const methods = Object.keys(h.route.methods).map(k => k.toUpperCase()).join(',');
+          routes.push(`${methods} ${h.route.path}`);
+        }
+      });
+    }
+  });
+  console.log('Mounted routes:\n' + routes.join('\n'));
+}
+
+/* ================================================================
    🗂️ Static (LAST)
 ================================================================ */
 app.use(express.static(path.join(__dirname, 'public')));
@@ -618,4 +614,6 @@ const server = app.listen(PORT, HOST, () =>
   console.log(`✅ Server running on ${process.env.SITE_URL || `http://${HOST}:${PORT}`}`)
 );
 server.keepAliveTimeout = 120000;
-server.headersTimeout = 125000;
+server.headersTimeout   = 125000;
+
+dumpRoutes();
