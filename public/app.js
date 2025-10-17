@@ -1,5 +1,5 @@
 // app.js
-console.info('app.js version: 2025-10-17-3');
+console.info('app.js version: 2025-10-17-4');
 
 /* ================================
    Config & Utilities
@@ -34,7 +34,7 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-/* Open a blank tab immediately on user gesture to avoid popup blockers */
+/* Optional helper (we no longer pre-open tabs during submit) */
 function openBlank() {
   try { return window.open('', '_blank', 'noopener,noreferrer'); }
   catch { return null; }
@@ -130,6 +130,10 @@ const stripeSessionId = p.get('session_id') || null;
 const ppSuccess = p.get('pp') === 'success';
 const intentParam = p.get('intent') || null;
 const vinParam = (p.get('vin') || '').toUpperCase();
+const oneParam = p.get('one') || null;          // NEW: one-time receipt in URL for PayPal
+const stateParam = p.get('state') || '';
+const plateParam = p.get('plate') || '';
+const typeParam = p.get('type') || '';
 
 function tryLoadPending() { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; } }
 function clearPending() { localStorage.removeItem(PENDING_KEY); }
@@ -150,12 +154,10 @@ async function resumePendingPurchase() {
     if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
 
-    // Not a user gesture, popup may be blocked — fallback to same-tab render
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
     else { document.open(); document.write(html); document.close(); }
 
-    // Meta Pixel: Purchase after successful PayPal resume
     try {
       fbq('track', 'Purchase', {
         value: 7.00,
@@ -198,7 +200,7 @@ async function handleSuccessIfNeeded() {
   const isSuccessContext = onSuccessPage() || stripeSessionId || ppSuccess;
   if (!isSuccessContext) return;
 
-  // Direct “buy_report” (guest) -> fetch via one-time receipt
+  // Stripe guest "buy_report" returns with session_id & vin in URL (unchanged)
   if (intentParam === 'buy_report' && stripeSessionId && vinParam) {
     showToast('Payment confirmed. Preparing your report…', 'ok');
     try {
@@ -210,25 +212,49 @@ async function handleSuccessIfNeeded() {
       if (!r.ok) throw new Error(await r.text());
       const html = await r.text();
       document.open(); document.write(html); document.close();
-
-      // Meta Pixel: Purchase after successful Stripe guest buy_report
       try {
-        fbq('track', 'Purchase', {
-          value: 7.00,
-          currency: 'USD',
-          contents: [{ id: 'VinReport', quantity: 1 }],
-          content_ids: ['VinReport'],
-          content_type: 'product'
-        });
+        fbq('track', 'Purchase', { value: 7.00, currency: 'USD', contents: [{ id: 'VinReport', quantity: 1 }], content_ids: ['VinReport'], content_type: 'product' });
       } catch {}
-
       return;
     } catch (e) {
       showToast(e.message || 'Failed to fetch report', 'error');
     }
   }
 
-  if (ppSuccess) showToast('Payment confirmed.', 'ok');
+  // NEW: PayPal guest (or logged-in) — success with one-time receipt & VIN/plate in URL
+  if (ppSuccess && oneParam && (vinParam || (stateParam && plateParam))) {
+    showToast('Payment confirmed. Preparing your report…', 'ok');
+    try {
+      const body = {
+        vin: vinParam || '',
+        state: stateParam || '',
+        plate: plateParam || '',
+        type: typeParam || 'carfax',
+        as: 'html',
+        oneTimeSession: oneParam
+      };
+      const r = await fetch(API.report, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      const html = await r.text();
+      document.open(); document.write(html); document.close();
+      try {
+        fbq('track', 'Purchase', { value: 7.00, currency: 'USD', contents: [{ id: 'VinReport', quantity: 1 }], content_ids: ['VinReport'], content_type: 'product' });
+      } catch {}
+      return;
+    } catch (e) {
+      showToast(e.message || 'Failed to fetch report', 'error');
+    }
+  }
+
+  // Fallback: if we’re on success and have a pending stored, resume it
+  if (ppSuccess || stripeSessionId || onSuccessPage()) {
+    const pending = tryLoadPending();
+    if (pending) {
+      showToast('Payment confirmed. Preparing your report…', 'ok');
+      await resumePendingPurchase();
+    }
+  }
+
   await refreshBalancePill();
 
   // If we’re on /success.html, bounce back to home
@@ -236,7 +262,7 @@ async function handleSuccessIfNeeded() {
     setTimeout(() => { window.location.href = '/'; }, 1200);
   } else {
     const url = new URL(location.href);
-    ['session_id','intent','vin','pp'].forEach(k => url.searchParams.delete(k));
+    ['session_id','intent','vin','pp','one','state','plate','type'].forEach(k => url.searchParams.delete(k));
     history.replaceState({}, '', url.pathname + url.search);
   }
 }
@@ -284,11 +310,8 @@ function openLogin()  { loginModal?.classList.remove('hidden'); }
 function closeLogin() { loginModal?.classList.add('hidden'); }
 closeLoginModal?.addEventListener('click', closeLogin);
 logoutBtn?.addEventListener('click', doLogout);
-
-// Always open the modal on button click
 loginBtn?.addEventListener('click', () => openLogin());
 
-// Auto-open login if homepage has ?openLogin=1
 (() => {
   const p = new URLSearchParams(window.location.search);
   if (p.get('openLogin') === '1') {
@@ -364,7 +387,6 @@ async function doLogout() {
 doSignupBtn?.addEventListener('click', doSignup);
 doLoginBtn?.addEventListener('click', doLogin);
 
-// Optional Google button
 document.getElementById('googleLogin')?.addEventListener('click', async () => {
   try {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -380,7 +402,6 @@ document.getElementById('googleLogin')?.addEventListener('click', async () => {
 let currentSession = null;
 function reflectAuthUI(session) {
   currentSession = session;
-
   if (session?.user) {
     if (userEmailEl) userEmailEl.textContent = session.user.email || '';
     userChip?.classList.remove('hidden');
@@ -405,7 +426,7 @@ function reflectAuthUI(session) {
     const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
     const url = new URL(location.href);
     url.searchParams.delete('code');
-    url.searchParams.delete('state'); // ← fixed
+    url.searchParams.delete('state');
     history.replaceState({}, '', url.pathname + url.search);
     if (error) showToast(error.message || 'Auth callback failed', 'error');
     else showToast('You’re signed in!', 'ok');
@@ -436,7 +457,7 @@ async function fetchBalance() {
     if (!user) return { balance: 0 };
     const r = await fetch(API.credits(user.id));
     if (!r.ok) return { balance: 0 };
-    return await r.json(); // { balance }
+    return await r.json();
   } catch { return { balance: 0 }; }
 }
 async function refreshBalancePill() {
@@ -484,10 +505,7 @@ async function openHistoryHTML(item) {
   if (token) headers['Authorization'] = `Bearer ${token}`;
   try {
     await ensureBackendReady();
-
-    // Pre-open viewer in user gesture to beat popup blockers
     const viewer = openBlank();
-
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
     if (!r.ok) { const t = await r.text(); if (viewer) viewer.close(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
@@ -599,17 +617,13 @@ async function capturePaypalOrder(orderID, user) {
   return r.json(); // { ok, captureId }
 }
 
-// Render PayPal smart button once (guard container + SDK)
-// ✅ Updated to ALWAYS save pending (guest or logged-in)
+// PayPal smart button (now encodes VIN/plate/receipt into the redirect URL)
 let paypalRendered = false;
 async function renderPaypalButton() {
   if (paypalRendered) return;
   const container = document.getElementById('paypalContainer');
   if (!container) return;
-  if (!window.paypal) {
-    showToast('PayPal is unavailable right now.', 'error');
-    return;
-  }
+  if (!window.paypal) { showToast('PayPal is unavailable right now.', 'error'); return; }
   paypalRendered = true;
 
   const { user } = await getSession();
@@ -620,7 +634,7 @@ async function renderPaypalButton() {
       try {
         const result = await capturePaypalOrder(data.orderID, user);
 
-        // Build pending payload from stored pending or lastFormData (what user entered)
+        // Build pending payload from stored pending or lastFormData
         let pending = tryLoadPending();
         if (!pending || (!pending.vin && !(pending.state && pending.plate))) {
           pending = lastFormData || null;
@@ -632,16 +646,25 @@ async function renderPaypalButton() {
         }
 
         // Guests need one-time receipt to authorize in /api/report
+        let one = '';
         if (!user && result?.captureId) {
-          pending.oneTimeSession = 'pp_' + result.captureId;
+          one = 'pp_' + result.captureId;
+          pending.oneTimeSession = one;
         }
 
-        // Save pending for resume step (guest or logged-in)
+        // Save pending (works when origin matches)
         localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
 
-        // Redirect to success (same origin)
-        const url = new URL('/success.html', window.location.origin);
+        // 🔑 Always pass the critical info in the URL too (works across www/non-www)
+        const url = new URL('/success.html', 'https://www.autovinreveal.com');
         url.searchParams.set('pp', 'success');
+        if (one) url.searchParams.set('one', one);
+        const vin = (pending.vin || '').toUpperCase();
+        if (vin) url.searchParams.set('vin', vin);
+        if (pending.state) url.searchParams.set('state', pending.state);
+        if (pending.plate) url.searchParams.set('plate', pending.plate);
+        url.searchParams.set('type', pending.type || 'carfax');
+
         window.location.href = url.toString();
       } catch (e) {
         showToast(e.message || 'PayPal capture failed', 'error');
@@ -656,8 +679,6 @@ async function renderPaypalButton() {
 
 /* ================================
    Purchase flow (Stripe)
-   — handles 409 “already purchased” by opening archive
-   — only stores pending when we have a VIN
 ================================ */
 async function startPurchase({ user, price_id, pendingReport = null }) {
   try {
@@ -682,9 +703,7 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
       const headers = { 'Content-Type': 'application/json' };
       const { token } = await getSession();
       if (token) headers['Authorization'] = `Bearer ${token}`;
-
       const viewer = openBlank();
-
       const data = { vin: pr.vin, state: pr.state || '', plate: pr.plate || '', type: pr.type || 'carfax', as: 'html', allowLive: false };
       const rr = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
       if (!rr.ok) { const t = await rr.text(); if (viewer) viewer.close(); throw new Error(t || 'Failed to open archived report'); }
@@ -703,7 +722,7 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
 
 let lastFormData = null;
 
-// Buttons (wire existing constants; don't redeclare them)
+
 buy1Btn?.addEventListener('click', async () => {
   const { user } = await getSession();
   closeBuyModal();
@@ -763,15 +782,12 @@ useCreditBtn?.addEventListener('click', async () => {
     const headers = { 'Content-Type': 'application/json' };
     const { token } = await getSession();
     if (token) headers['Authorization'] = `Bearer ${token}`;
-
     const viewer = openBlank();
-
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
     if (!r.ok) { const t = await r.text(); if (viewer) viewer.close(); throw new Error(t); }
     const html = await r.text();
     if (viewer) { viewer.document.write(html); viewer.document.close(); }
     else { const w = window.open('', '_blank'); if (w) { w.document.write(html); w.document.close(); } }
-
     showToast('Report fetched using 1 credit.', 'ok');
     await refreshBalancePill();
   } catch (e) {
@@ -846,7 +862,6 @@ f?.addEventListener('submit', async (e) => {
 
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
 
-    // Need to purchase → store pending and open modal (no about:blank)
     if (r.status === 401 || r.status === 402) {
       lastFormData = data;
       openBuyModal();
@@ -862,7 +877,6 @@ f?.addEventListener('submit', async (e) => {
       return;
     }
 
-    // Success: try new tab, else same-tab
     const html = await r.text();
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
@@ -897,17 +911,18 @@ f?.addEventListener('submit', async (e) => {
   }
 });
 
-
 /* ================================
    Init
 ================================ */
 (async () => {
-  setUseCreditVisible(false); // hidden by default for guests
+  setUseCreditVisible(false);
   await refreshBalancePill();
   renderHistory();
 
-  // If we came back with pending one-time (e.g., PayPal guest), finish it
+  // After return from PayPal/Stripe
   if (stripeSessionId || ppSuccess) {
+    // If PayPal provided one-time receipt & identifiers in URL, handler above will fetch.
+    // Otherwise, try localStorage fallback:
     if (!intentParam || intentParam !== 'buy_report') {
       const pending = tryLoadPending();
       if (pending) {
