@@ -1,11 +1,11 @@
-/********************************************************************/
-/* AutoVINReveal Server – Stripe + PayPal + Supabase + Caching      */
-/* Last updated: 2025-10-11 (popup-safe, webhook-safe)              */
-/********************************************************************/
+/********************************************************************
+ * AutoVINReveal Server – Stripe + PayPal + Supabase + Caching
+ * Fixed build – includes /success.html flow + finalize safety-net
+ ********************************************************************/
 
 import dotenv from 'dotenv';
-dotenv.config({ path: '/etc/secrets/.env' }); // (Render) secret file if present
-dotenv.config();                              // fallback .env
+dotenv.config({ path: '/etc/secrets/.env' }); // Render/host secret file (if present)
+dotenv.config();                               // Fallback .env
 
 import express from 'express';
 import path from 'path';
@@ -26,7 +26,7 @@ const require = createRequire(import.meta.url);
 const paypalSdk = require('@paypal/checkout-server-sdk');
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -37,35 +37,30 @@ const HOST = '0.0.0.0';
 ================================================================ */
 app.set('trust proxy', 1);
 
-// Paths that must never be redirected or have bodies parsed before raw:
+// Stripe webhook endpoints (skip redirects/body parsing before raw)
 const WEBHOOK_PATHS = new Set(['/api/stripe-webhook', '/api/stripe-webhook/']);
 
-// One early middleware that handles https/www redirects for everything
-// EXCEPT webhook paths.
+// Force HTTPS + force www (except for webhook)
 app.use((req, res, next) => {
-  if (WEBHOOK_PATHS.has(req.path)) return next(); // let Stripe through untouched
+  if (WEBHOOK_PATHS.has(req.path)) return next();
 
-  // Force HTTPS behind proxies
+  // Force HTTPS behind proxy/CDN
   if (process.env.NODE_ENV === 'production') {
     const xfProto = req.get('x-forwarded-proto');
     if (!req.secure && xfProto !== 'https') {
       return res.redirect(308, `https://${req.headers.host}${req.url}`);
     }
   }
-
-  // Optional: force www (again not for webhook)
+  // Optionally force www
   if (process.env.FORCE_WWW === '1' && req.headers.host && !req.headers.host.startsWith('www.')) {
     return res.redirect(308, `https://www.${req.headers.host}${req.url}`);
   }
-
   next();
 });
 
-// Keep simple CSP helper (does not block PayPal)
+// Simple CSP tweak
 app.use((req, res, next) => {
-  if (!WEBHOOK_PATHS.has(req.path)) {
-    res.setHeader('Content-Security-Policy', 'upgrade-insecure-requests');
-  }
+  res.setHeader('Content-Security-Policy', 'upgrade-insecure-requests');
   next();
 });
 
@@ -89,7 +84,9 @@ const CREDITS_PER_SINGLE = Number(process.env.CREDITS_PER_SINGLE || '1');
 const CREDITS_PER_10PACK = Number(process.env.CREDITS_PER_10PACK || '10');
 
 const SITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || SITE_URL;
 
+// Choose a Stripe instance based on object id (test/live)
 function stripeForId(id) {
   const isTest = typeof id === 'string' && id.startsWith('cs_test_');
   if (isTest) {
@@ -102,12 +99,12 @@ function stripeForId(id) {
 /* ================================================================
    🗄️ Supabase
 ================================================================ */
-const SUPABASE_URL       = process.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY  = process.env.VITE_SUPABASE_ANON_KEY;
-const SERVICE_ROLE_KEY   = process.env.SERVICE_ROLE_KEY;
+const SUPABASE_URL      = process.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
+const SERVICE_ROLE_KEY  = process.env.SERVICE_ROLE_KEY;
 
-const supabaseAnon    = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const supabaseService = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+const supabaseAnon     = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseService  = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const supabaseForToken = (token) =>
   createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } });
 
@@ -170,21 +167,20 @@ async function fetchAndCacheReport(vin, type = 'carfax') {
 
 /* ================================================================
    🧾 Stripe Webhook (raw body; no redirects)
-   NOTE: must be defined BEFORE express.json()
 ================================================================ */
 const WH_LIVE = process.env.STRIPE_WEBHOOK_SECRET_LIVE || process.env.STRIPE_WEBHOOK_SECRET;
 const WH_TEST = process.env.STRIPE_WEBHOOK_SECRET_TEST || null;
 
-// Quick GET so you can curl -i the final URL and see 200 (Stripe uses POST).
+// GET to quickly probe the URL
 app.get(['/api/stripe-webhook', '/api/stripe-webhook/'], (_req, res) => res.status(200).send('ok'));
 
 app.post(['/api/stripe-webhook', '/api/stripe-webhook/'],
   express.raw({ type: 'application/json' }),
   async (req, res) => {
     console.log('Stripe webhook hit:', req.method, req.originalUrl, 'host=', req.headers.host);
-
     const sig = req.headers['stripe-signature'];
     let event;
+
     try {
       // Try live first
       event = stripeLive.webhooks.constructEvent(req.body, sig, WH_LIVE);
@@ -206,8 +202,11 @@ app.post(['/api/stripe-webhook', '/api/stripe-webhook/'],
       if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
 
+        // Use a Stripe client that matches the session (esp. for test)
+        const sStripe = stripeForId(session.id);
+
         // Calculate credits strictly from line items
-        const lineItems = await stripeLive.checkout.sessions.listLineItems(session.id, { limit: 10 });
+        const lineItems = await sStripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
         let creditsToAdd = 0;
         for (const li of lineItems.data) {
           const pid = li.price?.id;
@@ -221,10 +220,10 @@ app.post(['/api/stripe-webhook', '/api/stripe-webhook/'],
           }
         }
 
-        const userId = session.metadata?.user_id || session.client_reference_id || null;
-        const intent = session.metadata?.intent || '';
-        const metaVin = (session.metadata?.vin || '').toUpperCase();
-        const metaType = session.metadata?.report_type || 'carfax';
+        const userId   = session.metadata?.user_id || session.client_reference_id || null;
+        const intent   = session.metadata?.intent || '';
+        const metaVin  = (session.metadata?.vin || '').toUpperCase();
+        const metaType = (session.metadata?.report_type || 'carfax').toLowerCase();
 
         if (userId && creditsToAdd > 0) {
           const { data: existing } = await supabaseService
@@ -259,25 +258,10 @@ app.post(['/api/stripe-webhook', '/api/stripe-webhook/'],
 
 /* ================================================================
    ⚙️ Normal middleware (after webhook)
-   (PayPal-safe Helmet config)
 ================================================================ */
 app.use(express.json());
-
-// Allowlist CORS origins (supports comma-separated)
-const ORIGINS = (process.env.ALLOWED_ORIGIN || '*')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
-app.use(cors({ origin: ORIGINS, credentials: true }));
-
-// 👇 Key change: allow popups (PayPal), disable COEP to avoid cross-origin issues
-app.use(helmet({
-  contentSecurityPolicy: false,
-  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
-  crossOriginEmbedderPolicy: false,
-  referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
-}));
-
+app.use(cors({ origin: ALLOWED_ORIGIN, credentials: false }));
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan('dev'));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
@@ -296,6 +280,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
     const isTenPack = (price_id === 'STRIPE_PRICE_10PACK' || price_id === '10pack');
     const priceLive = isTenPack ? PRICE_10PACK : PRICE_SINGLE;
 
+    // If report purchase with VIN: avoid charging again if cached
     if (vin) {
       const type = (report_type || 'carfax').toLowerCase();
       const cached = readCache((vin || '').toUpperCase(), type);
@@ -310,6 +295,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
       mode: 'payment',
       payment_method_types: ['card'],
       line_items: [{ price: priceLive, quantity: 1 }],
+      // ✅ Always send users to success.html with the right params
       success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ''}`,
       cancel_url: `${SITE_URL}/?checkout=cancel`,
       ...(userId ? { client_reference_id: userId } : {}),
@@ -326,6 +312,54 @@ app.post('/api/create-checkout-session', async (req, res) => {
   } catch (err) {
     console.error('stripe create session error:', err);
     res.status(500).json({ error: 'Stripe error' });
+  }
+});
+
+/* ================================================================
+   ✅ Stripe finalize (safety-net; idempotent)
+================================================================ */
+app.post('/api/checkout/finalize', async (req, res) => {
+  try {
+    const { session_id } = req.body || {};
+    if (!session_id) return res.status(400).json({ error: 'session_id required' });
+
+    const sStripe = stripeForId(session_id);
+    const session = await sStripe.checkout.sessions.retrieve(session_id);
+    if (session.payment_status !== 'paid') {
+      return res.status(400).json({ error: 'Payment not completed' });
+    }
+
+    const lineItems = await sStripe.checkout.sessions.listLineItems(session_id, { limit: 10 });
+    let creditsToAdd = 0;
+    for (const li of lineItems.data) {
+      const pid = li.price?.id;
+      const qty = li.quantity || 1;
+      if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) {
+        creditsToAdd += qty * CREDITS_PER_SINGLE;
+      } else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) {
+        creditsToAdd += qty * CREDITS_PER_10PACK;
+      } else {
+        creditsToAdd += qty * CREDITS_PER_SINGLE;
+      }
+    }
+
+    const userId = session.metadata?.user_id || session.client_reference_id || null;
+    if (userId && creditsToAdd > 0) {
+      const { data: existing } = await supabaseService
+        .from('credits').select('balance').eq('user_id', userId).maybeSingle();
+      if (existing) {
+        await supabaseService
+          .from('credits').update({ balance: (existing.balance || 0) + creditsToAdd }).eq('user_id', userId);
+      } else {
+        await supabaseService
+          .from('credits').insert({ user_id: userId, balance: creditsToAdd });
+      }
+    }
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('finalize error:', e?.message || e);
+    return res.status(500).json({ error: 'finalize failed' });
   }
 });
 
@@ -442,7 +476,7 @@ app.post('/api/report', async (req, res) => {
       const m = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
       if (m) targetVin = m[0];
     }
-    if (!targetVin) return res.status(400).send('VIN or Plate+State required');
+    if (!targetVin) return res.status(400).send('VIN or State+Plate required');
 
     // One-time receipt verification (guest or logged-in single-use)
     if (oneTimeSession) {
@@ -465,7 +499,7 @@ app.post('/api/report', async (req, res) => {
     }
 
     // Cache check
-    let raw = readCache(targetVin, type);
+    let raw = readCache(targetVin, type.toLowerCase());
 
     // Not cached: if live allowed, bill correctly then fetch
     if (!raw && allowLive) {
@@ -487,7 +521,7 @@ app.post('/api/report', async (req, res) => {
 
       const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
       raw = live;
-      writeCache(targetVin, type, raw);
+      writeCache(targetVin, type.toLowerCase(), raw);
     }
 
     if (!raw) return res.status(404).send('No cached or archive report found.');
@@ -560,12 +594,12 @@ app.post('/api/share', async (req, res) => {
     const { vin, type = 'carfax' } = req.body || {};
     if (!vin) return res.status(400).json({ error: 'vin required' });
 
-    const raw = readCache(vin.toUpperCase(), type);
+    const raw = readCache(vin.toUpperCase(), type.toLowerCase());
     if (!raw) return res.status(404).json({ error: 'Report not cached yet. Open it once first.' });
 
     const token = makeToken();
     const exp = Date.now() + 24 * 60 * 60 * 1000;
-    SHARE_TOKENS[token] = { vin: vin.toUpperCase(), type, exp };
+    SHARE_TOKENS[token] = { vin: vin.toUpperCase(), type: type.toLowerCase(), exp };
     saveShareTokens();
 
     const url = `${SITE_URL}/view/${token}`;

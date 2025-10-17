@@ -1,5 +1,5 @@
 // app.js
-console.info('app.js version: 2025-10-17-4');
+console.info('app.js version: 2025-10-17-5');
 
 /* ================================
    Config & Utilities
@@ -130,7 +130,7 @@ const stripeSessionId = p.get('session_id') || null;
 const ppSuccess = p.get('pp') === 'success';
 const intentParam = p.get('intent') || null;
 const vinParam = (p.get('vin') || '').toUpperCase();
-const oneParam = p.get('one') || null;          // NEW: one-time receipt in URL for PayPal
+const oneParam = p.get('one') || null;          // PayPal one-time receipt in URL
 const stateParam = p.get('state') || '';
 const plateParam = p.get('plate') || '';
 const typeParam = p.get('type') || '';
@@ -200,7 +200,7 @@ async function handleSuccessIfNeeded() {
   const isSuccessContext = onSuccessPage() || stripeSessionId || ppSuccess;
   if (!isSuccessContext) return;
 
-  // Stripe guest "buy_report" returns with session_id & vin in URL (unchanged)
+  // Stripe guest direct open
   if (intentParam === 'buy_report' && stripeSessionId && vinParam) {
     showToast('Payment confirmed. Preparing your report…', 'ok');
     try {
@@ -221,7 +221,7 @@ async function handleSuccessIfNeeded() {
     }
   }
 
-  // NEW: PayPal guest (or logged-in) — success with one-time receipt & VIN/plate in URL
+  // PayPal guest/logged-in: open using receipt + vin/plate from URL
   if (ppSuccess && oneParam && (vinParam || (stateParam && plateParam))) {
     showToast('Payment confirmed. Preparing your report…', 'ok');
     try {
@@ -246,7 +246,7 @@ async function handleSuccessIfNeeded() {
     }
   }
 
-  // Fallback: if we’re on success and have a pending stored, resume it
+  // Fallback to localStorage pending
   if (ppSuccess || stripeSessionId || onSuccessPage()) {
     const pending = tryLoadPending();
     if (pending) {
@@ -617,7 +617,7 @@ async function capturePaypalOrder(orderID, user) {
   return r.json(); // { ok, captureId }
 }
 
-// PayPal smart button (now encodes VIN/plate/receipt into the redirect URL)
+// PayPal smart button (encodes VIN/plate/receipt into the redirect URL)
 let paypalRendered = false;
 async function renderPaypalButton() {
   if (paypalRendered) return;
@@ -655,7 +655,7 @@ async function renderPaypalButton() {
         // Save pending (works when origin matches)
         localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
 
-        // 🔑 Always pass the critical info in the URL too (works across www/non-www)
+        // Always pass the critical info in the URL too
         const url = new URL('/success.html', 'https://www.autovinreveal.com');
         url.searchParams.set('pp', 'success');
         if (one) url.searchParams.set('one', one);
@@ -721,7 +721,6 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
 }
 
 let lastFormData = null;
-
 
 buy1Btn?.addEventListener('click', async () => {
   const { user } = await getSession();
@@ -843,7 +842,7 @@ f?.addEventListener('submit', async (e) => {
     if (token) headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // Logged-in but zero credits → open buy modal (don’t try to fetch yet)
+  // Logged-in but zero credits → open buy modal
   if (currentUser?.id) {
     try {
       const r = await fetch(API.credits(currentUser.id));
@@ -921,8 +920,6 @@ f?.addEventListener('submit', async (e) => {
 
   // After return from PayPal/Stripe
   if (stripeSessionId || ppSuccess) {
-    // If PayPal provided one-time receipt & identifiers in URL, handler above will fetch.
-    // Otherwise, try localStorage fallback:
     if (!intentParam || intentParam !== 'buy_report') {
       const pending = tryLoadPending();
       if (pending) {

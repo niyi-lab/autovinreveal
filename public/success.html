@@ -1,24 +1,73 @@
 <!doctype html>
 <html>
+
 <head>
   <meta charset="utf-8">
   <title>Processing…</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root{color-scheme:light dark}
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0}
-    .card{max-width:560px;width:92%;border:1px solid #e5e7eb;border-radius:14px;padding:20px;box-shadow:0 6px 24px rgba(0,0,0,.06)}
-    .muted{color:#64748b}
-    .spin{width:22px;height:22px;border:3px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;animation:sp 1s linear infinite}
-    @keyframes sp{to{transform:rotate(1turn)}}
-    .row{display:flex;align-items:center;gap:10px}
-    a{color:#2563eb}
-    .err{color:#b91c1c}
+    :root {
+      color-scheme: light dark
+    }
+
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Helvetica, Arial, sans-serif;
+      display: grid;
+      place-items: center;
+      height: 100vh;
+      margin: 0
+    }
+
+    .card {
+      max-width: 560px;
+      width: 92%;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, .06)
+    }
+
+    .muted {
+      color: #64748b
+    }
+
+    .spin {
+      width: 22px;
+      height: 22px;
+      border: 3px solid #e2e8f0;
+      border-top-color: #2563eb;
+      border-radius: 50%;
+      animation: sp 1s linear infinite
+    }
+
+    @keyframes sp {
+      to {
+        transform: rotate(1turn)
+      }
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px
+    }
+
+    a {
+      color: #2563eb
+    }
+
+    .err {
+      color: #b91c1c
+    }
   </style>
 </head>
+
 <body>
   <div class="card">
-    <div class="row"><div class="spin"></div><h3>Finishing up…</h3></div>
+    <div class="row">
+      <div class="spin"></div>
+      <h3>Finishing up…</h3>
+    </div>
     <p class="muted" id="msg">Confirming your payment.</p>
     <div id="actions" style="margin-top:10px;display:none">
       <a href="/">Go back home</a>
@@ -26,17 +75,13 @@
   </div>
 
   <script>
-    async function finalizeCredits(sessionId) {
-      try {
-        const r = await fetch('/api/checkout/finalize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: sessionId })
-        });
-        // Don’t throw on non-200 here; we still try to proceed
-        return r.ok;
-      } catch { return false; }
+    const PENDING_KEY = 'pendingReport';
+
+    function tryLoadPending() {
+      try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); }
+      catch { return null; }
     }
+    function clearPending() { localStorage.removeItem(PENDING_KEY); }
 
     function goHomeWith(flag) {
       const u = new URL('/', location.origin);
@@ -44,48 +89,63 @@
       location.replace(u.toString());
     }
 
+    async function finalizeCredits(sessionId) {
+      // Optional/defensive: only for Stripe sessions
+      if (!sessionId) return false;
+      try {
+        const r = await fetch('/api/checkout/finalize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId })
+        });
+        return r.ok;
+      } catch { return false; }
+    }
+
+    async function openReportViaOneTime({ vin, type = 'carfax', oneTimeSession }) {
+      const r = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vin, type, as: 'html', oneTimeSession })
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const html = await r.text();
+      document.open(); document.write(html); document.close();
+    }
+
     (async () => {
       const p = new URLSearchParams(location.search);
-      const sessionId = p.get('session_id') || '';
+      const sessionId = p.get('session_id') || '';          // Stripe
       const intent = p.get('intent') || '';
-      const vin = (p.get('vin') || '').toUpperCase();
+      const vinParam = (p.get('vin') || '').toUpperCase();
+      const pp = p.get('pp') === 'success';           // PayPal success marker
+      const oneParam = p.get('one') || '';                  // May contain 'pp_<captureId>' we set on redirect
+      const typeParam = p.get('type') || 'carfax';
 
       const msg = document.getElementById('msg');
       const actions = document.getElementById('actions');
 
-      if (!sessionId) {
-        // Nothing to do here
-        goHomeWith('success');
-        return;
-      }
-
-      // Always kick off finalize in the background (credits safety net)
-      const finalizePromise = finalizeCredits(sessionId);
-
-      if (intent === 'buy_report' && vin) {
-        // Primary path: use one-time receipt to open the report
+      // 1) STRIPE: buy_report flow with session_id + vin
+      if (sessionId && intent === 'buy_report' && vinParam) {
+        // Fire-and-forget finalize safety net (credits) in parallel
+        const finalizePromise = finalizeCredits(sessionId);
         try {
-          const r = await fetch('/api/report', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vin, type: 'carfax', as: 'html', oneTimeSession: sessionId })
-          });
-          if (!r.ok) throw new Error(await r.text());
-          const html = await r.text();
-          document.open(); document.write(html); document.close();
+          await openReportViaOneTime({ vin: vinParam, type: 'carfax', oneTimeSession: sessionId });
+          clearPending();
           return;
-        } catch (e) {
-          // Fallback: wait for finalize (credits/caching), then try to open cached report
+        } catch {
+          // fallback: wait finalize, then try cached (no live)
           await finalizePromise;
           try {
             const r2 = await fetch('/api/report', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ vin, type: 'carfax', as: 'html', allowLive: false })
+              body: JSON.stringify({ vin: vinParam, type: 'carfax', as: 'html', allowLive: false })
             });
             if (!r2.ok) throw new Error(await r2.text());
             const html2 = await r2.text();
             document.open(); document.write(html2); document.close();
+            clearPending();
             return;
           } catch (e2) {
             msg.innerHTML = `<span class="err">We received your payment, but couldn't open the report automatically.</span> You can try again from the homepage.`;
@@ -95,10 +155,87 @@
         }
       }
 
-      // Credit-only purchase: ensure credits are applied, then go home
-      await finalizePromise;
+      // 2) PAYPAL: we land here with ?pp=success and (ideally) &one=pp_<captureId>&vin=...&type=...
+      // If params are missing, we try localStorage fallback.
+      if (pp) {
+        const pending = tryLoadPending();
+        const vin = vinParam || pending?.vin || '';
+        const type = typeParam || pending?.type || 'carfax';
+        const one = oneParam || pending?.oneTimeSession || '';
+
+        if (!vin) {
+          goHomeWith('success'); // no VIN to open; just go home
+          return;
+        }
+
+        try {
+          await openReportViaOneTime({ vin, type, oneTimeSession: one || null });
+          clearPending();
+          return;
+        } catch (e) {
+          // If one-time receipt wasn’t present, try cached
+          try {
+            const r2 = await fetch('/api/report', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ vin, type, as: 'html', allowLive: false })
+            });
+            if (!r2.ok) throw new Error(await r2.text());
+            const html2 = await r2.text();
+            document.open(); document.write(html2); document.close();
+            clearPending();
+            return;
+          } catch {
+            msg.innerHTML = `<span class="err">Payment completed, but we couldn’t open the report automatically.</span> Please try again from the homepage.`;
+            actions.style.display = 'block';
+            return;
+          }
+        }
+      }
+
+      // 3) Legacy fallback: /?checkout=success or /success.html without usable params → try localStorage
+      if (p.get('checkout') === 'success' || !sessionId) {
+        const pending = tryLoadPending();
+        if (pending?.vin) {
+          try {
+            await openReportViaOneTime({
+              vin: (pending.vin || '').toUpperCase(),
+              type: pending.type || 'carfax',
+              oneTimeSession: pending.oneTimeSession || null
+            });
+            clearPending();
+            return;
+          } catch {
+            // last-ditch: cached
+            try {
+              const r2 = await fetch('/api/report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  vin: (pending.vin || '').toUpperCase(),
+                  type: pending.type || 'carfax',
+                  as: 'html',
+                  allowLive: false
+                })
+              });
+              if (!r2.ok) throw new Error(await r2.text());
+              const html2 = await r2.text();
+              document.open(); document.write(html2); document.close();
+              clearPending();
+              return;
+            } catch { }
+          }
+        }
+        // Nothing pending → just go home
+        goHomeWith('success');
+        return;
+      }
+
+      // Default: go home
       goHomeWith('success');
     })();
   </script>
+
 </body>
+
 </html>
