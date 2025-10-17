@@ -152,7 +152,7 @@ async function resumePendingPurchase() {
     if (w) { w.document.write(html); w.document.close(); }
     else { document.open(); document.write(html); document.close(); }
 
-    // 🔔 Meta Pixel: Purchase event after successful PayPal resume
+    // Meta Pixel: Purchase after successful PayPal resume
     try {
       fbq('track', 'Purchase', {
         value: 7.00,
@@ -208,7 +208,7 @@ async function handleSuccessIfNeeded() {
       const html = await r.text();
       document.open(); document.write(html); document.close();
 
-      // 🔔 Meta Pixel: Purchase event after successful Stripe guest buy_report
+      // Meta Pixel: Purchase after successful Stripe guest buy_report
       try {
         fbq('track', 'Purchase', {
           value: 7.00,
@@ -400,7 +400,9 @@ function reflectAuthUI(session) {
   const fromAuthLink = /[?&]code=/.test(location.search) || /access_token=/.test(location.hash);
   if (fromAuthLink) {
     const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
-    const url = new URL(location.href); url.searchParams.delete('code'); url.searchParams.delete('state']);
+    const url = new URL(location.href);
+    url.searchParams.delete('code');
+    url.searchParams.delete('state'); // ← fixed: removed stray ]
     history.replaceState({}, '', url.pathname + url.search);
     if (error) showToast(error.message || 'Auth callback failed', 'error');
     else showToast('You’re signed in!', 'ok');
@@ -601,7 +603,6 @@ async function renderPaypalButton() {
   const container = document.getElementById('paypalContainer');
   if (!container) return;
   if (!window.paypal) {
-    // SDK missing; don’t spam the console.
     showToast('PayPal is unavailable right now.', 'error');
     return;
   }
@@ -644,7 +645,6 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
 
     const body = { user_id: user?.id || null, price_id };
     if (pendingReport?.vin) {
-      // store pending only for report purchases
       localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport));
       body.vin = pendingReport.vin;
       body.report_type = pendingReport.type || 'carfax';
@@ -657,14 +657,12 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
     });
 
     if (r.status === 409) {
-      // VIN already cached: open from archive without charging again
       const pr = pendingReport || tryLoadPending();
       if (!pr?.vin) { showToast('Report already available.', 'ok'); return; }
       const headers = { 'Content-Type': 'application/json' };
       const { token } = await getSession();
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      // Pre-open viewer in this user-gesture path
       const viewer = openBlank();
 
       const data = { vin: pr.vin, state: pr.state || '', plate: pr.plate || '', type: pr.type || 'carfax', as: 'html', allowLive: false };
@@ -685,9 +683,7 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
 
 let lastFormData = null;
 
-// Buttons
-const buy1Btn = $id('buy1Btn');
-const buy10Btn = $id('buy10Btn');
+// Buttons (use existing consts; don't redeclare)
 buy1Btn?.addEventListener('click', async () => {
   const { user } = await getSession(); 
   closeBuyModal();
@@ -748,7 +744,6 @@ useCreditBtn?.addEventListener('click', async () => {
     const { token } = await getSession();
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    // Pre-open viewer on button click (user gesture)
     const viewer = openBlank();
 
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
@@ -778,7 +773,6 @@ f?.addEventListener('input', updateUseCreditBtn);
 f?.addEventListener('submit', async (e) => {
   e.preventDefault();
 
-  // Pre-open viewer at the moment of user gesture
   const viewer = openBlank();
 
   go.disabled = true; loading.classList.remove('hidden');
@@ -816,7 +810,6 @@ f?.addEventListener('submit', async (e) => {
     if (token) headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // Logged-in with zero credits? Prompt to buy.
   if (currentUser && currentUser.id) {
     try {
       const r = await fetch(API.credits(currentUser.id));
@@ -877,7 +870,6 @@ f?.addEventListener('submit', async (e) => {
   await refreshBalancePill();
   renderHistory();
 
-  // If we came back with pending one-time (e.g., PayPal guest), finish it
   if (stripeSessionId || ppSuccess) {
     if (!intentParam || intentParam !== 'buy_report') {
       const pending = tryLoadPending();
