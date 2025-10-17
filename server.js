@@ -1,6 +1,6 @@
 /********************************************************************/
 /* AutoVINReveal Server – Stripe + PayPal + Supabase + Caching      */
-/* Last updated: 2025-10-11                                         */
+/* Last updated: 2025-10-11 (popup-safe, webhook-safe)              */
 /********************************************************************/
 
 import dotenv from 'dotenv';
@@ -61,9 +61,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// (Nice to have: still safe for all other routes)
+// Keep simple CSP helper (does not block PayPal)
 app.use((req, res, next) => {
-  res.setHeader('Content-Security-Policy', 'upgrade-insecure-requests');
+  if (!WEBHOOK_PATHS.has(req.path)) {
+    res.setHeader('Content-Security-Policy', 'upgrade-insecure-requests');
+  }
   next();
 });
 
@@ -179,7 +181,6 @@ app.get(['/api/stripe-webhook', '/api/stripe-webhook/'], (_req, res) => res.stat
 app.post(['/api/stripe-webhook', '/api/stripe-webhook/'],
   express.raw({ type: 'application/json' }),
   async (req, res) => {
-    // Helpful for debugging endpoint reachability/host header
     console.log('Stripe webhook hit:', req.method, req.originalUrl, 'host=', req.headers.host);
 
     const sig = req.headers['stripe-signature'];
@@ -258,10 +259,25 @@ app.post(['/api/stripe-webhook', '/api/stripe-webhook/'],
 
 /* ================================================================
    ⚙️ Normal middleware (after webhook)
+   (PayPal-safe Helmet config)
 ================================================================ */
 app.use(express.json());
-app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
-app.use(helmet({ contentSecurityPolicy: false }));
+
+// Allowlist CORS origins (supports comma-separated)
+const ORIGINS = (process.env.ALLOWED_ORIGIN || '*')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+app.use(cors({ origin: ORIGINS, credentials: true }));
+
+// 👇 Key change: allow popups (PayPal), disable COEP to avoid cross-origin issues
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+  crossOriginEmbedderPolicy: false,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
+}));
+
 app.use(morgan('dev'));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 

@@ -1,30 +1,27 @@
 <!doctype html>
 <html lang="en" class="h-full">
-
 <head>
   <!-- Google tag (gtag.js) — single include -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-FF0NXRN0Y6"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
-    function gtag() { dataLayer.push(arguments); }
+    function gtag(){ dataLayer.push(arguments); }
     gtag('js', new Date()); gtag('config', 'G-FF0NXRN0Y6');
   </script>
 
   <meta charset="utf-8" />
   <title>AutoVINReveal</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="canonical" href="https://autovinreveal.com/">
   <link rel="stylesheet" href="/style.css">
 
   <!-- ✅ SEO Meta -->
-  <meta name="description"
-    content="Get instant CARFAX & AutoCheck vehicle history reports by VIN or license plate. Fast, secure, and easy — powered by AutoVINReveal.">
-  <meta name="keywords"
-    content="autovinreveal, carfax, autocheck, vin lookup, license plate search, vehicle report, auto history, used car check">
+  <meta name="description" content="Get instant CARFAX & AutoCheck vehicle history reports by VIN or license plate. Fast, secure, and easy — powered by AutoVINReveal.">
+  <meta name="keywords" content="autovinreveal, carfax, autocheck, vin lookup, license plate search, vehicle report, auto history, used car check">
 
   <!-- ✅ Open Graph / Social Preview -->
   <meta property="og:title" content="AutoVINReveal — Instant CARFAX & AutoCheck Reports">
-  <meta property="og:description"
-    content="Get CARFAX or AutoCheck instantly by VIN or Plate. Fast, secure, and accurate vehicle history reports.">
+  <meta property="og:description" content="Get CARFAX or AutoCheck instantly by VIN or Plate. Fast, secure, and accurate vehicle history reports.">
   <meta property="og:image" content="https://autovinreveal.com/og-image.png">
   <meta property="og:image:alt" content="AutoVINReveal Vehicle History Report Preview">
   <meta property="og:url" content="https://autovinreveal.com">
@@ -33,8 +30,7 @@
   <!-- ✅ Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="AutoVINReveal — Instant CARFAX & AutoCheck Reports">
-  <meta name="twitter:description"
-    content="Check vehicle history reports by VIN or plate instantly with AutoVINReveal.">
+  <meta name="twitter:description" content="Check vehicle history reports by VIN or plate instantly with AutoVINReveal.">
   <meta name="twitter:image" content="https://autovinreveal.com/og-image.png">
 
   <!-- ✅ Favicon + App Icons -->
@@ -42,12 +38,12 @@
   <link rel="apple-touch-icon" href="/favicon.png">
   <meta name="theme-color" content="#1d4ed8">
 
-  <!-- ✅ Preload hero/og image
-  <link rel="preload" as="image" href="/og-image.png" imagesrcset="/og-image.png 1200w" imagesizes="100vw">  -->
-
   <!-- Tailwind -->
   <link rel="stylesheet" href="/tw.css">
 
+  <!-- Preconnects (perf) -->
+  <link rel="preconnect" href="https://www.paypal.com" crossorigin>
+  <link rel="preconnect" href="https://www.paypalobjects.com" crossorigin>
 
   <!-- Apply dark mode BEFORE paint -->
   <script>
@@ -59,60 +55,32 @@
   </script>
 
   <!-- ✅ PayPal JS SDK (Sandbox). Swap client-id to LIVE in production -->
-  <script
-    src="https://www.paypal.com/sdk/js?client-id=Aclv8-_pnwQ7RC6rFmyLTxPfEqSNC2yS67N3dFeTwGH2i8-K2LVwwPEMmcfuw-DOxcuDWsPpoaSs7HOU&components=buttons&currency=USD"></script>
+  <script src="https://www.paypal.com/sdk/js?client-id=Aclv8-_pnwQ7RC6rFmyLTxPfEqSNC2yS67N3dFeTwGH2i8-K2LVwwPEMmcfuw-DOxcuDWsPpoaSs7HOU&components=buttons&currency=USD"></script>
 
-  <!-- Meta Pixel Code -->
-  <!-- Meta Pixel Code -->
+  <!-- Meta Pixel Base -->
   <script>
-    !function (f, b, e, v, n, t, s) {
-      if (f.fbq) return; n = f.fbq = function () {
-        n.callMethod ?
-        n.callMethod.apply(n, arguments) : n.queue.push(arguments)
-      };
-      if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = '2.0';
-      n.queue = []; t = b.createElement(e); t.async = !0;
-      t.src = v; s = b.getElementsByTagName(e)[0];
-      s.parentNode.insertBefore(t, s)
-    }(window, document, 'script',
-      'https://connect.facebook.net/en_US/fbevents.js');
+    !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){
+      n.callMethod? n.callMethod.apply(n,arguments):n.queue.push(arguments)
+    };if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+    n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;
+    s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)
+  }(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
     fbq('init', '1059594989434590');
     fbq('track', 'PageView');
   </script>
-  <noscript><img height="1" width="1" style="display:none"
-      src="https://www.facebook.com/tr?id=1059594989434590&ev=PageView&noscript=1" /></noscript>
-  <!-- End Meta Pixel Code -->
-
-
-
+  <noscript>
+    <img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1059594989434590&ev=PageView&noscript=1"/>
+  </noscript>
 </head>
 
 <body class="h-full">
-
- <script>
-  fbq('track', 'Purchase', {
-    value: 7.00,
-    currency: 'USD',
-    contents: [
-      {
-        id: 'VinReport',
-        quantity: 1
-      }
-    ],
-    content_ids: ['VinReport'],
-    content_type: 'product'
-  });
-</script>
-
-
-
   <div class="max-w-5xl mx-auto px-4 py-6">
     <!-- Header -->
     <header class="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-start gap-3">
       <div>
         <!-- title + subtitle -->
         <a href="/"
-          class="text-4xl sm:text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-[rgb(153,120,77)] via-amber-400 to-yellow-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight">
+           class="text-4xl sm:text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-[rgb(153,120,77)] via-amber-400 to-yellow-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight">
           AutoVINReveal
         </a>
         <p class="mt-1 sm:mt-2 text-sm sm:text-base lg:text-lg" style="color:var(--muted)">
@@ -123,13 +91,12 @@
       <!-- RIGHT SIDE -->
       <div class="justify-self-end flex items-center gap-2">
         <div id="balancePill" class="hidden text-xs px-2 py-1 rounded-full border"
-          style="color:var(--brand);border-color:color-mix(in srgb,var(--brand) 60%, transparent);">
+             style="color:var(--brand);border-color:color-mix(in srgb,var(--brand) 60%, transparent);">
           <span id="balanceText">0 credits</span>
         </div>
 
         <div id="userChip" class="hidden items-center gap-2">
-          <div
-            class="w-8 h-8 rounded-full border border-blue-500/40 bg-blue-500/10 grid place-items-center text-blue-600">
+          <div class="w-8 h-8 rounded-full border border-blue-500/40 bg-blue-500/10 grid place-items-center text-blue-600">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <circle cx="12" cy="8" r="4"></circle>
               <path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke-linecap="round"></path>
@@ -146,7 +113,6 @@
         </button>
       </div>
     </header>
-
 
     <!-- Form card -->
     <div class="relative mt-6 card">
@@ -250,8 +216,7 @@
       <div id="loading" class="loading hidden">
         <div class="flex items-center gap-3" style="color:var(--brand)">
           <svg class="w-6 h-6 animate-spin" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" fill="none" stroke-width="4">
-            </circle>
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" fill="none" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
           </svg>
           <span class="font-medium">Fetching report…</span>
@@ -265,15 +230,13 @@
         <h2 class="text-lg font-bold mb-2">Get Credits</h2>
         <p class="mb-4 text-sm" style="color:var(--muted)">Buy a single credit or save with a 10-pack.</p>
         <div class="grid gap-2">
-          <button id="buy1Btn" class="btn btn-primary w-full">Buy 1 Credit — $7 USD </button>
+          <button id="buy1Btn" class="btn btn-primary w-full">Buy 1 Credit — $7 USD</button>
           <div id="paypalContainer" class="mt-2"></div>
           <button id="buy10Btn" class="btn btn-outline w-full">Buy 10 Credits — $50 USD ($5 each)</button>
         </div>
         <button id="closeModalBtn" class="btn-outline w-full mt-4">Cancel</button>
       </div>
     </div>
-
-    
 
     <!-- Login Modal -->
     <div id="loginModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
@@ -342,8 +305,8 @@
   <!-- Toasts -->
   <div id="toastBox" class="fixed top-4 right-4 space-y-2 z-50"></div>
 
+  <!-- PUBLIC keys ok in client -->
   <script>
-    // PUBLIC keys ok in client
     window.VITE_SUPABASE_URL = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
     window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
   </script>
@@ -365,7 +328,11 @@
     </div>
   </div>
 
+  <!-- Your app -->
   <script type="module" src="/app.js"></script>
-</body>
 
+  <!-- Note:
+       Fire Meta Pixel 'Purchase' ONLY after confirmed success
+       (inside your app.js success handlers), not globally here. -->
+</body>
 </html>

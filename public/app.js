@@ -31,6 +31,12 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+/* Open a blank tab immediately on user gesture to avoid popup blockers */
+function openBlank() {
+  try { return window.open('', '_blank', 'noopener,noreferrer'); }
+  catch { return null; }
+}
+
 function setUseCreditVisible(show) {
   const el = $id('useCreditBtn');
   if (!el) return;
@@ -140,7 +146,23 @@ async function resumePendingPurchase() {
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) });
     if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
-    const w = window.open('', '_blank'); w.document.write(html); w.document.close();
+
+    // Not a user gesture, popup may be blocked — fallback to same-tab render
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); }
+    else { document.open(); document.write(html); document.close(); }
+
+    // 🔔 Meta Pixel: Purchase event after successful PayPal resume
+    try {
+      fbq('track', 'Purchase', {
+        value: 7.00,
+        currency: 'USD',
+        contents: [{ id: 'VinReport', quantity: 1 }],
+        content_ids: ['VinReport'],
+        content_type: 'product'
+      });
+    } catch {}
+
     showToast('Report ready!', 'ok');
 
     addToHistory({
@@ -185,6 +207,18 @@ async function handleSuccessIfNeeded() {
       if (!r.ok) throw new Error(await r.text());
       const html = await r.text();
       document.open(); document.write(html); document.close();
+
+      // 🔔 Meta Pixel: Purchase event after successful Stripe guest buy_report
+      try {
+        fbq('track', 'Purchase', {
+          value: 7.00,
+          currency: 'USD',
+          contents: [{ id: 'VinReport', quantity: 1 }],
+          content_ids: ['VinReport'],
+          content_type: 'product'
+        });
+      } catch {}
+
       return;
     } catch (e) {
       showToast(e.message || 'Failed to fetch report', 'error');
@@ -366,7 +400,7 @@ function reflectAuthUI(session) {
   const fromAuthLink = /[?&]code=/.test(location.search) || /access_token=/.test(location.hash);
   if (fromAuthLink) {
     const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
-    const url = new URL(location.href); url.searchParams.delete('code'); url.searchParams.delete('state');
+    const url = new URL(location.href); url.searchParams.delete('code'); url.searchParams.delete('state']);
     history.replaceState({}, '', url.pathname + url.search);
     if (error) showToast(error.message || 'Auth callback failed', 'error');
     else showToast('You’re signed in!', 'ok');
@@ -445,10 +479,15 @@ async function openHistoryHTML(item) {
   if (token) headers['Authorization'] = `Bearer ${token}`;
   try {
     await ensureBackendReady();
+
+    // Pre-open viewer in user gesture to beat popup blockers
+    const viewer = openBlank();
+
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
-    if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
+    if (!r.ok) { const t = await r.text(); if (viewer) viewer.close(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
-    const w = window.open('', '_blank'); w.document.write(html); w.document.close();
+    if (viewer) { viewer.document.write(html); viewer.document.close(); }
+    else { const w = window.open('', '_blank'); if (w) { w.document.write(html); w.document.close(); } }
   } catch (e) { showToast(e.message || 'Request failed', 'error'); }
 }
 async function downloadHistoryPDF(item) {
@@ -555,10 +594,17 @@ async function capturePaypalOrder(orderID, user) {
   return r.json(); // { ok, captureId }
 }
 
-// Render PayPal smart button once
+// Render PayPal smart button once (guard container + SDK)
 let paypalRendered = false;
 async function renderPaypalButton() {
-  if (paypalRendered || !window.paypal) return;
+  if (paypalRendered) return;
+  const container = document.getElementById('paypalContainer');
+  if (!container) return;
+  if (!window.paypal) {
+    // SDK missing; don’t spam the console.
+    showToast('PayPal is unavailable right now.', 'error');
+    return;
+  }
   paypalRendered = true;
 
   const { user } = await getSession();
@@ -617,11 +663,16 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
       const headers = { 'Content-Type': 'application/json' };
       const { token } = await getSession();
       if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      // Pre-open viewer in this user-gesture path
+      const viewer = openBlank();
+
       const data = { vin: pr.vin, state: pr.state || '', plate: pr.plate || '', type: pr.type || 'carfax', as: 'html', allowLive: false };
       const rr = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
-      if (!rr.ok) { const t = await rr.text(); throw new Error(t || 'Failed to open archived report'); }
+      if (!rr.ok) { const t = await rr.text(); if (viewer) viewer.close(); throw new Error(t || 'Failed to open archived report'); }
       const html = await rr.text();
-      const w = window.open('', '_blank'); w.document.write(html); w.document.close();
+      if (viewer) { viewer.document.write(html); viewer.document.close(); }
+      else { const w = window.open('', '_blank'); if (w) { w.document.write(html); w.document.close(); } }
       showToast('Opened your previously purchased report from archive.', 'ok');
       return;
     }
@@ -635,6 +686,8 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
 let lastFormData = null;
 
 // Buttons
+const buy1Btn = $id('buy1Btn');
+const buy10Btn = $id('buy10Btn');
 buy1Btn?.addEventListener('click', async () => {
   const { user } = await getSession(); 
   closeBuyModal();
@@ -694,10 +747,16 @@ useCreditBtn?.addEventListener('click', async () => {
     const headers = { 'Content-Type': 'application/json' };
     const { token } = await getSession();
     if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    // Pre-open viewer on button click (user gesture)
+    const viewer = openBlank();
+
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
-    if (!r.ok) throw new Error(await r.text());
+    if (!r.ok) { const t = await r.text(); if (viewer) viewer.close(); throw new Error(t); }
     const html = await r.text();
-    const w = window.open('', '_blank'); w.document.write(html); w.document.close();
+    if (viewer) { viewer.document.write(html); viewer.document.close(); }
+    else { const w = window.open('', '_blank'); if (w) { w.document.write(html); w.document.close(); } }
+
     showToast('Report fetched using 1 credit.', 'ok');
     await refreshBalancePill();
   } catch (e) {
@@ -718,6 +777,10 @@ f?.addEventListener('input', updateUseCreditBtn);
 
 f?.addEventListener('submit', async (e) => {
   e.preventDefault();
+
+  // Pre-open viewer at the moment of user gesture
+  const viewer = openBlank();
+
   go.disabled = true; loading.classList.remove('hidden');
 
   const formData = Object.fromEntries(new FormData(f).entries());
@@ -731,10 +794,12 @@ f?.addEventListener('submit', async (e) => {
   };
 
   if (!data.vin && !(data.state && data.plate)) {
+    if (viewer) viewer.close();
     showToast('Enter a VIN or a State + Plate', 'error');
     go.disabled = false; loading.classList.add('hidden'); return;
   }
   if (data.vin && !looksVin(data.vin)) {
+    if (viewer) viewer.close();
     showToast('VIN must be 17 characters (no I/O/Q)', 'error');
     go.disabled = false; loading.classList.add('hidden'); return;
   }
@@ -758,6 +823,7 @@ f?.addEventListener('submit', async (e) => {
       const { balance = 0 } = await r.json();
       if (balance <= 0) {
         lastFormData = data; openBuyModal();
+        if (viewer) viewer.close();
         go.disabled = false; loading.classList.add('hidden'); return;
       }
     } catch {}
@@ -767,12 +833,13 @@ f?.addEventListener('submit', async (e) => {
     if (!currentUser && stripeSessionId) data.oneTimeSession = stripeSessionId;
 
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
-    if (r.status === 401 || r.status === 402) { lastFormData = data; openBuyModal(); return; }
-    if (r.status === 409) { showToast('That receipt was already used. Please purchase again.', 'error'); return; }
-    if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
+    if (r.status === 401 || r.status === 402) { lastFormData = data; openBuyModal(); if (viewer) viewer.close(); return; }
+    if (r.status === 409) { showToast('That receipt was already used. Please purchase again.', 'error'); if (viewer) viewer.close(); return; }
+    if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); if (viewer) viewer.close(); return; }
 
     const html = await r.text();
-    const w = window.open('', '_blank'); w.document.write(html); w.document.close();
+    if (viewer) { viewer.document.write(html); viewer.document.close(); }
+    else { const w = window.open('', '_blank'); if (w) { w.document.write(html); w.document.close(); } }
 
     showToast('Report fetched successfully!', 'ok');
     addToHistory({
