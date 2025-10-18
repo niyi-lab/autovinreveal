@@ -22,7 +22,9 @@
     "form-data": "4.0.4",
     "helmet": "7.1.0",
     "morgan": "1.10.0",
-    "stripe": "19.1.0"
+    "stripe": "19.1.0",
+    "cookie-parser": "^1.4.6"
+    
   },
   "devDependencies": {
     "autoprefixer": "^10.4.21",
