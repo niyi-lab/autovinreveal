@@ -1,6 +1,9 @@
 // app.js
 console.info('app.js version: 2025-10-17-5');
 
+app.get(['/admin', '/admin/'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
 /* ================================
    Config & Utilities
 ================================ */
