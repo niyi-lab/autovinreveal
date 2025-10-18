@@ -46,6 +46,10 @@ const ADMIN_SESSION_TTL_SECONDS = Number(process.env.ADMIN_SESSION_TTL_SECONDS |
 /* ================================================================
    Security / redirects (except webhook)
 ================================================================ */
+app.get(['/admin', '/admin/'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
 app.set('trust proxy', 1);
 const WEBHOOK_PATHS = new Set(['/api/stripe-webhook', '/api/stripe-webhook/']);
 
