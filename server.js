@@ -1,11 +1,10 @@
 /********************************************************************
- * AutoVINReveal Server – Stripe + PayPal + Supabase + Caching
- * Fixed build – includes /success.html flow + finalize safety-net
+ * AutoVINReveal Server – Stripe + PayPal + Supabase + Caching + Admin
  ********************************************************************/
 
 import dotenv from 'dotenv';
-dotenv.config({ path: '/etc/secrets/.env' }); // Render/host secret file (if present)
-dotenv.config();                               // Fallback .env
+dotenv.config({ path: '/etc/secrets/.env' });
+dotenv.config();
 
 import express from 'express';
 import path from 'path';
@@ -21,6 +20,7 @@ import fs from 'fs';
 import Stripe from 'stripe';
 import { gunzipSync } from 'zlib';
 import crypto from 'crypto';
+import cookieParser from 'cookie-parser';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const paypalSdk = require('@paypal/checkout-server-sdk');
@@ -32,34 +32,33 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
+const NODE_ENV = process.env.NODE_ENV || 'production';
+const PROD = NODE_ENV === 'production';
+
 /* ================================================================
-   🔒 Secure-by-default (but do NOT redirect webhook)
+   🔒 Security / redirects (skip Stripe webhook)
 ================================================================ */
 app.set('trust proxy', 1);
 
-// Stripe webhook endpoints (skip redirects/body parsing before raw)
 const WEBHOOK_PATHS = new Set(['/api/stripe-webhook', '/api/stripe-webhook/']);
 
-// Force HTTPS + force www (except for webhook)
 app.use((req, res, next) => {
   if (WEBHOOK_PATHS.has(req.path)) return next();
 
-  // Force HTTPS behind proxy/CDN
-  if (process.env.NODE_ENV === 'production') {
+  if (PROD) {
     const xfProto = req.get('x-forwarded-proto');
     if (!req.secure && xfProto !== 'https') {
       return res.redirect(308, `https://${req.headers.host}${req.url}`);
     }
   }
-  // Optionally force www
   if (process.env.FORCE_WWW === '1' && req.headers.host && !req.headers.host.startsWith('www.')) {
     return res.redirect(308, `https://www.${req.headers.host}${req.url}`);
   }
   next();
 });
 
-// Simple CSP tweak
-app.use((req, res, next) => {
+// Tiny CSP helper (lets http→https upgrade happen)
+app.use((_, res, next) => {
   res.setHeader('Content-Security-Policy', 'upgrade-insecure-requests');
   next();
 });
@@ -70,7 +69,7 @@ app.use((req, res, next) => {
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
 /* ================================================================
-   💳 Stripe Setup
+   💳 Stripe
 ================================================================ */
 const stripeLive = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 const STRIPE_TEST_SECRET_KEY = process.env.STRIPE_TEST_SECRET_KEY || null;
@@ -86,13 +85,12 @@ const CREDITS_PER_10PACK = Number(process.env.CREDITS_PER_10PACK || '10');
 const SITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || SITE_URL;
 
-// Choose a Stripe instance based on object id (test/live)
 function stripeForId(id) {
   const isTest = typeof id === 'string' && id.startsWith('cs_test_');
   if (isTest) {
     if (!STRIPE_TEST_SECRET_KEY) throw new Error('Test session but STRIPE_TEST_SECRET_KEY not set.');
     return new Stripe(STRIPE_TEST_SECRET_KEY, { apiVersion: '2024-06-20' });
-  }
+    }
   return stripeLive;
 }
 
@@ -126,11 +124,11 @@ const H      = { 'API-KEY': KEY, 'API-SECRET': SECRET };
 
 async function csGet(url) {
   const r = await axios.get(url, { headers: H, responseType: 'text', timeout: 30000 });
-  return r.data; // base64 (gzipped HTML OR raw HTML-base64 OR raw PDF-base64)
+  return r.data; // base64
 }
 
 /* ================================================================
-   🧠 Cache / tokens / helpers
+   🧠 Cache / helpers
 ================================================================ */
 const CACHE_DIR = path.join(__dirname, 'cache');
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
@@ -149,10 +147,12 @@ function saveConsumed() {
 
 function decodeReportBase64(rawB64) {
   const buf = Buffer.from(rawB64, 'base64');
+  // gzipped HTML?
   if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
     try { return { kind: 'html', html: gunzipSync(buf).toString('utf8') }; }
     catch { return { kind: 'unknown', buffer: buf, error: 'gunzip-failed' }; }
   }
+  // PDF?
   if (buf.slice(0, 5).toString() === '%PDF-') return { kind: 'pdf', buffer: buf };
   const asText = buf.toString('utf8');
   if (/<!DOCTYPE html|<html[\s>]/i.test(asText.slice(0, 2048))) return { kind: 'html', html: asText };
@@ -166,34 +166,28 @@ async function fetchAndCacheReport(vin, type = 'carfax') {
 }
 
 /* ================================================================
-   🧾 Stripe Webhook (raw body; no redirects)
+   🧾 Stripe Webhook
 ================================================================ */
 const WH_LIVE = process.env.STRIPE_WEBHOOK_SECRET_LIVE || process.env.STRIPE_WEBHOOK_SECRET;
 const WH_TEST = process.env.STRIPE_WEBHOOK_SECRET_TEST || null;
 
-// GET to quickly probe the URL
 app.get(['/api/stripe-webhook', '/api/stripe-webhook/'], (_req, res) => res.status(200).send('ok'));
 
 app.post(['/api/stripe-webhook', '/api/stripe-webhook/'],
   express.raw({ type: 'application/json' }),
   async (req, res) => {
-    console.log('Stripe webhook hit:', req.method, req.originalUrl, 'host=', req.headers.host);
     const sig = req.headers['stripe-signature'];
     let event;
-
     try {
-      // Try live first
       event = stripeLive.webhooks.constructEvent(req.body, sig, WH_LIVE);
     } catch (e1) {
       if (WH_TEST) {
         try {
           event = stripeLive.webhooks.constructEvent(req.body, sig, WH_TEST);
         } catch (e2) {
-          console.error('Webhook verify failed (both):', e1?.message, e2?.message);
           return res.status(400).send('Webhook signature verification failed');
         }
       } else {
-        console.error('Webhook verify failed (live only):', e1?.message);
         return res.status(400).send('Webhook signature verification failed');
       }
     }
@@ -201,23 +195,16 @@ app.post(['/api/stripe-webhook', '/api/stripe-webhook/'],
     try {
       if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
-
-        // Use a Stripe client that matches the session (esp. for test)
         const sStripe = stripeForId(session.id);
 
-        // Calculate credits strictly from line items
         const lineItems = await sStripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
         let creditsToAdd = 0;
         for (const li of lineItems.data) {
           const pid = li.price?.id;
           const qty = li.quantity || 1;
-          if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) {
-            creditsToAdd += qty * CREDITS_PER_SINGLE;
-          } else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) {
-            creditsToAdd += qty * CREDITS_PER_10PACK;
-          } else {
-            creditsToAdd += qty * CREDITS_PER_SINGLE; // default
-          }
+          if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) creditsToAdd += qty * CREDITS_PER_SINGLE;
+          else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) creditsToAdd += qty * CREDITS_PER_10PACK;
+          else creditsToAdd += qty * CREDITS_PER_SINGLE;
         }
 
         const userId   = session.metadata?.user_id || session.client_reference_id || null;
@@ -237,20 +224,13 @@ app.post(['/api/stripe-webhook', '/api/stripe-webhook/'],
           }
         }
 
-        // If it was a direct "buy_report" and VIN present, prefetch/cache it
         if (intent === 'buy_report' && metaVin) {
-          try {
-            await fetchAndCacheReport(metaVin, metaType);
-            console.log(`✅ Prefetched report for ${metaVin}`);
-          } catch (e) {
-            console.error('Instant prefetch error:', e?.message || e);
-          }
+          try { await fetchAndCacheReport(metaVin, metaType); } catch {}
         }
       }
 
       return res.status(200).json({ ok: true });
     } catch (e) {
-      console.error('Webhook handler error:', e?.message || e);
       return res.status(500).send('Webhook handler error');
     }
   }
@@ -260,13 +240,14 @@ app.post(['/api/stripe-webhook', '/api/stripe-webhook/'],
    ⚙️ Normal middleware (after webhook)
 ================================================================ */
 app.use(express.json());
+app.use(cookieParser(process.env.APP_SECRET || 'change-me'));
 app.use(cors({ origin: ALLOWED_ORIGIN, credentials: false }));
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan('dev'));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
 /* ================================================================
-   💰 Stripe Checkout (prevents re-buy for same VIN if cached)
+   💰 Stripe Checkout
 ================================================================ */
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
@@ -280,7 +261,6 @@ app.post('/api/create-checkout-session', async (req, res) => {
     const isTenPack = (price_id === 'STRIPE_PRICE_10PACK' || price_id === '10pack');
     const priceLive = isTenPack ? PRICE_10PACK : PRICE_SINGLE;
 
-    // If report purchase with VIN: avoid charging again if cached
     if (vin) {
       const type = (report_type || 'carfax').toLowerCase();
       const cached = readCache((vin || '').toUpperCase(), type);
@@ -295,7 +275,6 @@ app.post('/api/create-checkout-session', async (req, res) => {
       mode: 'payment',
       payment_method_types: ['card'],
       line_items: [{ price: priceLive, quantity: 1 }],
-      // ✅ Always send users to success.html with the right params
       success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ''}`,
       cancel_url: `${SITE_URL}/?checkout=cancel`,
       ...(userId ? { client_reference_id: userId } : {}),
@@ -316,7 +295,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
 });
 
 /* ================================================================
-   ✅ Stripe finalize (safety-net; idempotent)
+   ✅ Stripe finalize (safety-net)
 ================================================================ */
 app.post('/api/checkout/finalize', async (req, res) => {
   try {
@@ -334,13 +313,9 @@ app.post('/api/checkout/finalize', async (req, res) => {
     for (const li of lineItems.data) {
       const pid = li.price?.id;
       const qty = li.quantity || 1;
-      if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) {
-        creditsToAdd += qty * CREDITS_PER_SINGLE;
-      } else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) {
-        creditsToAdd += qty * CREDITS_PER_10PACK;
-      } else {
-        creditsToAdd += qty * CREDITS_PER_SINGLE;
-      }
+      if (pid === PRICE_SINGLE || pid === PRICE_SINGLE_TEST) creditsToAdd += qty * CREDITS_PER_SINGLE;
+      else if (pid === PRICE_10PACK || pid === PRICE_10PACK_TEST) creditsToAdd += qty * CREDITS_PER_10PACK;
+      else creditsToAdd += qty * CREDITS_PER_SINGLE;
     }
 
     const userId = session.metadata?.user_id || session.client_reference_id || null;
@@ -392,7 +367,7 @@ const ppClient = new paypalSdk.core.PayPalHttpClient(ppEnv);
 async function verifyPaypalCapture(captureId) {
   const req = new paypalSdk.payments.CapturesGetRequest(captureId);
   const res = await ppClient.execute(req);
-  return res?.result; // COMPLETED
+  return res?.result;
 }
 
 app.post('/api/paypal/create-order', async (_req, res) => {
@@ -437,11 +412,9 @@ app.post('/api/paypal/capture-order', async (req, res) => {
       const { data: existing } = await supabaseService
         .from('credits').select('balance').eq('user_id', user_id).maybeSingle();
       if (existing) {
-        await supabaseService
-          .from('credits').update({ balance: (existing.balance || 0) + 1 }).eq('user_id', user_id);
+        await supabaseService.from('credits').update({ balance: (existing.balance || 0) + 1 }).eq('user_id', user_id);
       } else {
-        await supabaseService
-          .from('credits').insert({ user_id, balance: 1 });
+        await supabaseService.from('credits').insert({ user_id, balance: 1 });
       }
     }
 
@@ -478,7 +451,7 @@ app.post('/api/report', async (req, res) => {
     }
     if (!targetVin) return res.status(400).send('VIN or State+Plate required');
 
-    // One-time receipt verification (guest or logged-in single-use)
+    // One-time receipt verification (guests)
     if (oneTimeSession) {
       if (CONSUMED.has(oneTimeSession)) return res.status(409).send('This receipt was already used.');
       try {
@@ -492,16 +465,15 @@ app.post('/api/report', async (req, res) => {
           if (s.payment_status !== 'paid') return res.status(402).send('Payment not completed.');
         }
         CONSUMED.add(oneTimeSession); saveConsumed();
-      } catch (err) {
-        console.error('One-time verify error:', err?.message || err);
+      } catch {
         return res.status(400).send('Invalid purchase receipt.');
       }
     }
 
-    // Cache check
+    // Cache lookup
     let raw = readCache(targetVin, type.toLowerCase());
 
-    // Not cached: if live allowed, bill correctly then fetch
+    // If not cached and live allowed, spend credit or require payment
     if (!raw && allowLive) {
       const { token, user } = await getUser(req);
 
@@ -511,10 +483,7 @@ app.post('/api/report', async (req, res) => {
           p_vin: targetVin,
           p_result_url: null,
         });
-        if (rpcErr) {
-          console.error('use_credit_for_vin error:', rpcErr);
-          return res.status(402).send('Insufficient credits');
-        }
+        if (rpcErr) return res.status(402).send('Insufficient credits');
       } else if (!user && !oneTimeSession) {
         return res.status(401).send('Complete purchase to view this report.');
       }
@@ -548,8 +517,7 @@ app.post('/api/report', async (req, res) => {
           res.setHeader('Content-Type', 'application/pdf');
           res.setHeader('Content-Disposition', `attachment; filename="${targetVin}-${type}.pdf"`);
           return res.send(Buffer.from(pdf.data));
-        } catch (e) {
-          console.error('pdf conversion error:', e?.response?.status, e?.message);
+        } catch {
           return res.status(502).send('Could not generate PDF from this report.');
         }
       }
@@ -629,6 +597,227 @@ app.get('/view/:token', async (req, res) => {
     return res.send(decoded.buffer);
   }
   return res.status(500).send('Unsupported report content.');
+});
+
+/* ================================================================
+   👑 Admin: auth & utilities
+================================================================ */
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const ADMIN_SESSION_TTL_SECONDS = Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 12); // 12h
+
+function adminOnly(req, res, next) {
+  const val = req.signedCookies?.admin || '';
+  if (val === '1') return next();
+  return res.status(401).json({ error: 'admin auth required' });
+}
+
+// Login / logout / check
+app.post('/api/admin/login', (req, res) => {
+  const pass = (req.body?.password || '').toString();
+  if (!ADMIN_PASSWORD || pass !== ADMIN_PASSWORD) return res.status(401).json({ error: 'invalid password' });
+  res.cookie('admin', '1', {
+    httpOnly: true,
+    signed: true,
+    sameSite: 'lax',
+    secure: PROD,
+    maxAge: ADMIN_SESSION_TTL_SECONDS * 1000,
+  });
+  res.json({ ok: true });
+});
+app.post('/api/admin/logout', adminOnly, (req, res) => {
+  res.clearCookie('admin');
+  res.json({ ok: true });
+});
+app.get('/api/admin/check', (req, res) => {
+  res.json({ ok: (req.signedCookies?.admin === '1') });
+});
+
+// Admin “open free” (no credit spent), fetches live + caches, returns HTML/PDF
+app.post('/api/admin/open', adminOnly, async (req, res) => {
+  try {
+    const {
+      vin: vinIn,
+      state,
+      plate,
+      type = 'carfax',
+      as = 'html'
+    } = req.body || {};
+    let vin = (vinIn || '').toUpperCase();
+
+    if (!vin && state && plate) {
+      const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
+      const m = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
+      if (m) vin = m[0];
+    }
+    if (!vin) return res.status(400).json({ error: 'VIN or state+plate required' });
+
+    await fetchAndCacheReport(vin, type.toLowerCase());
+    const raw = readCache(vin, type.toLowerCase());
+    const decoded = decodeReportBase64(raw);
+
+    if (as === 'pdf') {
+      if (decoded.kind === 'pdf') {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="${vin}-${type}.pdf"`);
+        return res.send(decoded.buffer);
+      }
+      if (decoded.kind === 'html') {
+        const form = new FormData();
+        form.append('base64_content', Buffer.from(decoded.html, 'utf8').toString('base64'));
+        form.append('vin', vin);
+        form.append('report_type', type);
+        const pdf = await axios.post(`${CS}/pdf`, form, {
+          headers: { ...H, ...form.getHeaders() },
+          responseType: 'arraybuffer',
+          timeout: 60000,
+        });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="${vin}-${type}.pdf"`);
+        return res.send(Buffer.from(pdf.data));
+      }
+      return res.status(500).json({ error: 'Unsupported content' });
+    }
+
+    if (decoded.kind === 'html') {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(decoded.html);
+    }
+    if (decoded.kind === 'pdf') {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${vin}-${type}.pdf"`);
+      return res.send(decoded.buffer);
+    }
+    return res.status(500).json({ error: 'Unsupported content' });
+  } catch (e) {
+    console.error('admin open error:', e);
+    res.status(500).json({ error: 'admin open failed' });
+  }
+});
+
+// Cached-view helper (no spend, cache only)
+app.get('/api/report-view', adminOnly, (req, res) => {
+  const vin  = (req.query.vin || '').toUpperCase();
+  const type = (req.query.type || 'carfax').toLowerCase();
+  if (!vin) return res.status(400).send('vin required');
+  const raw = readCache(vin, type);
+  if (!raw) return res.status(404).send('not cached');
+  const decoded = decodeReportBase64(raw);
+  if (decoded.kind === 'html') {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(decoded.html);
+  }
+  if (decoded.kind === 'pdf') {
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${vin}-${type}.pdf"`);
+    return res.send(decoded.buffer);
+  }
+  return res.status(500).send('unsupported');
+});
+
+/* ================================================================
+   👑 Admin – History APIs
+================================================================ */
+app.get('/api/admin/history', adminOnly, async (req, res) => {
+  try {
+    const limit = Math.min(+(req.query.limit || 200), 1000);
+
+    const { data: rows, error } = await supabaseService
+      .from('vin_queries')
+      .select('id, user_id, vin, success, result_url, created_at')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    const userIds = [...new Set(rows.map(r => r.user_id))];
+    let emailByUser = {};
+    if (userIds.length) {
+      const { data: profiles, error: pErr } = await supabaseService
+        .from('profiles')
+        .select('id, email')
+        .in('id', userIds);
+      if (!pErr && profiles) {
+        for (const p of profiles) emailByUser[p.id] = p.email || '';
+      }
+    }
+
+    const mapped = rows.map(r => ({
+      id: r.id,
+      user_id: r.user_id,
+      email: emailByUser[r.user_id] || '',
+      vin: r.vin,
+      success: !!r.success,
+      result_url: r.result_url || null,
+      created_at: r.created_at
+    }));
+
+    return res.json({ rows: mapped });
+  } catch (e) {
+    console.error('admin history error:', e);
+    res.status(500).json({ error: 'Failed to load history' });
+  }
+});
+
+app.get('/api/admin/ledger', adminOnly, async (req, res) => {
+  try {
+    const limit = Math.min(+(req.query.limit || 200), 1000);
+    const { data: rows, error } = await supabaseService
+      .from('credit_ledger')
+      .select('id, user_id, delta, reason, ref, created_at')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    const userIds = [...new Set(rows.map(r => r.user_id))];
+    let emailByUser = {};
+    if (userIds.length) {
+      const { data: profiles, error: pErr } = await supabaseService
+        .from('profiles')
+        .select('id, email')
+        .in('id', userIds);
+      if (!pErr && profiles) {
+        for (const p of profiles) emailByUser[p.id] = p.email || '';
+      }
+    }
+
+    const mapped = rows.map(r => ({
+      id: r.id,
+      user_id: r.user_id,
+      email: emailByUser[r.user_id] || '',
+      delta: r.delta,
+      reason: r.reason,
+      ref: r.ref,
+      created_at: r.created_at
+    }));
+
+    res.json({ rows: mapped });
+  } catch (e) {
+    console.error('admin ledger error:', e);
+    res.status(500).json({ error: 'Failed to load ledger' });
+  }
+});
+
+app.get('/api/admin/cache', adminOnly, async (req, res) => {
+  try {
+    const files = fs.readdirSync(CACHE_DIR).filter(f => f.endsWith('.b64'));
+    const rows = files.map(f => {
+      const fp = path.join(CACHE_DIR, f);
+      const st = fs.statSync(fp);
+      const [vin, typeWithExt] = f.split('-');
+      const type = typeWithExt.replace(/\.b64$/, '');
+      return {
+        vin,
+        type,
+        size_bytes: st.size,
+        mtime: st.mtime
+      };
+    }).sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+    res.json({ rows });
+  } catch (e) {
+    console.error('admin cache list error:', e);
+    res.status(500).json({ error: 'Failed to read cache' });
+  }
 });
 
 /* ================================================================

@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Admin • AutoVINReveal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; --b:#e5e7eb; --muted:#64748b; --accent:#2563eb; }
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif; margin:0; padding:20px; }
+    .wrap { max-width: 1100px; margin-inline: auto; }
+    .card { border:1px solid var(--b); border-radius:14px; padding:16px; box-shadow:0 6px 24px rgba(0,0,0,.05); margin-bottom:18px; }
+    h1 { margin:0 0 14px 0; }
+    h2 { margin:0 0 10px 0; font-size:1.1rem; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .btn { border:1px solid var(--accent); background:var(--accent); color:white; border-radius:10px; padding:8px 12px; cursor:pointer; }
+    .btn-outline { border:1px solid var(--b); background:transparent; color:inherit; border-radius:10px; padding:8px 12px; cursor:pointer; }
+    .input, select { border:1px solid var(--b); border-radius:10px; padding:8px 10px; min-width: 140px; }
+    .table { width:100%; border-collapse:collapse; }
+    .table th, .table td { border-top:1px solid var(--b); padding:8px; text-align:left; font-size:.92rem; }
+    .muted { color: var(--muted); }
+    .warn { color: #b91c1c; }
+    .ok { color: #15803d; }
+    .hidden { display:none; }
+    code { background: rgba(0,0,0,.05); padding:2px 6px; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Admin</h1>
+
+    <!-- Login card -->
+    <section id="loginCard" class="card">
+      <h2>Login</h2>
+      <div class="row">
+        <input id="adminPass" type="password" class="input" placeholder="Admin password">
+        <button id="adminLoginBtn" class="btn">Login</button>
+        <span id="loginMsg" class="muted"></span>
+      </div>
+      <p class="muted" style="margin-top:8px">
+        Cookie is <code>httpOnly</code> + signed. Session TTL respects <code>ADMIN_SESSION_TTL_SECONDS</code>.
+      </p>
+    </section>
+
+    <!-- Controls (visible after login) -->
+    <section id="controlsCard" class="card hidden">
+      <div class="row">
+        <button id="logoutBtn" class="btn-outline">Logout</button>
+        <span class="ok" id="whoami">Logged in as Admin</span>
+      </div>
+    </section>
+
+    <!-- Open Free -->
+    <section id="openCard" class="card hidden">
+      <h2>Open Report (Free / No Credit)</h2>
+      <div class="row">
+        <input id="vin" class="input" placeholder="VIN (17 chars)">
+        <select id="type">
+          <option value="carfax">CARFAX</option>
+          <option value="autocheck">AutoCheck</option>
+        </select>
+        <span class="muted">or</span>
+        <select id="state">
+          <option value="">State</option>
+          <option>CA</option><option>TX</option><option>FL</option><option>NY</option><option>WA</option>
+          <!-- add rest as needed -->
+        </select>
+        <input id="plate" class="input" placeholder="Plate">
+        <button id="openFreeBtn" class="btn">Open</button>
+        <span class="muted">Returns HTML/PDF and caches it.</span>
+      </div>
+    </section>
+
+    <!-- Cache -->
+    <section id="cacheCard" class="card hidden">
+      <h2>Cache</h2>
+      <div class="row" style="margin-bottom:8px">
+        <button id="refreshCache" class="btn">Refresh</button>
+      </div>
+      <div style="overflow:auto">
+        <table class="table" id="cacheTable">
+          <thead>
+            <tr><th>When (mtime)</th><th>VIN</th><th>Type</th><th>Size (KB)</th><th>Open</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- History -->
+    <section id="historyCard" class="card hidden">
+      <h2>History</h2>
+
+      <div class="row" style="gap:10px; margin-bottom:10px">
+        <button id="refreshHistory" class="btn">Refresh VIN Queries</button>
+        <button id="refreshLedger" class="btn btn-outline">Refresh Ledger</button>
+        <input id="filterEmail" placeholder="Filter by email…" class="input" style="max-width:220px">
+        <input id="filterVIN" placeholder="Filter VIN…" class="input" style="max-width:180px">
+      </div>
+
+      <div style="overflow:auto; margin-bottom:16px">
+        <table class="table" id="historyTable">
+          <thead>
+            <tr><th>ID</th><th>When</th><th>Email</th><th>VIN</th><th>Success</th><th>Result URL</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <h3 style="margin:0 0 8px">Credit Ledger (last 200)</h3>
+      <div style="overflow:auto">
+        <table class="table" id="ledgerTable">
+          <thead>
+            <tr><th>ID</th><th>When</th><th>Email</th><th>Δ</th><th>Reason</th><th>Ref</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="muted" style="margin-top:18px">
+      Tip: to view cached report quickly, click “Open” in the Cache table (no credits used).
+    </p>
+  </div>
+
+  <script>
+  (function(){
+    const $  = (s,el=document)=>el.querySelector(s);
+    const $$ = (s,el=document)=>[...el.querySelectorAll(s)];
+    const loginCard   = $('#loginCard');
+    const controls    = $('#controlsCard');
+    const openCard    = $('#openCard');
+    const cacheCard   = $('#cacheCard');
+    const historyCard = $('#historyCard');
+
+    async function checkAdmin(){
+      const r = await fetch('/api/admin/check');
+      const j = await r.json();
+      const ok = !!j.ok;
+      loginCard.classList.toggle('hidden', ok);
+      controls.classList.toggle('hidden', !ok);
+      openCard.classList.toggle('hidden', !ok);
+      cacheCard.classList.toggle('hidden', !ok);
+      historyCard.classList.toggle('hidden', !ok);
+      return ok;
+    }
+
+    // Login / logout
+    $('#adminLoginBtn').addEventListener('click', async () => {
+      const pass = $('#adminPass').value;
+      const r = await fetch('/api/admin/login', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ password: pass })
+      });
+      const msg = $('#loginMsg');
+      if (r.ok) {
+        msg.textContent = 'Logged in.';
+        await checkAdmin();
+        loadCache(); loadHistory(); loadLedger();
+      } else {
+        msg.textContent = 'Invalid password';
+      }
+    });
+
+    $('#logoutBtn').addEventListener('click', async () => {
+      await fetch('/api/admin/logout', { method: 'POST' });
+      await checkAdmin();
+    });
+
+    // Open free
+    $('#openFreeBtn').addEventListener('click', async () => {
+      const vin   = $('#vin').value.trim().toUpperCase();
+      const type  = $('#type').value || 'carfax';
+      const state = $('#state').value.trim().toUpperCase();
+      const plate = $('#plate').value.trim().toUpperCase();
+
+      const body = vin ? { vin, type, as:'html' } : { state, plate, type, as:'html' };
+
+      try {
+        const r = await fetch('/api/admin/open', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(body)
+        });
+        if (!r.ok) { alert(await r.text()); return; }
+        const ct = r.headers.get('content-type') || '';
+        if (ct.includes('text/html')) {
+          const html = await r.text();
+          const w = window.open('', '_blank'); if (w) { w.document.write(html); w.document.close(); }
+          else { document.open(); document.write(html); document.close(); }
+        } else {
+          // assume PDF
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+          setTimeout(()=>URL.revokeObjectURL(url), 15000);
+        }
+        // Also refresh cache list (now cached)
+        loadCache();
+      } catch (e) {
+        alert(e.message || 'open failed');
+      }
+    });
+
+    // Cache table
+    const tbCache = $('#cacheTable tbody');
+    function fmtTime(ts){ try { return new Date(ts).toLocaleString(); } catch { return ts; } }
+    function esc(s){ return (s||'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    async function loadCache(){
+      const r = await fetch('/api/admin/cache');
+      const j = await r.json();
+      tbCache.innerHTML = '';
+      (j.rows || []).forEach(row => {
+        const sizeKB = Math.round((row.size_bytes || 0) / 102.4) / 10;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${esc(fmtTime(row.mtime))}</td>
+          <td style="font-family:ui-monospace,monospace">${esc(row.vin)}</td>
+          <td>${esc(row.type)}</td>
+          <td>${sizeKB.toFixed(1)}</td>
+          <td><button class="btn-outline" data-vin="${esc(row.vin)}" data-type="${esc(row.type)}">Open (cached)</button></td>
+        `;
+        tbCache.appendChild(tr);
+      });
+      $('#cacheTable').addEventListener('click', async (e) => {
+        const btn = e.target.closest('button[data-vin]');
+        if (!btn) return;
+        const vin  = btn.getAttribute('data-vin');
+        const type = btn.getAttribute('data-type');
+        const r = await fetch(`/api/report-view?vin=${encodeURIComponent(vin)}&type=${encodeURIComponent(type)}`);
+        if (!r.ok) { alert(await r.text()); return; }
+        const ct = r.headers.get('content-type') || '';
+        if (ct.includes('text/html')) {
+          const html = await r.text();
+          const w = window.open('', '_blank'); if (w) { w.document.write(html); w.document.close(); }
+          else { document.open(); document.write(html); document.close(); }
+        } else {
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+          setTimeout(()=>URL.revokeObjectURL(url), 15000);
+        }
+      }, { once:true });
+    }
+    $('#refreshCache').addEventListener('click', loadCache);
+
+    // History + Ledger
+    const tbHist = $('#historyTable tbody');
+    const tbLedg = $('#ledgerTable tbody');
+    let histRows = []; let ledgerRows = [];
+    function renderHistory(){
+      const em  = ($('#filterEmail').value||'').trim().toLowerCase();
+      const vin = ($('#filterVIN').value||'').trim().toUpperCase();
+      tbHist.innerHTML = '';
+      histRows
+        .filter(r => (!em || (r.email||'').toLowerCase().includes(em)) && (!vin || (r.vin||'').toUpperCase().includes(vin)))
+        .forEach(r => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${r.id}</td>
+            <td>${esc(fmtTime(r.created_at))}</td>
+            <td>${esc(r.email)}</td>
+            <td style="font-family:ui-monospace,monospace">${esc(r.vin)}</td>
+            <td>${r.success ? '✅' : '—'}</td>
+            <td>${r.result_url ? `<a target="_blank" href="${esc(r.result_url)}">open</a>` : ''}</td>
+          `;
+          tbHist.appendChild(tr);
+        });
+    }
+    function renderLedger(){
+      tbLedg.innerHTML = '';
+      ledgerRows.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${r.id}</td>
+          <td>${esc(fmtTime(r.created_at))}</td>
+          <td>${esc(r.email)}</td>
+          <td style="font-family:ui-monospace,monospace">${r.delta}</td>
+          <td>${esc(r.reason)}</td>
+          <td style="font-family:ui-monospace,monospace">${esc(r.ref||'')}</td>
+        `;
+        tbLedg.appendChild(tr);
+      });
+    }
+    async function loadHistory(){
+      const r = await fetch('/api/admin/history');
+      const j = await r.json();
+      histRows = j.rows || [];
+      renderHistory();
+    }
+    async function loadLedger(){
+      const r = await fetch('/api/admin/ledger');
+      const j = await r.json();
+      ledgerRows = j.rows || [];
+      renderLedger();
+    }
+
+    $('#refreshHistory').addEventListener('click', loadHistory);
+    $('#refreshLedger').addEventListener('click', loadLedger);
+    $('#filterEmail').addEventListener('input', renderHistory);
+    $('#filterVIN').addEventListener('input', renderHistory);
+
+    // boot
+    (async () => {
+      if (await checkAdmin()) {
+        loadCache(); loadHistory(); loadLedger();
+      }
+    })();
+  })();
+  </script>
+</body>
+</html>
