@@ -81,7 +81,7 @@ function setPrimaryCTA(mode = 'view') {
 /* ================================
    Supabase init
 ================================ */
-const SB_URL  = window.VITE_SUPABASE_URL  || (typeof process !== 'undefined' ? process?.env?.VITE_SUPABASE_URL  : '') || '';
+const SB_URL = window.VITE_SUPABASE_URL || (typeof process !== 'undefined' ? process?.env?.VITE_SUPABASE_URL : '') || '';
 const SB_ANON = window.VITE_SUPABASE_ANON_KEY || (typeof process !== 'undefined' ? process?.env?.VITE_SUPABASE_ANON_KEY : '') || '';
 let supabase = null;
 if (window.supabase && SB_URL && SB_ANON) {
@@ -167,7 +167,7 @@ async function resumePendingPurchase() {
         content_ids: ['VinReport'],
         content_type: 'product'
       });
-    } catch {}
+    } catch { }
 
     showToast('Report ready!', 'ok');
 
@@ -188,7 +188,7 @@ async function resumePendingPurchase() {
         await navigator.clipboard.writeText(url);
         showToast('Share link copied to clipboard!', 'ok');
       }
-    } catch {}
+    } catch { }
   } catch (e) {
     showToast(e.message || 'Failed to resume purchase', 'error');
   } finally {
@@ -215,7 +215,7 @@ async function handleSuccessIfNeeded() {
       document.open(); document.write(html); document.close();
       try {
         fbq('track', 'Purchase', { value: 7.00, currency: 'USD', contents: [{ id: 'VinReport', quantity: 1 }], content_ids: ['VinReport'], content_type: 'product' });
-      } catch {}
+      } catch { }
       return;
     } catch (e) {
       showToast(e.message || 'Failed to fetch report', 'error');
@@ -240,7 +240,7 @@ async function handleSuccessIfNeeded() {
       document.open(); document.write(html); document.close();
       try {
         fbq('track', 'Purchase', { value: 7.00, currency: 'USD', contents: [{ id: 'VinReport', quantity: 1 }], content_ids: ['VinReport'], content_type: 'product' });
-      } catch {}
+      } catch { }
       return;
     } catch (e) {
       showToast(e.message || 'Failed to fetch report', 'error');
@@ -263,7 +263,7 @@ async function handleSuccessIfNeeded() {
     setTimeout(() => { window.location.href = '/'; }, 1200);
   } else {
     const url = new URL(location.href);
-    ['session_id','intent','vin','pp','one','state','plate','type'].forEach(k => url.searchParams.delete(k));
+    ['session_id', 'intent', 'vin', 'pp', 'one', 'state', 'plate', 'type'].forEach(k => url.searchParams.delete(k));
     history.replaceState({}, '', url.pathname + url.search);
   }
 }
@@ -277,37 +277,37 @@ function setTheme(mode) {
   document.documentElement.classList.toggle('dark', mode === 'dark');
   localStorage.setItem('theme', mode);
   const label = themeBtn?.querySelector('.label');
-  const icon  = themeBtn?.querySelector('.icon');
+  const icon = themeBtn?.querySelector('.icon');
   if (label) label.textContent = mode === 'dark' ? 'Light' : 'Dark';
-  if (icon)  icon.textContent  = mode === 'dark' ? '☀️' : '🌙';
+  if (icon) icon.textContent = mode === 'dark' ? '☀️' : '🌙';
 }
 themeBtn?.addEventListener('click', () => {
   const nowDark = !document.documentElement.classList.contains('dark');
   setTheme(nowDark ? 'dark' : 'light');
 });
 (() => {
-  const dark  = document.documentElement.classList.contains('dark');
+  const dark = document.documentElement.classList.contains('dark');
   const label = themeBtn?.querySelector('.label');
-  const icon  = themeBtn?.querySelector('.icon');
+  const icon = themeBtn?.querySelector('.icon');
   if (label) label.textContent = dark ? 'Light' : 'Dark';
-  if (icon)  icon.textContent  = dark ? '☀️' : '🌙';
+  if (icon) icon.textContent = dark ? '☀️' : '🌙';
 })();
 
 /* ================================
    Auth modal (email + password)
 ================================ */
-const loginBtn         = $id('loginBtn');
-const loginModal       = $id('loginModal');
-const closeLoginModal  = $id('closeLoginModal');
-const emailEl          = $id('loginEmail');
-const pwEl             = $id('loginPassword');
-const doLoginBtn       = $id('doLogin');
-const doSignupBtn      = $id('doSignup');
-const userChip         = $id('userChip');
-const userEmailEl      = $id('userEmail');
-const logoutBtn        = $id('logoutBtn');
+const loginBtn = $id('loginBtn');
+const loginModal = $id('loginModal');
+const closeLoginModal = $id('closeLoginModal');
+const emailEl = $id('loginEmail');
+const pwEl = $id('loginPassword');
+const doLoginBtn = $id('doLogin');
+const doSignupBtn = $id('doSignup');
+const userChip = $id('userChip');
+const userEmailEl = $id('userEmail');
+const logoutBtn = $id('logoutBtn');
 
-function openLogin()  { loginModal?.classList.remove('hidden'); }
+function openLogin() { loginModal?.classList.remove('hidden'); }
 function closeLogin() { loginModal?.classList.add('hidden'); }
 closeLoginModal?.addEventListener('click', closeLogin);
 logoutBtn?.addEventListener('click', doLogout);
@@ -360,7 +360,12 @@ async function doSignup() {
     }
 
     if (!data.session) showToast('Check your email to confirm your account.', 'ok');
-    else { showToast('Account created — you are signed in!', 'ok'); closeLogin(); }
+    else {
+      showToast('Account created — you are signed in!', 'ok'); closeLogin();
+      // META: store email for Advanced Matching
+      try { localStorage.setItem('fb_em', (email || '').trim().toLowerCase()); } catch { }
+
+    }
     await refreshBalancePill();
   } catch (e) { showToast(e.message || 'Sign up failed', 'error'); }
 }
@@ -463,7 +468,7 @@ async function fetchBalance() {
 }
 async function refreshBalancePill() {
   const pill = $id('balancePill');
-  const txt  = $id('balanceText');
+  const txt = $id('balanceText');
   const { user } = await getSession();
 
   if (!user) {
@@ -476,7 +481,7 @@ async function refreshBalancePill() {
 
   const { balance = 0 } = await fetchBalance();
   if (pill && txt) {
-    txt.textContent = `${balance} credit${balance===1?'':'s'}`;
+    txt.textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
     pill.classList.remove('hidden');
   }
 
@@ -580,8 +585,8 @@ function renderHistory() {
       const item = loadHistory()[i]; if (!item) return;
       if (action === 'open') openHistoryHTML(item);
       else if (action === 'pdf') downloadHistoryPDF(item);
-      else if (action === 'share') copyShareLink(item.vin.replace('(from plate)','').trim() || item.plate, item.type);
-      else if (action === 'del') { const list = loadHistory(); list.splice(i,1); saveHistory(list); renderHistory(); }
+      else if (action === 'share') copyShareLink(item.vin.replace('(from plate)', '').trim() || item.plate, item.type);
+      else if (action === 'del') { const list = loadHistory(); list.splice(i, 1); saveHistory(list); renderHistory(); }
     });
   });
 }
@@ -590,12 +595,12 @@ $id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(H
 /* ================================
    Buy Credits modal (tiers) + PayPal
 ================================ */
-const buyModal    = $id('buyCreditsModal');
-const buy1Btn     = $id('buy1Btn');   // 1-credit button (Stripe)
-const buy10Btn    = $id('buy10Btn');  // 10-pack button (Stripe)
+const buyModal = $id('buyCreditsModal');
+const buy1Btn = $id('buy1Btn');   // 1-credit button (Stripe)
+const buy10Btn = $id('buy10Btn');  // 10-pack button (Stripe)
 const closeBuyBtn = $id('closeModalBtn');
-function openBuyModal(){ buyModal?.classList.remove('hidden'); renderPaypalButton(); }
-function closeBuyModal(){ buyModal?.classList.add('hidden'); }
+function openBuyModal() { buyModal?.classList.remove('hidden'); renderPaypalButton(); }
+function closeBuyModal() { buyModal?.classList.add('hidden'); }
 closeBuyBtn?.addEventListener('click', closeBuyModal);
 
 // PayPal helpers
@@ -762,7 +767,7 @@ async function updateUseCreditBtn() {
       const r = await fetch(API.credits(user.id));
       const { balance = 0 } = await r.json();
       enable = balance > 0;
-    } catch {}
+    } catch { }
   }
   useCreditBtn.disabled = !enable;
 }
@@ -818,7 +823,7 @@ f?.addEventListener('submit', async (e) => {
     state: (formData.state || '').trim(),
     plate: (formData.plate || '').trim(),
     type: formData.type || 'carfax',
-    as:   'html',
+    as: 'html',
     allowLive: true
   };
 
@@ -854,7 +859,7 @@ f?.addEventListener('submit', async (e) => {
         go.disabled = false; loading.classList.add('hidden');
         return;
       }
-    } catch {}
+    } catch { }
   }
 
   try {
@@ -900,7 +905,7 @@ f?.addEventListener('submit', async (e) => {
         await navigator.clipboard.writeText(url);
         showToast('Share link copied to clipboard!', 'ok');
       }
-    } catch {}
+    } catch { }
 
     await refreshBalancePill();
   } catch (err) {
