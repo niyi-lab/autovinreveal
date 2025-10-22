@@ -90,7 +90,7 @@ const PRICE_SINGLE_TEST  = process.env.STRIPE_PRICE_SINGLE_TEST || null;
 const PRICE_10PACK_TEST  = process.env.STRIPE_PRICE_10PACK_TEST || null;
 
 const CREDITS_PER_SINGLE = Number(process.env.CREDITS_PER_SINGLE || '1');
-const CREDITS_PER_10PACK = Number(process.env.CREDITS_PER_10PACK || '10');
+const CREDITS_PER_10PACK = Number(process.env.CREDITS_PER_10PACK || '5');
 
 function stripeForId(id) {
   const isTest = typeof id === 'string' && id.startsWith('cs_test_');

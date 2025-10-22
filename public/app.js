@@ -737,7 +737,7 @@ buy10Btn?.addEventListener('click', async () => {
   const { user } = await getSession();
   if (!user) {
     closeBuyModal();
-    showToast('Please sign in to buy a 10-pack of credits.', 'error');
+    showToast('Please sign in to buy a 5-pack of credits.', 'error');
     openLogin();
     return;
   }
