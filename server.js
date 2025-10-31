@@ -35,7 +35,7 @@ const HOST = '0.0.0.0';
 /* ================================================================
    Config (env)
 ================================================================ */
-const SITE_URL         = process.env.SITE_URL || `http://localhost:${PORT}`;
+const SITE_URL         = process.env.SITE_URL || `http://localhost:3000`;
 const ALLOWED_ORIGIN   = process.env.ALLOWED_ORIGIN || SITE_URL;
 const FORCE_WWW        = process.env.FORCE_WWW === '1';
 
@@ -740,8 +740,18 @@ app.use(express.static(path.join(__dirname, 'public')));
 /* ================================================================
    Boot
 ================================================================ */
-const server = app.listen(PORT, HOST, () =>
-  console.log(`✅ Server running on ${process.env.SITE_URL || `http://${HOST}:${PORT}`}`)
-);
+
+app.get("/", (_req, res) => res.send("OK: AutoVINReveal server up"));
+// /healthz already defined above; keep only one if you want.
+
+const server = app.listen(Number(PORT), HOST, () => {
+  const addr = server.address();
+  const where = typeof addr === "string" ? addr : `${addr.address}:${addr.port}`;
+  console.log(`✅ Server listening on ${where}`);
+  console.log(`   Try:  http://localhost:${PORT}`);
+  console.log(`         http://127.0.0.1:${PORT}`);
+});
+
+// optional, keep-alive tuning
 server.keepAliveTimeout = 120000;
 server.headersTimeout   = 125000;

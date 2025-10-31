@@ -1,329 +1,638 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en" class="h-full">
-<head>
-  <!-- Google tag (gtag.js) — single include -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-FF0NXRN0Y6"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){ dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-FF0NXRN0Y6');
-  </script>
+  <head>
+    <!-- Google tag (gtag.js) — single include -->
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-FF0NXRN0Y6"
+    ></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        dataLayer.push(arguments);
+      }
+      gtag("js", new Date());
+      gtag("config", "G-FF0NXRN0Y6");
+    </script>
 
-  <meta charset="utf-8" />
-  <title>AutoVINReveal</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="canonical" href="https://autovinreveal.com/">
-  <link rel="stylesheet" href="/style.css">
+    <meta charset="utf-8" />
+    <title>AutoVINReveal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="canonical" href="https://autovinreveal.com/" />
+    <link rel="stylesheet" href="/style.css" />
 
-  <!-- ✅ SEO Meta -->
-  <meta name="description" content="Get instant CARFAX & AutoCheck vehicle history reports by VIN or license plate. Fast, secure, and easy — powered by AutoVINReveal.">
-  <meta name="keywords" content="autovinreveal, carfax, autocheck, vin lookup, license plate search, vehicle report, auto history, used car check">
+    <!-- ✅ SEO Meta -->
+    <meta
+      name="description"
+      content="Get instant CARFAX & AutoCheck vehicle history reports by VIN or license plate. Fast, secure, and easy — powered by AutoVINReveal."
+    />
+    <meta
+      name="keywords"
+      content="autovinreveal, carfax, autocheck, vin lookup, license plate search, vehicle report, auto history, used car check"
+    />
 
-  <!-- ✅ Open Graph / Social Preview -->
-  <meta property="og:title" content="AutoVINReveal — Instant CARFAX & AutoCheck Reports">
-  <meta property="og:description" content="Get CARFAX or AutoCheck instantly by VIN or Plate. Fast, secure, and accurate vehicle history reports.">
-  <meta property="og:image" content="https://autovinreveal.com/og-image.png">
-  <meta property="og:image:alt" content="AutoVINReveal Vehicle History Report Preview">
-  <meta property="og:url" content="https://autovinreveal.com">
-  <meta property="og:type" content="website">
+    <!-- ✅ Open Graph / Social Preview -->
+    <meta
+      property="og:title"
+      content="AutoVINReveal — Instant CARFAX & AutoCheck Reports"
+    />
+    <meta
+      property="og:description"
+      content="Get CARFAX or AutoCheck instantly by VIN or Plate. Fast, secure, and accurate vehicle history reports."
+    />
+    <meta
+      property="og:image"
+      content="https://autovinreveal.com/og-image.png"
+    />
+    <meta
+      property="og:image:alt"
+      content="AutoVINReveal Vehicle History Report Preview"
+    />
+    <meta property="og:url" content="https://autovinreveal.com" />
+    <meta property="og:type" content="website" />
 
-  <!-- ✅ Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="AutoVINReveal — Instant CARFAX & AutoCheck Reports">
-  <meta name="twitter:description" content="Check vehicle history reports by VIN or plate instantly with AutoVINReveal.">
-  <meta name="twitter:image" content="https://autovinreveal.com/og-image.png">
+    <!-- ✅ Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="AutoVINReveal — Instant CARFAX & AutoCheck Reports"
+    />
+    <meta
+      name="twitter:description"
+      content="Check vehicle history reports by VIN or plate instantly with AutoVINReveal."
+    />
+    <meta
+      name="twitter:image"
+      content="https://autovinreveal.com/og-image.png"
+    />
 
-  <!-- ✅ Favicon + App Icons -->
-  <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32">
-  <link rel="apple-touch-icon" href="/favicon.png">
-  <meta name="theme-color" content="#1d4ed8">
+    <!-- ✅ Favicon + App Icons -->
+    <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/favicon.png" />
+    <meta name="theme-color" content="#1d4ed8" />
 
-  <!-- Tailwind -->
-  <link rel="stylesheet" href="/tw.css">
+    <!-- Tailwind -->
+    <link rel="stylesheet" href="/tw.css" />
 
-  <!-- Preconnects (perf) -->
-  <link rel="preconnect" href="https://www.paypal.com" crossorigin>
-  <link rel="preconnect" href="https://www.paypalobjects.com" crossorigin>
+    <!-- Preconnects (perf) -->
+    <link rel="preconnect" href="https://www.paypal.com" crossorigin />
+    <link rel="preconnect" href="https://www.paypalobjects.com" crossorigin />
 
-  <!-- Apply dark mode BEFORE paint -->
-  <script>
-    (() => {
-      const saved = localStorage.getItem('theme');
-      const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
-      if (saved === 'dark' || (!saved && prefersDark)) document.documentElement.classList.add('dark');
-    })();
-  </script>
+    <!-- Apply dark mode BEFORE paint -->
+    <script>
+      (() => {
+        const saved = localStorage.getItem("theme");
+        const prefersDark = matchMedia("(prefers-color-scheme: dark)").matches;
+        if (saved === "dark" || (!saved && prefersDark))
+          document.documentElement.classList.add("dark");
+      })();
+    </script>
 
-  <!-- ✅ PayPal JS SDK -->
-  <script src="https://www.paypal.com/sdk/js?client-id=Aclv8-_pnwQ7RC6rFmyLTxPfEqSNC2yS67N3dFeTwGH2i8-K2LVwwPEMmcfuw-DOxcuDWsPpoaSs7HOU&components=buttons&currency=USD"></script>
+    <!-- ✅ PayPal JS SDK -->
+    <script src="https://www.paypal.com/sdk/js?client-id=Aclv8-_pnwQ7RC6rFmyLTxPfEqSNC2yS67N3dFeTwGH2i8-K2LVwwPEMmcfuw-DOxcuDWsPpoaSs7HOU&components=buttons&currency=USD"></script>
 
-  <!-- Meta Pixel Base + Manual Advanced Matching -->
-  <script>
-    window.FB_PIXEL_ID = '1059594989434590';
+    <!-- Meta Pixel Base + Manual Advanced Matching -->
+    <script>
+      window.FB_PIXEL_ID = "1059594989434590";
 
-    !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){
-      n.callMethod? n.callMethod.apply(n,arguments):n.queue.push(arguments)
-    };if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
-    n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;
-    s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)
-  }(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
+      !(function (f, b, e, v, n, t, s) {
+        if (f.fbq) return;
+        n = f.fbq = function () {
+          n.callMethod
+            ? n.callMethod.apply(n, arguments)
+            : n.queue.push(arguments);
+        };
+        if (!f._fbq) f._fbq = n;
+        n.push = n;
+        n.loaded = !0;
+        n.version = "2.0";
+        n.queue = [];
+        t = b.createElement(e);
+        t.async = !0;
+        t.src = v;
+        s = b.getElementsByTagName(e)[0];
+        s.parentNode.insertBefore(t, s);
+      })(
+        window,
+        document,
+        "script",
+        "https://connect.facebook.net/en_US/fbevents.js"
+      );
 
-    (function(){
-      // Pull email/phone we may have saved earlier (e.g., on sign-in)
-      var adv = {};
-      try {
-        var em = (localStorage.getItem('fb_em') || '').trim().toLowerCase();
-        if (em && em.includes('@')) adv.em = em;   // email
-        var ph = (localStorage.getItem('fb_ph') || '').replace(/[^\d]/g,'');
-        if (ph) adv.ph = ph;                       // phone (optional)
-      } catch(e) {}
+      (function () {
+        // Pull email/phone we may have saved earlier (e.g., on sign-in)
+        var adv = {};
+        try {
+          var em = (localStorage.getItem("fb_em") || "").trim().toLowerCase();
+          if (em && em.includes("@")) adv.em = em; // email
+          var ph = (localStorage.getItem("fb_ph") || "").replace(/[^\d]/g, "");
+          if (ph) adv.ph = ph; // phone (optional)
+        } catch (e) {}
 
-      // ✅ 3rd argument is advanced-matching
-      fbq('init', window.FB_PIXEL_ID, adv);
-      fbq('track', 'PageView');
-    })();
-  </script>
-  <noscript>
-    <img height="1" width="1" style="display:none"
-         src="https://www.facebook.com/tr?id=1059594989434590&ev=PageView&noscript=1"/>
-  </noscript>
-</head>
+        // ✅ 3rd argument is advanced-matching
+        fbq("init", window.FB_PIXEL_ID, adv);
+        fbq("track", "PageView");
+      })();
+    </script>
+    <noscript>
+      <img
+        height="1"
+        width="1"
+        style="display: none"
+        src="https://www.facebook.com/tr?id=1059594989434590&ev=PageView&noscript=1"
+      />
+    </noscript>
+  </head>
 
-<body class="h-full">
-  <div class="max-w-5xl mx-auto px-4 py-6">
-    <!-- Header -->
-    <header class="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-start gap-3">
-      <div>
-        <a href="/"
-           class="text-4xl sm:text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-[rgb(153,120,77)] via-amber-400 to-yellow-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight">
-          AutoVINReveal
-        </a>
-        <p class="mt-1 sm:mt-2 text-sm sm:text-base lg:text-lg" style="color:var(--muted)">
-          Get instant CARFAX & AutoCheck by VIN or Plate — fast, secure, and clear.
-        </p>
-      </div>
-
-      <!-- RIGHT SIDE -->
-      <div class="justify-self-end flex items-center gap-2">
-        <div id="balancePill" class="hidden text-xs px-2 py-1 rounded-full border"
-             style="color:var(--brand);border-color:color-mix(in srgb,var(--brand) 60%, transparent);">
-          <span id="balanceText">0 credits</span>
-        </div>
-
-        <div id="userChip" class="hidden items-center gap-2">
-          <div class="w-8 h-8 rounded-full border border-blue-500/40 bg-blue-500/10 grid place-items-center text-blue-600">
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <circle cx="12" cy="8" r="4"></circle>
-              <path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke-linecap="round"></path>
-            </svg>
-          </div>
-          <span id="userEmail" class="text-sm"></span>
-          <button id="logoutBtn" class="btn-outline text-xs">Sign out</button>
-        </div>
-
-        <button id="loginBtn" class="btn-outline text-sm">🔑 Login</button>
-
-        <button id="themeBtn" class="theme-btn shrink-0" type="button" aria-label="Toggle theme">
-          <span class="icon">🌙</span><span class="label">Dark</span>
-        </button>
-      </div>
-    </header>
-
-    <!-- Form card -->
-    <div class="relative mt-6 card">
-      <form id="f" class="space-y-4">
+  <body class="h-full">
+    <div class="max-w-5xl mx-auto px-4 py-6">
+      <!-- Header -->
+      <header
+        class="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-start gap-3"
+      >
         <div>
-          <label class="lbl">VIN</label>
-          <input name="vin" maxlength="17" placeholder="e.g., 1C6RD6FT1CS310366" class="input" />
+          <a
+            href="/"
+            class="text-4xl sm:text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-[rgb(153,120,77)] via-amber-400 to-yellow-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight"
+          >
+            AutoVINReveal
+          </a>
+          <p
+            class="mt-1 sm:mt-2 text-sm sm:text-base lg:text-lg"
+            style="color: var(--muted)"
+          >
+            Get instant CARFAX & AutoCheck by VIN or Plate — fast, secure, and
+            clear.
+          </p>
         </div>
 
-        <div class="flex items-center justify-center">
-          <div class="sep"></div>
-          <span class="mx-3 text-xs uppercase tracking-widest" style="color:var(--muted)">or</span>
-          <div class="sep"></div>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label class="lbl">State</label>
-            <select name="state" class="select">
-              <option value="">Select a state…</option>
-              <option value="AL">Alabama</option><option value="AK">Alaska</option>
-              <option value="AZ">Arizona</option><option value="AR">Arkansas</option>
-              <option value="CA">California</option><option value="CO">Colorado</option>
-              <option value="CT">Connecticut</option><option value="DE">Delaware</option>
-              <option value="DC">District of Columbia</option><option value="FL">Florida</option>
-              <option value="GA">Georgia</option><option value="HI">Hawaii</option>
-              <option value="ID">Idaho</option><option value="IL">Illinois</option>
-              <option value="IN">Indiana</option><option value="IA">Iowa</option>
-              <option value="KS">Kansas</option><option value="KY">Kentucky</option>
-              <option value="LA">Louisiana</option><option value="ME">Maine</option>
-              <option value="MD">Maryland</option><option value="MA">Massachusetts</option>
-              <option value="MI">Michigan</option><option value="MN">Minnesota</option>
-              <option value="MS">Mississippi</option><option value="MO">Missouri</option>
-              <option value="MT">Montana</option><option value="NE">Nebraska</option>
-              <option value="NV">Nevada</option><option value="NH">New Hampshire</option>
-              <option value="NJ">New Jersey</option><option value="NM">New Mexico</option>
-              <option value="NY">New York</option><option value="NC">North Carolina</option>
-              <option value="ND">North Dakota</option><option value="OH">Ohio</option>
-              <option value="OK">Oklahoma</option><option value="OR">Oregon</option>
-              <option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option>
-              <option value="SC">South Carolina</option><option value="SD">South Dakota</option>
-              <option value="TN">Tennessee</option><option value="TX">Texas</option>
-              <option value="UT">Utah</option><option value="VT">Vermont</option>
-              <option value="VA">Virginia</option><option value="WA">Washington</option>
-              <option value="WV">West Virginia</option><option value="WI">Wisconsin</option>
-              <option value="WY">Wyoming</option>
-            </select>
+        <!-- RIGHT SIDE -->
+        <div class="justify-self-end flex items-center gap-2">
+          <div
+            id="balancePill"
+            class="hidden text-xs px-2 py-1 rounded-full border"
+            style="
+              color: var(--brand);
+              border-color: color-mix(in srgb, var(--brand) 60%, transparent);
+            "
+          >
+            <span id="balanceText">0 credits</span>
           </div>
-          <div>
-            <label class="lbl">Plate</label>
-            <input name="plate" placeholder="e.g., 8ABC123" class="input" />
-          </div>
-        </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label class="lbl">Type</label>
-            <select name="type" class="select">
-              <option value="carfax">CARFAX</option>
-              <option value="autocheck">AutoCheck</option>
-            </select>
+          <div id="userChip" class="hidden items-center gap-2">
+            <div
+              class="w-8 h-8 rounded-full border border-blue-500/40 bg-blue-500/10 grid place-items-center text-blue-600"
+            >
+              <svg
+                class="w-4 h-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+              >
+                <circle cx="12" cy="8" r="4"></circle>
+                <path
+                  d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6"
+                  stroke-linecap="round"
+                ></path>
+              </svg>
+            </div>
+            <span id="userEmail" class="text-sm"></span>
+            <button id="logoutBtn" class="btn-outline text-xs">Sign out</button>
           </div>
-        </div>
 
-        <div class="pt-2">
-          <button id="go" class="btn btn-primary w-full" type="submit">
-            <svg class="w-5 h-5 opacity-90" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6" />
+          <button id="loginBtn" class="btn-outline text-sm">🔑 Login</button>
+
+          <button
+            id="themeBtn"
+            class="theme-btn shrink-0"
+            type="button"
+            aria-label="Toggle theme"
+          >
+            <span class="icon">🌙</span><span class="label">Dark</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Form card -->
+      <div class="relative mt-6 card">
+        <form id="f" class="space-y-4">
+          <div>
+            <label class="lbl">VIN</label>
+            <input
+              name="vin"
+              maxlength="17"
+              placeholder="e.g., 1C6RD6FT1CS310366"
+              class="input"
+            />
+          </div>
+
+          <div class="flex items-center justify-center">
+            <div class="sep"></div>
+            <span
+              class="mx-3 text-xs uppercase tracking-widest"
+              style="color: var(--muted)"
+              >or</span
+            >
+            <div class="sep"></div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="lbl">State</label>
+              <select name="state" class="select">
+                <option value="">Select a state…</option>
+                <option value="AL">Alabama</option>
+                <option value="AK">Alaska</option>
+                <option value="AZ">Arizona</option>
+                <option value="AR">Arkansas</option>
+                <option value="CA">California</option>
+                <option value="CO">Colorado</option>
+                <option value="CT">Connecticut</option>
+                <option value="DE">Delaware</option>
+                <option value="DC">District of Columbia</option>
+                <option value="FL">Florida</option>
+                <option value="GA">Georgia</option>
+                <option value="HI">Hawaii</option>
+                <option value="ID">Idaho</option>
+                <option value="IL">Illinois</option>
+                <option value="IN">Indiana</option>
+                <option value="IA">Iowa</option>
+                <option value="KS">Kansas</option>
+                <option value="KY">Kentucky</option>
+                <option value="LA">Louisiana</option>
+                <option value="ME">Maine</option>
+                <option value="MD">Maryland</option>
+                <option value="MA">Massachusetts</option>
+                <option value="MI">Michigan</option>
+                <option value="MN">Minnesota</option>
+                <option value="MS">Mississippi</option>
+                <option value="MO">Missouri</option>
+                <option value="MT">Montana</option>
+                <option value="NE">Nebraska</option>
+                <option value="NV">Nevada</option>
+                <option value="NH">New Hampshire</option>
+                <option value="NJ">New Jersey</option>
+                <option value="NM">New Mexico</option>
+                <option value="NY">New York</option>
+                <option value="NC">North Carolina</option>
+                <option value="ND">North Dakota</option>
+                <option value="OH">Ohio</option>
+                <option value="OK">Oklahoma</option>
+                <option value="OR">Oregon</option>
+                <option value="PA">Pennsylvania</option>
+                <option value="RI">Rhode Island</option>
+                <option value="SC">South Carolina</option>
+                <option value="SD">South Dakota</option>
+                <option value="TN">Tennessee</option>
+                <option value="TX">Texas</option>
+                <option value="UT">Utah</option>
+                <option value="VT">Vermont</option>
+                <option value="VA">Virginia</option>
+                <option value="WA">Washington</option>
+                <option value="WV">West Virginia</option>
+                <option value="WI">Wisconsin</option>
+                <option value="WY">Wyoming</option>
+              </select>
+            </div>
+            <div>
+              <label class="lbl">Plate</label>
+              <input name="plate" placeholder="e.g., 8ABC123" class="input" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="lbl">Type</label>
+              <select name="type" class="select">
+                <option value="carfax">CARFAX</option>
+                <option value="autocheck">AutoCheck</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="pt-2">
+            <button id="go" class="btn btn-primary w-full" type="submit">
+              <svg
+                class="w-5 h-5 opacity-90"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M12 6v12m6-6H6"
+                />
+              </svg>
+              View Report
+            </button>
+          </div>
+        </form>
+
+        <!-- Loading overlay -->
+        <div id="loading" class="loading hidden">
+          <div class="flex items-center gap-3" style="color: var(--brand)">
+            <svg class="w-6 h-6 animate-spin" viewBox="0 0 24 24">
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                fill="none"
+                stroke-width="4"
+              ></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+              ></path>
             </svg>
-            View Report
+            <span class="font-medium">Fetching report…</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Buy Credits Modal (tiers) -->
+      <div
+        id="buyCreditsModal"
+        class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      >
+        <div class="card max-w-sm text-center w-[92%]">
+          <h2 class="text-lg font-bold mb-2">Get Credits</h2>
+          <p class="mb-4 text-sm" style="color: var(--muted)">
+            Buy a single credit or save with a 10-pack.
+          </p>
+          <div class="grid gap-2">
+            <button id="buy1Btn" class="btn btn-primary w-full">
+              Buy 1 Credit — $6 USD
+            </button>
+            <div id="paypalContainer" class="mt-2"></div>
+            <button id="buy10Btn" class="btn btn-outline w-full">
+              Buy 5 Credits — $20 USD ($4 each)
+            </button>
+          </div>
+          <button id="closeModalBtn" class="btn-outline w-full mt-4">
+            Cancel
           </button>
         </div>
-      </form>
+      </div>
 
-      <!-- Loading overlay -->
-      <div id="loading" class="loading hidden">
-        <div class="flex items-center gap-3" style="color:var(--brand)">
-          <svg class="w-6 h-6 animate-spin" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" fill="none" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+      <!-- Login Modal -->
+      <div
+        id="loginModal"
+        class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
+      >
+        <div class="card w-[420px] max-w-[92vw]">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold">Sign in</h2>
+            <button id="closeLoginModal" class="btn-outline text-xs">✕</button>
+          </div>
+
+          <div class="mt-3">
+            <button
+              id="googleLogin"
+              class="btn-outline w-full flex items-center justify-center gap-2"
+            >
+              <img
+                src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                alt=""
+                class="w-5 h-5"
+              />
+              Continue with Google
+            </button>
+          </div>
+
+          <label class="lbl">Email</label>
+          <input
+            id="loginEmail"
+            type="email"
+            class="input"
+            placeholder="you@email.com"
+          />
+
+          <div class="mt-3">
+            <label class="lbl">Password</label>
+            <input
+              id="loginPassword"
+              type="password"
+              class="input"
+              placeholder="••••••••"
+            />
+          </div>
+
+          <div class="mt-4 grid grid-cols-2 gap-2">
+            <button id="doLogin" class="btn btn-primary">Sign in</button>
+            <button id="doSignup" class="btn-outline">Create account</button>
+          </div>
+
+          <p class="text-xs mt-3" style="color: var(--muted)">
+            Tip: you can also buy credits without signing in 
+          </p>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div class="mt-8">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="text-lg font-semibold">Results History</h2>
+          <button id="clearHistory" class="btn-outline text-sm">
+            Clear all
+          </button>
+        </div>
+        <div class="table-wrap rounded-xl">
+          <table class="min-w-full text-sm">
+            <thead
+              class="bg-[color:var(--tableHead)] text-left text-sm font-semibold"
+              style="color: var(--muted)"
+            >
+              <tr>
+                <th class="px-4 py-3 w-[35%]">VIN</th>
+                <th class="px-4 py-3 w-[15%]">Type</th>
+                <th class="px-4 py-3 w-[20%]">Time</th>
+                <th class="px-4 py-3 w-[10%] text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <footer class="bg-gray-50 border-t mt-12">
+        <div class="max-w-6xl mx-auto px-6 py-12">
+          <div class="flex items-center justify-between mb-6">
+            <div>
+              <h3 class="text-2xl font-bold">Customer Reviews</h3>
+              <p class="text-sm text-gray-600">Real customers. Real results.</p>
+            </div>
+            <div class="text-right">
+              <div class="text-lg font-semibold">5.0 ★</div>
+              <div class="text-sm text-gray-500">Based on recent feedback</div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <!-- Repeat this card 5–6 times with real info -->
+            <article class="bg-white p-4 rounded shadow-sm flex gap-4">
+              <img
+                src="/images/img1.png"
+                alt="Maya S.'s photo"
+                class="w-16 h-16 rounded-full object-cover flex-shrink-0"
+                loading="lazy"
+                width="64"
+                height="64"
+              />
+              <div class="flex-1">
+                <div class="flex items-center justify-between">
+                  <div class="text-sm font-medium">Maya S.</div>
+                  <div class="text-xs text-gray-500">2025-09-21</div>
+                </div>
+                <div class="mt-1 text-yellow-500" aria-label="5 out of 5 stars">
+                  ★★★★★
+                </div>
+                <p class="mt-2 text-gray-700 text-sm">
+                  Got the report in seconds and saved $1,200 negotiating. Super
+                  clean PDF.
+                </p>
+              </div>
+            </article>
+            <article class="bg-white p-4 rounded shadow-sm flex gap-4">
+              <img
+                src="/images/img1.png"
+                alt="Maya S.'s photo"
+                class="w-16 h-16 rounded-full object-cover flex-shrink-0"
+                loading="lazy"
+                width="64"
+                height="64"
+              />
+              <div class="flex-1">
+                <div class="flex items-center justify-between">
+                  <div class="text-sm font-medium">Collin P.</div>
+                  <div class="text-xs text-gray-500">2025-09-10</div>
+                </div>
+                <div class="mt-1 text-yellow-500" aria-label="5 out of 5 stars">
+                  ★★★★★
+                </div>
+                <p class="mt-2 text-gray-700 text-sm">
+                  Saved me like 40 bucks, Thank you will definately Purchase again
+                </p>
+              </div>
+            </article>
+            <article class="bg-white p-4 rounded shadow-sm flex gap-4">
+              <img
+                src="/images/img1.png"
+                alt="Maya S.'s photo"
+                class="w-16 h-16 rounded-full object-cover flex-shrink-0"
+                loading="lazy"
+                width="64"
+                height="64"
+              />
+              <div class="flex-1">
+                <div class="flex items-center justify-between">
+                  <div class="text-sm font-medium">Laz F.</div>
+                  <div class="text-xs text-gray-500">2025-08-08</div>
+                </div>
+                <div class="mt-1 text-yellow-500" aria-label="5 out of 5 stars">
+                  ★★★★★
+                </div>
+                <p class="mt-2 text-gray-700 text-sm">
+                  This is way better than paying almost 50 bucks for a report
+                </p>
+              </div>
+            </article>
+            <article class="bg-white p-4 rounded shadow-sm flex gap-4">
+              <img
+                src="/images/img1.png"
+                alt="Maya S.'s photo"
+                class="w-16 h-16 rounded-full object-cover flex-shrink-0"
+                loading="lazy"
+                width="64"
+                height="64"
+              />
+              <div class="flex-1">
+                <div class="flex items-center justify-between">
+                  <div class="text-sm font-medium">Eric T.</div>
+                  <div class="text-xs text-gray-500">2025-10-21</div>
+                </div>
+                <div class="mt-1 text-yellow-500" aria-label="5 out of 5 stars">
+                  ★★★★★
+                </div>
+                <p class="mt-2 text-gray-700 text-sm">
+                  Gave me a discount for purchasing in bulk thanks again .
+                </p>
+              </div>
+            </article>
+
+            <!-- Add 4–5 more cards with your real customer quotes/images -->
+          </div>
+        </div>
+      </footer>
+
+      <!-- Footer -->
+      <div
+        class="mt-8 flex items-center justify-center gap-4 text-sm"
+        style="color: var(--muted)"
+      >
+        <a class="underline" href="/privacy.html">Privacy Policy</a>
+        <span>•</span>
+        <a class="underline" href="/terms.html">Terms of Use</a>
+        <a
+          class="underline"
+          href="https://mail.google.com/mail/?view=cm&fs=1&to=autovinreveal%40gmail.com"
+          >Contact Us</a
+        >
+      </div>
+    </div>
+
+    <!-- Toasts -->
+    <div id="toastBox" class="fixed top-4 right-4 space-y-2 z-50"></div>
+
+    <!-- PUBLIC keys ok in client -->
+    <script>
+      window.VITE_SUPABASE_URL = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
+      window.VITE_SUPABASE_ANON_KEY =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <!-- Boot/Warmup Overlay -->
+    <div
+      id="bootOverlay"
+      class="hidden fixed inset-0 bg-black/60 z-[1000] flex items-center justify-center"
+    >
+      <div class="card max-w-sm w-[92%] text-center">
+        <div class="mb-3 flex items-center justify-center">
+          <svg class="w-8 h-8 animate-spin" viewBox="0 0 24 24">
+            <circle
+              class="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              fill="none"
+              stroke-width="4"
+            ></circle>
+            <path
+              class="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+            ></path>
           </svg>
-          <span class="font-medium">Fetching report…</span>
         </div>
-      </div>
-    </div>
-
-    <!-- Buy Credits Modal (tiers) -->
-    <div id="buyCreditsModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div class="card max-w-sm text-center w-[92%]">
-        <h2 class="text-lg font-bold mb-2">Get Credits</h2>
-        <p class="mb-4 text-sm" style="color:var(--muted)">Buy a single credit or save with a 10-pack.</p>
-        <div class="grid gap-2">
-          <button id="buy1Btn" class="btn btn-primary w-full">Buy 1 Credit — $6 USD</button>
-          <div id="paypalContainer" class="mt-2"></div>
-          <button id="buy10Btn" class="btn btn-outline w-full">Buy 5 Credits — $20 USD ($4 each)</button>
-        </div>
-        <button id="closeModalBtn" class="btn-outline w-full mt-4">Cancel</button>
-      </div>
-    </div>
-
-    <!-- Login Modal -->
-    <div id="loginModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-      <div class="card w-[420px] max-w-[92vw]">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-semibold">Sign in</h2>
-          <button id="closeLoginModal" class="btn-outline text-xs">✕</button>
-        </div>
-
-        <div class="mt-3">
-          <button id="googleLogin" class="btn-outline w-full flex items-center justify-center gap-2">
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="" class="w-5 h-5">
-            Continue with Google
-          </button>
-        </div>
-
-        <label class="lbl">Email</label>
-        <input id="loginEmail" type="email" class="input" placeholder="you@email.com" />
-
-        <div class="mt-3">
-          <label class="lbl">Password</label>
-          <input id="loginPassword" type="password" class="input" placeholder="••••••••" />
-        </div>
-
-        <div class="mt-4 grid grid-cols-2 gap-2">
-          <button id="doLogin" class="btn btn-primary">Sign in</button>
-          <button id="doSignup" class="btn-outline">Create account</button>
-        </div>
-
-        <p class="text-xs mt-3" style="color:var(--muted)">
-          Tip: you can also buy credits without signing in — Stripe or PayPal will just ask for your card info.
+        <h2 class="text-lg font-semibold mb-1">Warming up…</h2>
+        <p class="text-sm" style="color: var(--muted)">
+          Our free server may take 20–60s to start. Thanks for your patience.
         </p>
       </div>
     </div>
 
-    <!-- History -->
-    <div class="mt-8">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="text-lg font-semibold">Results History</h2>
-        <button id="clearHistory" class="btn-outline text-sm">Clear all</button>
-      </div>
-      <div class="table-wrap rounded-xl">
-        <table class="min-w-full text-sm">
-          <thead class="bg-[color:var(--tableHead)] text-left text-sm font-semibold" style="color:var(--muted)">
-            <tr>
-              <th class="px-4 py-3 w-[35%]">VIN</th>
-              <th class="px-4 py-3 w-[15%]">Type</th>
-              <th class="px-4 py-3 w-[20%]">Time</th>
-              <th class="px-4 py-3 w-[10%] text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody id="historyBody"></tbody>
-        </table>
-      </div>
-    </div>
+    <!-- Your app -->
+    <script type="module" src="/app.js"></script>
 
-    <!-- Footer -->
-    <div class="mt-8 flex items-center justify-center gap-4 text-sm" style="color:var(--muted)">
-      <a class="underline" href="/privacy.html">Privacy Policy</a>
-      <span>•</span>
-      <a class="underline" href="/terms.html">Terms of Use</a>
-      <a class="underline" href="https://mail.google.com/mail/?view=cm&fs=1&to=autovinreveal%40gmail.com">Contact Us</a>
-    </div>
-  </div>
-
-  <!-- Toasts -->
-  <div id="toastBox" class="fixed top-4 right-4 space-y-2 z-50"></div>
-
-  <!-- PUBLIC keys ok in client -->
-  <script>
-    window.VITE_SUPABASE_URL = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
-    window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
-  </script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <!-- Boot/Warmup Overlay -->
-  <div id="bootOverlay" class="hidden fixed inset-0 bg-black/60 z-[1000] flex items-center justify-center">
-    <div class="card max-w-sm w-[92%] text-center">
-      <div class="mb-3 flex items-center justify-center">
-        <svg class="w-8 h-8 animate-spin" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" fill="none" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-        </svg>
-      </div>
-      <h2 class="text-lg font-semibold mb-1">Warming up…</h2>
-      <p class="text-sm" style="color:var(--muted)">
-        Our free server may take 20–60s to start. Thanks for your patience.
-      </p>
-    </div>
-  </div>
-
-  <!-- Your app -->
-  <script type="module" src="/app.js"></script>
-
-  <!-- Note:
+    <!-- Note:
        Fire Meta Pixel 'Purchase' ONLY after confirmed success
        (inside your app.js success handlers), not globally here. -->
-</body>
+  </body>
 </html>
