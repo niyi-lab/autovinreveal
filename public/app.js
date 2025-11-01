@@ -785,8 +785,6 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
 
 let lastFormData = null;
 
-const buy1Btn = $id('buy1Btn');
-const buy10Btn = $id('buy10Btn');
 buy1Btn?.addEventListener('click', async () => {
   const { user } = await getSession();
   closeBuyModal();
