@@ -1,6 +1,5 @@
 // app.js
-console.info('app.js version: 2025-10-17-5');
-
+console.info('app.js version: 2025-11-01-vin-validate');
 
 /* ================================
    Config & Utilities
@@ -10,13 +9,16 @@ const API = {
   checkout: '/api/create-checkout-session',
   credits: (uid) => `/api/credits/${uid}`,
   share: '/api/share',
+  // NOTE: Server doesn't expose a "validate VIN" endpoint without cost.
+  // We enforce ISO-3779 VIN check digit locally to block bad VINs up front.
 };
-const PENDING_KEY = 'pendingReport';
 
+const PENDING_KEY = 'pendingReport';
 function $id(id) { return document.getElementById(id); }
 
 function showToast(message, type = 'error') {
   const box = $id('toastBox');
+  if (!box) { alert(message); return; }
   const el = document.createElement('div');
   el.className = `toast ${type === 'error' ? 'error' : 'ok'} animate-fadeIn`;
   el.textContent = message;
@@ -35,7 +37,6 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-/* Optional helper (we no longer pre-open tabs during submit) */
 function openBlank() {
   try { return window.open('', '_blank', 'noopener,noreferrer'); }
   catch { return null; }
@@ -47,7 +48,68 @@ function setUseCreditVisible(show) {
   el.classList.toggle('hidden', !show);
 }
 
-/* Primary CTA switcher: 'view' | 'buy' */
+/* ================================
+   VIN Validation (ISO 3779)
+   - Blocks I, O, Q
+   - Enforces length 17
+   - Validates check digit (position 9)
+================================ */
+const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/; // excludes I,O,Q
+const VIN_WEIGHTS = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
+const VIN_MAP = Object.freeze({
+  A:1, B:2, C:3, D:4, E:5, F:6, G:7, H:8,
+  J:1, K:2, L:3, M:4, N:5, P:7, R:9,
+  S:2, T:3, U:4, V:5, W:6, X:7, Y:8, Z:9,
+  '0':0, '1':1, '2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9
+});
+function looksVinBasic(v) { return VIN_RE.test((v||'').toUpperCase()); }
+function vinCheckDigitOk(vinRaw) {
+  const vin = (vinRaw || '').toUpperCase();
+  if (!looksVinBasic(vin)) return false;
+
+  let sum = 0;
+  for (let i=0;i<17;i++){
+    const ch = vin[i];
+    const val = VIN_MAP[ch];
+    const w = VIN_WEIGHTS[i];
+    if (val === undefined) return false;
+    sum += val * w;
+  }
+  const remainder = sum % 11;
+  const expected = (remainder === 10) ? 'X' : String(remainder);
+  const actual = vin[8]; // position 9 (0-index 8)
+  return actual === expected;
+}
+function looksVin(v) {
+  const vin = (v||'').toUpperCase().trim();
+  if (!looksVinBasic(vin)) return false;
+  return vinCheckDigitOk(vin);
+}
+
+/* Inline VIN validation UI helpers */
+function ensureVinHelpEl() {
+  let help = $id('vinHelp');
+  if (!help) {
+    const vinInput = document.querySelector('input[name="vin"]');
+    if (!vinInput) return null;
+    help = document.createElement('div');
+    help.id = 'vinHelp';
+    help.className = 'text-xs mt-1';
+    help.style.color = 'var(--muted)';
+    vinInput.insertAdjacentElement('afterend', help);
+  }
+  return help;
+}
+function setVinHelp(text, ok=false) {
+  const el = ensureVinHelpEl();
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.color = ok ? 'var(--brand)' : 'var(--muted)';
+}
+
+/* ================================
+   Primary CTA switcher: 'view' | 'buy'
+================================ */
 function setPrimaryCTA(mode = 'view') {
   const btn = $id('go');
   if (!btn) return;
@@ -74,7 +136,7 @@ function setPrimaryCTA(mode = 'view') {
       </svg>
       View Report
     `;
-    btn.onclick = null; // handled by <form> submit
+    btn.onclick = null;
   }
 }
 
@@ -95,7 +157,6 @@ const bootOverlay = $id('bootOverlay');
 let backendReadyOnce = false;
 function showBootOverlay() { bootOverlay?.classList.remove('hidden'); }
 function hideBootOverlay() { bootOverlay?.classList.add('hidden'); }
-
 async function pingBackendOnce(timeoutMs = 2000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -131,7 +192,7 @@ const stripeSessionId = p.get('session_id') || null;
 const ppSuccess = p.get('pp') === 'success';
 const intentParam = p.get('intent') || null;
 const vinParam = (p.get('vin') || '').toUpperCase();
-const oneParam = p.get('one') || null;          // PayPal one-time receipt in URL
+const oneParam = p.get('one') || null;
 const stateParam = p.get('state') || '';
 const plateParam = p.get('plate') || '';
 const typeParam = p.get('type') || '';
@@ -147,7 +208,6 @@ async function resumePendingPurchase() {
   const headers = { 'Content-Type': 'application/json' };
   const { token, user } = await getSession();
   if (token) headers['Authorization'] = `Bearer ${token}`;
-
   if (!user && stripeSessionId) pending.oneTimeSession = stripeSessionId;
 
   try {
@@ -161,13 +221,11 @@ async function resumePendingPurchase() {
 
     try {
       fbq('track', 'Purchase', {
-        value: 7.00,
-        currency: 'USD',
+        value: 7.00, currency: 'USD',
         contents: [{ id: 'VinReport', quantity: 1 }],
-        content_ids: ['VinReport'],
-        content_type: 'product'
+        content_ids: ['VinReport'], content_type: 'product'
       });
-    } catch { }
+    } catch {}
 
     showToast('Report ready!', 'ok');
 
@@ -188,7 +246,7 @@ async function resumePendingPurchase() {
         await navigator.clipboard.writeText(url);
         showToast('Share link copied to clipboard!', 'ok');
       }
-    } catch { }
+    } catch {}
   } catch (e) {
     showToast(e.message || 'Failed to resume purchase', 'error');
   } finally {
@@ -201,7 +259,6 @@ async function handleSuccessIfNeeded() {
   const isSuccessContext = onSuccessPage() || stripeSessionId || ppSuccess;
   if (!isSuccessContext) return;
 
-  // Stripe guest direct open
   if (intentParam === 'buy_report' && stripeSessionId && vinParam) {
     showToast('Payment confirmed. Preparing your report…', 'ok');
     try {
@@ -213,16 +270,11 @@ async function handleSuccessIfNeeded() {
       if (!r.ok) throw new Error(await r.text());
       const html = await r.text();
       document.open(); document.write(html); document.close();
-      try {
-        fbq('track', 'Purchase', { value: 7.00, currency: 'USD', contents: [{ id: 'VinReport', quantity: 1 }], content_ids: ['VinReport'], content_type: 'product' });
-      } catch { }
+      try { fbq('track', 'Purchase', { value: 7.00, currency: 'USD', contents: [{ id: 'VinReport', quantity: 1 }], content_ids: ['VinReport'], content_type: 'product' }); } catch {}
       return;
-    } catch (e) {
-      showToast(e.message || 'Failed to fetch report', 'error');
-    }
+    } catch (e) { showToast(e.message || 'Failed to fetch report', 'error'); }
   }
 
-  // PayPal guest/logged-in: open using receipt + vin/plate from URL
   if (ppSuccess && oneParam && (vinParam || (stateParam && plateParam))) {
     showToast('Payment confirmed. Preparing your report…', 'ok');
     try {
@@ -238,16 +290,11 @@ async function handleSuccessIfNeeded() {
       if (!r.ok) throw new Error(await r.text());
       const html = await r.text();
       document.open(); document.write(html); document.close();
-      try {
-        fbq('track', 'Purchase', { value: 7.00, currency: 'USD', contents: [{ id: 'VinReport', quantity: 1 }], content_ids: ['VinReport'], content_type: 'product' });
-      } catch { }
+      try { fbq('track', 'Purchase', { value: 7.00, currency: 'USD', contents: [{ id: 'VinReport', quantity: 1 }], content_ids: ['VinReport'], content_type: 'product' }); } catch {}
       return;
-    } catch (e) {
-      showToast(e.message || 'Failed to fetch report', 'error');
-    }
+    } catch (e) { showToast(e.message || 'Failed to fetch report', 'error'); }
   }
 
-  // Fallback to localStorage pending
   if (ppSuccess || stripeSessionId || onSuccessPage()) {
     const pending = tryLoadPending();
     if (pending) {
@@ -258,12 +305,11 @@ async function handleSuccessIfNeeded() {
 
   await refreshBalancePill();
 
-  // If we’re on /success.html, bounce back to home
   if (onSuccessPage()) {
     setTimeout(() => { window.location.href = '/'; }, 1200);
   } else {
     const url = new URL(location.href);
-    ['session_id', 'intent', 'vin', 'pp', 'one', 'state', 'plate', 'type'].forEach(k => url.searchParams.delete(k));
+    ['session_id','intent','vin','pp','one','state','plate','type'].forEach(k => url.searchParams.delete(k));
     history.replaceState({}, '', url.pathname + url.search);
   }
 }
@@ -295,6 +341,7 @@ themeBtn?.addEventListener('click', () => {
 
 /* ================================
    Auth modal (email + password)
+   + Show/Hide password button
 ================================ */
 const loginBtn = $id('loginBtn');
 const loginModal = $id('loginModal');
@@ -312,6 +359,25 @@ function closeLogin() { loginModal?.classList.add('hidden'); }
 closeLoginModal?.addEventListener('click', closeLogin);
 logoutBtn?.addEventListener('click', doLogout);
 loginBtn?.addEventListener('click', () => openLogin());
+
+// Add a minimal "Show" button for password if not present
+(function ensureShowPassword() {
+  if (!pwEl) return;
+  // If HTML doesn't include a toggle, inject one after the field
+  if (!document.getElementById('pwToggle')) {
+    const toggle = document.createElement('button');
+    toggle.id = 'pwToggle';
+    toggle.type = 'button';
+    toggle.className = 'btn-outline text-xs mt-1';
+    toggle.textContent = 'Show password';
+    pwEl.insertAdjacentElement('afterend', toggle);
+    toggle.addEventListener('click', () => {
+      const isPwd = pwEl.type === 'password';
+      pwEl.type = isPwd ? 'text' : 'password';
+      toggle.textContent = isPwd ? 'Hide password' : 'Show password';
+    });
+  }
+})();
 
 (() => {
   const p = new URLSearchParams(window.location.search);
@@ -362,9 +428,7 @@ async function doSignup() {
     if (!data.session) showToast('Check your email to confirm your account.', 'ok');
     else {
       showToast('Account created — you are signed in!', 'ok'); closeLogin();
-      // META: store email for Advanced Matching
-      try { localStorage.setItem('fb_em', (email || '').trim().toLowerCase()); } catch { }
-
+      try { localStorage.setItem('fb_em', (email || '').trim().toLowerCase()); } catch {}
     }
     await refreshBalancePill();
   } catch (e) { showToast(e.message || 'Sign up failed', 'error'); }
@@ -557,6 +621,7 @@ async function copyShareLink(vin, type) {
 function renderHistory() {
   const body = $id('historyBody');
   const list = loadHistory();
+  if (!body) return;
   body.innerHTML = '';
   if (!list.length) {
     body.innerHTML = `<tr><td colspan="5" class="px-4 py-3" style="color:var(--muted)">No reports yet.</td></tr>`;
@@ -596,14 +661,13 @@ $id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(H
    Buy Credits modal (tiers) + PayPal
 ================================ */
 const buyModal = $id('buyCreditsModal');
-const buy1Btn = $id('buy1Btn');   // 1-credit button (Stripe)
-const buy10Btn = $id('buy10Btn');  // 10-pack button (Stripe)
+const buy1Btn = $id('buy1Btn');
+const buy10Btn = $id('buy10Btn');
 const closeBuyBtn = $id('closeModalBtn');
 function openBuyModal() { buyModal?.classList.remove('hidden'); renderPaypalButton(); }
 function closeBuyModal() { buyModal?.classList.add('hidden'); }
 closeBuyBtn?.addEventListener('click', closeBuyModal);
 
-// PayPal helpers
 async function createPaypalOrder(user) {
   const r = await fetch('/api/paypal/create-order', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -613,7 +677,6 @@ async function createPaypalOrder(user) {
   const { orderID } = await r.json();
   return orderID;
 }
-
 async function capturePaypalOrder(orderID, user) {
   const r = await fetch('/api/paypal/capture-order', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -623,7 +686,6 @@ async function capturePaypalOrder(orderID, user) {
   return r.json(); // { ok, captureId }
 }
 
-// PayPal smart button (encodes VIN/plate/receipt into the redirect URL)
 let paypalRendered = false;
 async function renderPaypalButton() {
   if (paypalRendered) return;
@@ -633,14 +695,12 @@ async function renderPaypalButton() {
   paypalRendered = true;
 
   const { user } = await getSession();
-
   window.paypal.Buttons({
     createOrder: () => createPaypalOrder(user),
     onApprove: async (data) => {
       try {
         const result = await capturePaypalOrder(data.orderID, user);
 
-        // Build pending payload from stored pending or lastFormData
         let pending = tryLoadPending();
         if (!pending || (!pending.vin && !(pending.state && pending.plate))) {
           pending = lastFormData || null;
@@ -651,17 +711,14 @@ async function renderPaypalButton() {
           return;
         }
 
-        // Guests need one-time receipt to authorize in /api/report
         let one = '';
         if (!user && result?.captureId) {
           one = 'pp_' + result.captureId;
           pending.oneTimeSession = one;
         }
 
-        // Save pending (works when origin matches)
         localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
 
-        // Always pass the critical info in the URL too
         const url = new URL('/success.html', 'https://www.autovinreveal.com');
         url.searchParams.set('pp', 'success');
         if (one) url.searchParams.set('one', one);
@@ -728,6 +785,8 @@ async function startPurchase({ user, price_id, pendingReport = null }) {
 
 let lastFormData = null;
 
+const buy1Btn = $id('buy1Btn');
+const buy10Btn = $id('buy10Btn');
 buy1Btn?.addEventListener('click', async () => {
   const { user } = await getSession();
   closeBuyModal();
@@ -767,7 +826,7 @@ async function updateUseCreditBtn() {
       const r = await fetch(API.credits(user.id));
       const { balance = 0 } = await r.json();
       enable = balance > 0;
-    } catch { }
+    } catch {}
   }
   useCreditBtn.disabled = !enable;
 }
@@ -801,21 +860,69 @@ useCreditBtn?.addEventListener('click', async () => {
 });
 
 /* ================================
-   Main form (fetch report)
+   VIN + Form: Realtime gating (A, YES)
+   - Disables "View Report" unless:
+     a) VIN passes ISO-3779 check, OR
+     b) State & Plate present
 ================================ */
 const f = $id('f');
 const go = $id('go');
 const loading = $id('loading');
 
-const looksVin = (v) => /^[A-HJ-NPR-Z0-9]{17}$/i.test(v || '');
+function hasPlateCombo(formData) {
+  const state = (formData.state || '').trim();
+  const plate = (formData.plate || '').trim();
+  return !!(state && plate);
+}
 
-f?.addEventListener('input', updateUseCreditBtn);
+function reflectVinGate() {
+  if (!f || !go) return;
+  const formData = Object.fromEntries(new FormData(f).entries());
+  const vin = (formData.vin || '').trim().toUpperCase();
 
+  if (vin.length === 0 && !hasPlateCombo(formData)) {
+    setVinHelp('Enter a 17-char VIN (no I/O/Q) or select State & Plate.');
+    go.disabled = true;
+    return;
+  }
+
+  if (vin.length > 0) {
+    if (!looksVinBasic(vin)) {
+      setVinHelp('VIN must be 17 chars and cannot contain I, O, or Q.');
+      go.disabled = true;
+      return;
+    }
+    if (!vinCheckDigitOk(vin)) {
+      setVinHelp('VIN check digit failed. Please double-check the VIN.', false);
+      go.disabled = true;
+      return;
+    }
+    setVinHelp('VIN looks valid ✓', true);
+    go.disabled = false;
+    return;
+  }
+
+  // No VIN, but plate combo ok → allow
+  if (hasPlateCombo(formData)) {
+    setVinHelp('State + Plate provided ✓', true);
+    go.disabled = false;
+    return;
+  }
+
+  // Fallback block
+  go.disabled = true;
+}
+
+f?.addEventListener('input', () => {
+  reflectVinGate();
+  updateUseCreditBtn();
+});
+
+/* ================================
+   Main form (fetch report)
+================================ */
 f?.addEventListener('submit', async (e) => {
   e.preventDefault();
-
-  go.disabled = true;
-  loading.classList.remove('hidden');
 
   const formData = Object.fromEntries(new FormData(f).entries());
   const data = {
@@ -827,14 +934,20 @@ f?.addEventListener('submit', async (e) => {
     allowLive: true
   };
 
+  // Final guard (button is already gated)
   if (!data.vin && !(data.state && data.plate)) {
     showToast('Enter a VIN or a State + Plate', 'error');
-    go.disabled = false; loading.classList.add('hidden'); return;
+    reflectVinGate();
+    return;
   }
-  if (data.vin && !/^[A-HJ-NPR-Z0-9]{17}$/i.test(data.vin)) {
-    showToast('VIN must be 17 characters (no I/O/Q)', 'error');
-    go.disabled = false; loading.classList.add('hidden'); return;
+  if (data.vin && !looksVin(data.vin)) {
+    showToast('That VIN appears invalid (ISO-3779 check failed).', 'error');
+    reflectVinGate();
+    return;
   }
+
+  go.disabled = true;
+  loading?.classList.remove('hidden');
 
   let headers = { 'Content-Type': 'application/json' };
   let currentUser = null;
@@ -848,7 +961,6 @@ f?.addEventListener('submit', async (e) => {
     if (token) headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // Logged-in but zero credits → open buy modal
   if (currentUser?.id) {
     try {
       const r = await fetch(API.credits(currentUser.id));
@@ -856,10 +968,10 @@ f?.addEventListener('submit', async (e) => {
       if (balance <= 0) {
         lastFormData = data;
         openBuyModal();
-        go.disabled = false; loading.classList.add('hidden');
+        go.disabled = false; loading?.classList.add('hidden');
         return;
       }
-    } catch { }
+    } catch {}
   }
 
   try {
@@ -905,14 +1017,14 @@ f?.addEventListener('submit', async (e) => {
         await navigator.clipboard.writeText(url);
         showToast('Share link copied to clipboard!', 'ok');
       }
-    } catch { }
+    } catch {}
 
     await refreshBalancePill();
   } catch (err) {
     showToast(err.message || 'Request failed', 'error');
   } finally {
     go.disabled = false;
-    loading.classList.add('hidden');
+    loading?.classList.add('hidden');
   }
 });
 
@@ -924,7 +1036,6 @@ f?.addEventListener('submit', async (e) => {
   await refreshBalancePill();
   renderHistory();
 
-  // After return from PayPal/Stripe
   if (stripeSessionId || ppSuccess) {
     if (!intentParam || intentParam !== 'buy_report') {
       const pending = tryLoadPending();
@@ -935,5 +1046,6 @@ f?.addEventListener('submit', async (e) => {
     }
   }
 
+  reflectVinGate();        // <-- enforce gating on load
   updateUseCreditBtn();
 })();
