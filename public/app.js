@@ -1026,6 +1026,23 @@ f?.addEventListener('submit', async (e) => {
   }
 });
 
+
+// Sidebar 5-pack CTA (public site)
+document.getElementById('buy5Sidebar')?.addEventListener('click', async () => {
+  const { user } = await getSession();
+  if (!user) {
+    showToast('Please sign in to buy a 5-pack of credits.', 'error');
+    openLogin();
+    return;
+  }
+  // TODO: replace with your real Stripe Price ID for the 5-pack
+  startPurchase({ user, price_id: 'STRIPE_PRICE_10PACK', pendingReport: null });
+});
+
+document.getElementById('comparePlans')?.addEventListener('click', () => {
+  openBuyModal();
+});
+
 /* ================================
    Init
 ================================ */

@@ -132,3 +132,41 @@ tbody tr + tr{ border-top:1px solid var(--border) }
 /* in public/style.css */
 .card .border { border-color: color-mix(in srgb, var(--brand) 18%, transparent); }
 .card .border:hover { border-color: color-mix(in srgb, var(--brand) 35%, transparent); }
+
+
+.promo-card {
+  border: 1px solid rgba(0,0,0,.08);
+  background: var(--panel, #0b1220);
+  color: var(--fg, #e5e7eb);
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.18);
+  position: sticky; top: 16px;
+}
+
+.promo-head {
+  font-weight: 700; letter-spacing: .2px;
+  font-size: 0.95rem; color: var(--brand, #60a5fa);
+  margin-bottom: 8px;
+}
+
+.promo-price { margin-top: 6px; font-size: .95rem; }
+.promo-price .big { font-size: 1.85rem; font-weight: 800; margin-right: 6px; }
+.promo-sub { margin: 6px 0 12px; color: var(--muted, #94a3b8); }
+
+.promo-points { margin: 0 0 14px; padding-left: 18px; }
+.promo-points li { margin: 6px 0; color: var(--muted, #94a3b8); }
+
+.promo-actions { display: flex; gap: 10px; }
+.btn-primary {
+  background: var(--brand, #3b82f6);
+  color: white; border: none; padding: 10px 14px;
+  border-radius: 10px; font-weight: 600; cursor: pointer;
+}
+.btn-primary:hover { filter: brightness(1.05); }
+
+.btn-outline {
+  background: transparent; border: 1px solid rgba(255,255,255,.18);
+  color: inherit; padding: 10px 14px; border-radius: 10px; cursor: pointer;
+}
+.btn-outline:hover { border-color: rgba(255,255,255,.35); }

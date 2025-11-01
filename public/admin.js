@@ -202,6 +202,9 @@ async function onCacheAction(e) {
 
 refreshCacheBtn?.addEventListener('click', loadCache);
 
+
+
+
 /* ------------------------------
    Open/Download via admin endpoint
    GET /api/admin/open?vin=&type=&as=html|pdf&fetch=0|1
