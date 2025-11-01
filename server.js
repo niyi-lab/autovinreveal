@@ -122,16 +122,32 @@ async function getUser(req) {
 }
 
 /* ================================================================
-   CarSimulcast API
+   CarSimulcast API (hardened)
 ================================================================ */
 const CS     = 'https://connect.carsimulcast.com';
 const KEY    = process.env.API_KEY;
 const SECRET = process.env.API_SECRET;
 const H      = { 'API-KEY': KEY, 'API-SECRET': SECRET };
 
+// ✅ Hardened: surface HTTP errors / hints so we can respond 422 for bad VINs.
 async function csGet(url) {
-  const r = await axios.get(url, { headers: H, responseType: 'text', timeout: 30000 });
-  return r.data; // base64 (gzipped HTML OR raw HTML-base64 OR raw PDF-base64)
+  try {
+    const r = await axios.get(url, {
+      headers: H,
+      responseType: 'text',
+      timeout: 30000,
+      validateStatus: () => true // don't throw; we handle status codes
+    });
+    if (r.status >= 400) {
+      const body = String(r.data || '');
+      const hint = body.slice(0, 200).toLowerCase();
+      throw new Error(`CS_${r.status}:${hint}`);
+    }
+    return r.data; // base64 (gzipped HTML OR raw HTML-base64 OR raw PDF-base64)
+  } catch (err) {
+    const msg = String(err?.message || 'cs-error');
+    throw new Error(`CS_ERROR:${msg}`);
+  }
 }
 
 /* ================================================================
@@ -166,6 +182,34 @@ async function fetchAndCacheReport(vin, type = 'carfax') {
   const live = await csGet(`${CS}/getrecord/${type}/${vin}`);
   writeCache(vin, type, live);
   return true;
+}
+
+/* ================================================================
+   ✅ VIN validation (ISO 3779: charset + check digit)
+================================================================ */
+const VIN_WEIGHTS = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
+const VIN_MAP = Object.freeze({
+  A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8, J:1,K:2,L:3,M:4,N:5, P:7, R:9,
+  S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9,
+  '0':0,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9
+});
+function isPlausibleVinFormat(vin) { return /^[A-HJ-NPR-Z0-9]{17}$/.test(vin); }
+function vinCheckDigitOk(vin) {
+  let sum = 0;
+  for (let i = 0; i < 17; i++) {
+    const val = VIN_MAP[vin[i]];
+    if (val == null) return false;
+    sum += val * VIN_WEIGHTS[i];
+  }
+  const r = sum % 11;
+  const expected = r === 10 ? 'X' : String(r);
+  return vin[8] === expected;
+}
+function validateVin(vinRaw) {
+  const vin = (vinRaw || '').toUpperCase().trim();
+  if (!isPlausibleVinFormat(vin)) return { ok:false, code:'format', msg:'VIN must be 17 characters (no I, O, Q).' };
+  if (!vinCheckDigitOk(vin))      return { ok:false, code:'check_digit', msg:'VIN check digit is invalid. Please re-check.' };
+  return { ok:true, vin };
 }
 
 /* ================================================================
@@ -239,11 +283,24 @@ app.use(morgan('dev'));
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
 /* ================================================================
-   Stripe checkout session
+   Stripe checkout session  (✅ validate VIN before creating session)
 ================================================================ */
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
     const { user_id: userIdFromBody, price_id, vin, report_type } = req.body || {};
+
+    // 🔒 Validate VIN if provided (prevents charging for bogus VINs)
+    if (vin) {
+      const v = validateVin(vin);
+      if (!v.ok) {
+        return res.status(422).json({
+          error: 'invalid_vin',
+          reason: v.code,
+          message: v.msg
+        });
+      }
+    }
+
     let userId = userIdFromBody;
     if (!userId) {
       const { user } = await getUser(req);
@@ -400,7 +457,7 @@ app.post('/api/paypal/capture-order', async (req, res) => {
 });
 
 /* ================================================================
-   /api/check – see if cached
+   /api/check – see if cached (✅ now rejects invalid VINs)
 ================================================================ */
 app.post('/api/check', async (req, res) => {
   try {
@@ -412,15 +469,21 @@ app.post('/api/check', async (req, res) => {
       if (m) targetVin = m[0];
     }
     if (!targetVin) return res.json({ ok: true, cached: false });
-    const raw = readCache(targetVin, type.toLowerCase());
-    return res.json({ ok: true, cached: !!raw, vin: targetVin, type: type.toLowerCase() });
+
+    const v = validateVin(targetVin);
+    if (!v.ok) {
+      return res.status(422).json({ ok:false, error:'invalid_vin', reason:v.code });
+    }
+
+    const raw = readCache(v.vin, type.toLowerCase());
+    return res.json({ ok: true, cached: !!raw, vin: v.vin, type: type.toLowerCase() });
   } catch (e) {
     return res.status(200).json({ ok: false, cached: false });
   }
 });
 
 /* ================================================================
-   Report API
+   Report API (✅ validates VIN & surfaces provider errors)
 ================================================================ */
 app.post('/api/report', async (req, res) => {
   try {
@@ -439,46 +502,71 @@ app.post('/api/report', async (req, res) => {
       const m = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
       if (m) targetVin = m[0];
     }
-    if (!targetVin) return res.status(400).send('VIN or State+Plate required');
+    if (!targetVin) return res.status(400).json({ error:'vin_required', message:'VIN or State+Plate required' });
 
-    // One-time receipt verification
-    if (oneTimeSession) {
-      if (CONSUMED.has(oneTimeSession)) return res.status(409).send('This receipt was already used.');
-      try {
-        if (oneTimeSession.startsWith('pp_')) {
-          const captureId = oneTimeSession.slice(3);
-          const cap = await verifyPaypalCapture(captureId);
-          if (cap?.status !== 'COMPLETED') return res.status(402).send('Payment not completed.');
-        } else {
-          const sStripe = stripeForId(oneTimeSession);
-          const s = await sStripe.checkout.sessions.retrieve(oneTimeSession);
-          if (s.payment_status !== 'paid') return res.status(402).send('Payment not completed.');
-        }
-        CONSUMED.add(oneTimeSession); saveConsumed();
-      } catch {
-        return res.status(400).send('Invalid purchase receipt.');
-      }
+    // ✅ Validate VIN here (prevents spending a credit / charging on invalid VINs)
+    const v = validateVin(targetVin);
+    if (!v.ok) {
+      return res.status(422).json({
+        error:'invalid_vin',
+        reason:v.code,
+        message:v.msg
+      });
     }
+    targetVin = v.vin;
 
     // Cache first
     let raw = readCache(targetVin, type.toLowerCase());
 
-    // Not cached: optionally live fetch (credits if user)
+    // Not cached: optionally live fetch (credits if user or one-time receipt)
     if (!raw && allowLive) {
-      const { token, user } = await getUser(req);
-      if (user && !oneTimeSession) {
-        const supabaseUser = supabaseForToken(token);
-        const { error: rpcErr } = await supabaseUser.rpc('use_credit_for_vin', { p_vin: targetVin, p_result_url: null });
-        if (rpcErr) return res.status(402).send('Insufficient credits');
-      } else if (!user && !oneTimeSession) {
-        return res.status(401).send('Complete purchase to view this report.');
+      // Payment/credit checks...
+      if (oneTimeSession) {
+        if (CONSUMED.has(oneTimeSession)) return res.status(409).json({ error:'receipt_used' });
+        try {
+          if (oneTimeSession.startsWith('pp_')) {
+            const captureId = oneTimeSession.slice(3);
+            const cap = await verifyPaypalCapture(captureId);
+            if (cap?.status !== 'COMPLETED') return res.status(402).json({ error:'payment_incomplete' });
+          } else {
+            const sStripe = stripeForId(oneTimeSession);
+            const s = await sStripe.checkout.sessions.retrieve(oneTimeSession);
+            if (s.payment_status !== 'paid') return res.status(402).json({ error:'payment_incomplete' });
+          }
+          CONSUMED.add(oneTimeSession); saveConsumed();
+        } catch {
+          return res.status(400).json({ error:'receipt_invalid' });
+        }
+      } else {
+        const { token, user } = await getUser(req);
+        if (user) {
+          const supabaseUser = supabaseForToken(token);
+          const { error: rpcErr } = await supabaseUser.rpc('use_credit_for_vin', { p_vin: targetVin, p_result_url: null });
+          if (rpcErr) return res.status(402).json({ error:'insufficient_credits' });
+        } else {
+          return res.status(401).json({ error:'purchase_required' });
+        }
       }
-      const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
-      raw = live;
-      writeCache(targetVin, type.toLowerCase(), raw);
+
+      // ✅ Call CarSimulcast and interpret errors
+      try {
+        const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
+        raw = live;
+        writeCache(targetVin, type.toLowerCase(), raw);
+      } catch (e) {
+        const msg = String(e.message || '');
+        if (msg.includes('CS_400') || msg.includes('CS_404') || /invalid.*vin|vin.*not.*found/i.test(msg)) {
+          return res.status(422).json({
+            error:'invalid_vin',
+            reason:'remote_reject',
+            message:'The provider rejected this VIN as invalid or not found.'
+          });
+        }
+        return res.status(502).json({ error:'provider_error', message:'Upstream error fetching report. Please try again.' });
+      }
     }
 
-    if (!raw) return res.status(404).send('No cached or archive report found.');
+    if (!raw) return res.status(404).json({ error:'not_found', message:'No cached or archive report found.' });
 
     const decoded = decodeReportBase64(raw);
 
@@ -503,10 +591,10 @@ app.post('/api/report', async (req, res) => {
           res.setHeader('Content-Disposition', `attachment; filename="${targetVin}-${type}.pdf"`);
           return res.send(Buffer.from(pdf.data));
         } catch {
-          return res.status(502).send('Could not generate PDF from this report.');
+          return res.status(502).json({ error:'pdf_convert_failed' });
         }
       }
-      return res.status(500).send('Unsupported report content.');
+      return res.status(500).json({ error:'unsupported_content' });
     }
 
     if (decoded.kind === 'html') {
@@ -518,9 +606,9 @@ app.post('/api/report', async (req, res) => {
       res.setHeader('Content-Disposition', `inline; filename="${targetVin}-${type}.pdf"`);
       return res.send(decoded.buffer);
     }
-    return res.status(500).send('Unsupported report content.');
+    return res.status(500).json({ error:'unsupported_content' });
   } catch (err) {
-    return res.status(500).send('Server error');
+    return res.status(500).json({ error:'server_error' });
   }
 });
 
@@ -729,6 +817,15 @@ app.get('/api/admin/history', requireAdmin, async (req, res) => {
 });
 
 /* ================================================================
+   Optional: public VIN validator endpoint for instant UX
+================================================================ */
+app.get('/api/vin/validate/:vin', (req, res) => {
+  const v = validateVin(req.params.vin);
+  if (!v.ok) return res.status(422).json({ ok:false, reason:v.code, message:v.msg });
+  return res.json({ ok:true, vin:v.vin });
+});
+
+/* ================================================================
    Static + explicit /admin route
 ================================================================ */
 app.get('/admin', (_req, res) => {
@@ -740,9 +837,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 /* ================================================================
    Boot
 ================================================================ */
-
 app.get("/", (_req, res) => res.send("OK: AutoVINReveal server up"));
-// /healthz already defined above; keep only one if you want.
 
 const server = app.listen(Number(PORT), HOST, () => {
   const addr = server.address();
