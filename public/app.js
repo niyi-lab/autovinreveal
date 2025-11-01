@@ -1046,6 +1046,6 @@ f?.addEventListener('submit', async (e) => {
     }
   }
 
-  reflectVinGate();        // <-- enforce gating on load
+  reflectVinGate();        // <- enforce gating on load
   updateUseCreditBtn();
-})();
+})(); 
