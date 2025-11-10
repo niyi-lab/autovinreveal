@@ -145,7 +145,7 @@ tbody tr + tr{ border-top:1px solid var(--border) }
 }
 
 .promo-head {
-  font-weight: 700; letter-spacing: .2px;
+  font-weight: 800; letter-spacing: .2px;
   font-size: 0.95rem; color: var(--brand, #60a5fa);
   margin-bottom: 8px;
 }
