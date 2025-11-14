@@ -618,6 +618,43 @@ async function copyShareLink(vin, type) {
   }
 }
 
+/* Email a report from history */
+async function emailHistoryReport(item) {
+  const to = prompt('Send report to which email address?');
+  if (!to) return;
+
+  const trimmed = to.trim();
+  if (!trimmed || !trimmed.includes('@')) {
+    showToast('Please enter a valid email address.', 'error');
+    return;
+  }
+
+  try {
+    const body = {
+      to: trimmed,
+      vin: item.vin && item.vin !== '(from plate)' ? item.vin : '',
+      plate: item.plate || '',
+      state: item.state || '',
+      type: item.type || 'carfax'
+    };
+
+    const r = await fetch('/api/email-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (!r.ok) {
+      const t = await r.text();
+      throw new Error(t || ('HTTP ' + r.status));
+    }
+
+    showToast('Email sent successfully ✅', 'ok');
+  } catch (e) {
+    showToast(e.message || 'Could not send email', 'error');
+  }
+}
+
 function renderHistory() {
   const body = $id('historyBody');
   const list = loadHistory();
@@ -634,10 +671,11 @@ function renderHistory() {
       <td class="px-4 py-3">${item.type}</td>
       <td class="px-4 py-3">${formatTime(item.ts)}</td>
       <td class="px-4 py-3">
-        <div class="flex gap-2">
+        <div class="flex flex-wrap gap-2">
           <button data-idx="${idx}" data-action="open" class="btn-outline" style="font-size:.8rem">Open HTML</button>
           <button data-idx="${idx}" data-action="pdf" class="btn-outline" style="font-size:.8rem">Download PDF</button>
           <button data-idx="${idx}" data-action="share" class="btn-outline" style="font-size:.8rem">Copy Link</button>
+          <button data-idx="${idx}" data-action="email" class="btn-outline" style="font-size:.8rem">Email</button>
           <button data-idx="${idx}" data-action="del" class="btn-outline" style="font-size:.8rem;color:#dc2626;border-color:#fecaca">Delete</button>
         </div>
       </td>`;
@@ -651,6 +689,7 @@ function renderHistory() {
       if (action === 'open') openHistoryHTML(item);
       else if (action === 'pdf') downloadHistoryPDF(item);
       else if (action === 'share') copyShareLink(item.vin.replace('(from plate)', '').trim() || item.plate, item.type);
+      else if (action === 'email') emailHistoryReport(item);
       else if (action === 'del') { const list = loadHistory(); list.splice(i, 1); saveHistory(list); renderHistory(); }
     });
   });
@@ -866,6 +905,7 @@ useCreditBtn?.addEventListener('click', async () => {
 const f = $id('f');
 const go = $id('go');
 const loading = $id('loading');
+const typeGroup = $id('typeGroup');
 
 function hasPlateCombo(formData) {
   const state = (formData.state || '').trim();
@@ -877,6 +917,9 @@ function reflectVinGate() {
   if (!f || !go) return;
   const formData = Object.fromEntries(new FormData(f).entries());
   const vin = (formData.vin || '').trim().toUpperCase();
+
+  // Default: hide type until we know input is valid
+  if (typeGroup) typeGroup.classList.add('hidden');
 
   if (vin.length === 0 && !hasPlateCombo(formData)) {
     setVinHelp('Enter a 17-char VIN (no I/O/Q) or select State & Plate.');
@@ -897,6 +940,7 @@ function reflectVinGate() {
     }
     setVinHelp('VIN looks valid ✓', true);
     go.disabled = false;
+    if (typeGroup) typeGroup.classList.remove('hidden');
     return;
   }
 
@@ -904,11 +948,13 @@ function reflectVinGate() {
   if (hasPlateCombo(formData)) {
     setVinHelp('State + Plate provided ✓', true);
     go.disabled = false;
+    if (typeGroup) typeGroup.classList.remove('hidden');
     return;
   }
 
   // Fallback block
   go.disabled = true;
+  if (typeGroup) typeGroup.classList.add('hidden');
 }
 
 f?.addEventListener('input', () => {
@@ -1063,4 +1109,4 @@ document.getElementById('comparePlans')?.addEventListener('click', () => {
 
   reflectVinGate();        // <- enforce gating on load
   updateUseCreditBtn();
-})(); 
+})();
