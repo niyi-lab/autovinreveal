@@ -730,54 +730,104 @@ async function renderPaypalButton() {
   if (paypalRendered) return;
   const container = document.getElementById('paypalContainer');
   if (!container) return;
-  if (!window.paypal) { showToast('PayPal is unavailable right now.', 'error'); return; }
+  if (!window.paypal) {
+    showToast('PayPal is unavailable right now.', 'error');
+    return;
+  }
   paypalRendered = true;
 
   const { user } = await getSession();
+
   window.paypal.Buttons({
     createOrder: () => createPaypalOrder(user),
+
     onApprove: async (data) => {
       try {
-        const result = await capturePaypalOrder(data.orderID, user);
+        // 1) Capture PayPal payment on your backend
+        const result = await capturePaypalOrder(data.orderID, user); // { ok, captureId }
 
+        // 2) See if this was a "buy + view" flow (VIN/plate stored)
         let pending = tryLoadPending();
         if (!pending || (!pending.vin && !(pending.state && pending.plate))) {
           pending = lastFormData || null;
         }
+
+        // 🔹 Case A: No pending VIN/plate → treat as "credits only"
         if (!pending || (!pending.vin && !(pending.state && pending.plate))) {
-          showToast('Payment completed, but we lost the VIN/Plate input. Please enter it again.', 'error');
-          window.location.href = '/';
+          showToast('Payment completed. 1 credit added to your account.', 'ok');
+          await refreshBalancePill();
+          closeBuyModal?.();
           return;
         }
 
-        let one = '';
+        // 🔹 Case B: This was a one-off report purchase (guest or logged-in)
+        const body = {
+          ...pending,
+          as: 'html',
+          allowLive: true
+        };
+
+        // For guests (no Supabase user), attach one-time PayPal receipt
         if (!user && result?.captureId) {
-          one = 'pp_' + result.captureId;
-          pending.oneTimeSession = one;
+          body.oneTimeSession = 'pp_' + result.captureId;
         }
 
-        localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+        await ensureBackendReady();
 
-        const url = new URL('/success.html', 'https://www.autovinreveal.com');
-        url.searchParams.set('pp', 'success');
-        if (one) url.searchParams.set('one', one);
-        const vin = (pending.vin || '').toUpperCase();
-        if (vin) url.searchParams.set('vin', vin);
-        if (pending.state) url.searchParams.set('state', pending.state);
-        if (pending.plate) url.searchParams.set('plate', pending.plate);
-        url.searchParams.set('type', pending.type || 'carfax');
+        const headers = { 'Content-Type': 'application/json' };
+        const sess = await getSession();
+        if (sess.token) headers['Authorization'] = `Bearer ${sess.token}`;
 
-        window.location.href = url.toString();
+        // 3) Actually fetch the report *right now*
+        const resp = await fetch(API.report, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body)
+        });
+
+        if (!resp.ok) {
+          const t = await resp.text();
+          throw new Error(t || ('HTTP ' + resp.status));
+        }
+
+        const html = await resp.text();
+
+        const viewer = openBlank();
+        if (viewer) {
+          viewer.document.write(html);
+          viewer.document.close();
+        } else {
+          document.open();
+          document.write(html);
+          document.close();
+        }
+
+        showToast('Report fetched successfully!', 'ok');
+
+        addToHistory({
+          vin: pending.vin || '(from plate)',
+          type: pending.type || 'carfax',
+          ts: Date.now(),
+          state: pending.state || '',
+          plate: pending.plate || ''
+        });
+        renderHistory();
+        await refreshBalancePill();
+        clearPending?.();
+        closeBuyModal?.();
       } catch (e) {
+        console.error('PayPal onApprove error:', e);
         showToast(e.message || 'PayPal capture failed', 'error');
       }
     },
+
     onError: (err) => {
       console.error(err);
       showToast('PayPal error', 'error');
     }
   }).render('#paypalContainer');
 }
+
 
 /* ================================
    Purchase flow (Stripe)
