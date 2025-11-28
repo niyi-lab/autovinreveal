@@ -1271,7 +1271,7 @@ app.use(express.static(path.join(__dirname, "public")));
 /* ================================================================
    Boot
 ================================================================ */
-app.get("/", (_req, res) => res.send("OK: AutoVINReveal server up"));
+
 
 const server = app.listen(Number(PORT), HOST, () => {
   const addr = server.address();
