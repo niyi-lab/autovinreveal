@@ -409,13 +409,15 @@ app.post("/api/paypal/capture-order", async (req, res) => {
   } catch { res.status(500).json({ error: "PayPal capture failed" }); }
 });
 
-// ✅ Main Report Logic with Auto-Refunds
+/* ================================================================
+   Main Report Logic (Fixed: No double-charging)
+================================================================ */
 app.post("/api/report", async (req, res) => {
   try {
     const { vin, state, plate, type = "carfax", as = "html", allowLive: allowLiveRaw, oneTimeSession } = req.body || {};
     const allowLive = allowLiveRaw !== false;
 
-    // Resolve VIN
+    // 1. Resolve VIN
     let targetVin = (vin || "").trim().toUpperCase();
     if (!targetVin && state && plate) {
       try {
@@ -426,20 +428,52 @@ app.post("/api/report", async (req, res) => {
     }
     if (!targetVin) return res.status(400).json({ error: "vin_required" });
 
-    // Validate VIN
+    // 2. Validate VIN
     const v = validateVin(targetVin);
     if (!v.ok) return res.status(422).json({ error: "invalid_vin", reason: v.code, message: v.msg });
     targetVin = v.vin;
 
-    // Cache check
+    // 3. Check Cache
     let raw = readCache(targetVin, type.toLowerCase());
 
-    // Live Fetch Logic
-    if (!raw && allowLive) {
-      let currentUser = null;
+    // 4. Check Database Ownership (Anti-Double-Charge)
+    let alreadyOwned = false;
+    let currentUser = null;
+    let currentToken = null;
 
-      // 1. DEDUCT CREDIT / CHECK PAYMENT
-      if (oneTimeSession) {
+    if (!oneTimeSession) {
+        const { token, user } = await getUser(req);
+        currentUser = user;
+        currentToken = token;
+        
+        if (currentUser) {
+            // Check if user bought this VIN previously
+            const { data: past } = await supabaseService
+                .from('vin_queries')
+                .select('id')
+                .eq('user_id', currentUser.id)
+                .eq('vin', targetVin)
+                .eq('success', true)
+                .maybeSingle();
+            if (past) alreadyOwned = true;
+        }
+    }
+
+    // 5. Live Fetch Logic
+    if (!raw && allowLive) {
+      
+      // If NOT already owned and NOT a one-time session, we must charge
+      if (!alreadyOwned && !oneTimeSession) {
+        if (currentUser) {
+          const { error: rpcErr } = await supabaseForToken(currentToken).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
+          if (rpcErr) return res.status(402).json({ error: "insufficient_credits" });
+        } else {
+          return res.status(401).json({ error: "purchase_required" });
+        }
+      }
+
+      // Handle One-Time Session (Stripe/PayPal)
+      if (oneTimeSession && !alreadyOwned) {
         if (CONSUMED.has(oneTimeSession)) return res.status(409).json({ error: "receipt_used" });
         try {
           if (oneTimeSession.startsWith("pp_")) {
@@ -454,52 +488,40 @@ app.post("/api/report", async (req, res) => {
           CONSUMED.add(oneTimeSession);
           saveConsumed();
         } catch { return res.status(400).json({ error: "receipt_invalid" }); }
-      } else {
-        const { token, user } = await getUser(req);
-        if (user) {
-          currentUser = user;
-          const { error: rpcErr } = await supabaseForToken(token).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
-          if (rpcErr) return res.status(402).json({ error: "insufficient_credits" });
-        } else {
-          return res.status(401).json({ error: "purchase_required" });
-        }
       }
 
-      // 2. FETCH REPORT
+      // 6. Perform the Fetch
       try {
         const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
         raw = live;
         writeCache(targetVin, type.toLowerCase(), raw);
       } catch (e) {
-        // ⚠️ CRITICAL: FETCH FAILED. REFUND THE USER IMMEDIATELY.
-        console.error(`Fetching ${targetVin} failed. Attempting refund.`);
-        
-        // Only refund credits users (oneTimeSession users just keep their token unused effectively, but for cleaner logic we might just fail)
-        // If it was a credit user:
-        if (currentUser) {
+        // FETCH FAILED? REFUND CREDITS if we just took them.
+        // We only refund if it wasn't "alreadyOwned" (meaning we just charged them 1 sec ago)
+        if (!alreadyOwned && !oneTimeSession && currentUser) {
+           console.error(`Fetch failed for ${targetVin}. Refunding user ${currentUser.id}`);
            await supabaseService.rpc('adjust_credits', {
               p_user: currentUser.id,
-              p_delta: 1, // refund 1 credit
+              p_delta: 1, 
               p_reason: 'refund_api_failure',
               p_ref: targetVin
            });
-           console.log(`Refunded 1 credit to user ${currentUser.id}`);
-        } else if (oneTimeSession) {
-           // If one-time session used, remove from CONSUMED so they can try again or use on another VIN
+        } else if (oneTimeSession && !alreadyOwned) {
            CONSUMED.delete(oneTimeSession);
            saveConsumed();
         }
 
         const msg = String(e.message || "");
         if (msg.includes("CS_400") || msg.includes("CS_404") || /invalid.*vin|vin.*not.*found/i.test(msg)) {
-           return res.status(422).json({ error: "invalid_vin", reason: "remote_reject", message: "VIN not found in database. Your credit has been refunded." });
+           return res.status(422).json({ error: "invalid_vin", reason: "remote_reject", message: "VIN not found in database. Refunded." });
         }
-        return res.status(502).json({ error: "provider_error", message: "System error. Your credit has been refunded." });
+        return res.status(502).json({ error: "provider_error", message: "System error. Refunded." });
       }
     }
 
     if (!raw) return res.status(404).json({ error: "not_found", message: "No report found." });
 
+    // 7. Deliver Result
     const decoded = decodeReportBase64(raw);
 
     if (as === "pdf") {
