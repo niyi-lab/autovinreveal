@@ -719,7 +719,8 @@ app.get("*", (req, res) => {
   } else {
     res.status(404).send("Not found");
   }
-});
+}); 
+
 
 const server = app.listen(Number(PORT), HOST, () => {
   console.log(`\n🚀 Server is running!`);
