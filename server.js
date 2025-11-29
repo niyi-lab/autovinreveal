@@ -181,8 +181,42 @@ async function csGet(url) {
 const CACHE_DIR = path.join(__dirname, "cache");
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 const ck = (vin, type) => path.join(CACHE_DIR, `${vin}-${type}.b64`);
+
+// Basic FS read/write
 const readCache = (vin, type) => fs.existsSync(ck(vin, type)) ? fs.readFileSync(ck(vin, type), "utf8") : null;
 const writeCache = (vin, type, data) => fs.writeFileSync(ck(vin, type), data, "utf8");
+
+// [NEW] Smart Fetch: Checks FS first, then Database
+async function getReportData(vin, type) {
+  const v = (vin || "").toUpperCase();
+  const t = (type || "").toLowerCase();
+  
+  // 1. Try Local File System
+  let raw = readCache(v, t);
+  if (raw) return raw;
+
+  // 2. Try Database (Persistent Storage)
+  // We check for ANY record with this VIN that has non-null report_data
+  try {
+    const { data } = await supabaseService
+      .from("vin_queries")
+      .select("report_data")
+      .eq("vin", v)
+      .not("report_data", "is", null)
+      .limit(1)
+      .maybeSingle();
+
+    if (data && data.report_data) {
+      // Found in DB! Restore to local cache for speed next time
+      writeCache(v, t, data.report_data);
+      return data.report_data;
+    }
+  } catch (err) {
+    console.error("Error fetching report from DB backup:", err);
+  }
+
+  return null;
+}
 
 const CONSUMED_FILE = path.join(__dirname, ".consumed_sessions.json");
 let CONSUMED = new Set();
@@ -326,7 +360,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
     if (vin) {
       const type = (report_type || "carfax").toLowerCase();
-      if (readCache((vin || "").toUpperCase(), type)) {
+      // Use smart check here too
+      const cachedData = await getReportData((vin || "").toUpperCase(), type);
+      if (cachedData) {
         return res.status(409).json({ alreadyCached: true, vin, report_type: type });
       }
     }
@@ -410,7 +446,7 @@ app.post("/api/paypal/capture-order", async (req, res) => {
 });
 
 /* ================================================================
-   Main Report Logic (Fixed: No double-charging)
+   Main Report Logic (Fixed: No double-charging + DB Fallback)
 ================================================================ */
 app.post("/api/report", async (req, res) => {
   try {
@@ -433,8 +469,8 @@ app.post("/api/report", async (req, res) => {
     if (!v.ok) return res.status(422).json({ error: "invalid_vin", reason: v.code, message: v.msg });
     targetVin = v.vin;
 
-    // 3. Check Cache
-    let raw = readCache(targetVin, type.toLowerCase());
+    // 3. Check Cache (Filesystem OR Database)
+    let raw = await getReportData(targetVin, type);
 
     // 4. Check Database Ownership (Anti-Double-Charge)
     let alreadyOwned = false;
@@ -495,9 +531,20 @@ app.post("/api/report", async (req, res) => {
         const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
         raw = live;
         writeCache(targetVin, type.toLowerCase(), raw);
+
+        // [NEW] Persist to Database immediately
+        if (currentUser) {
+            // We find the query row we likely just created/updated and save the report content
+            // or just update by user+vin
+            await supabaseService
+              .from("vin_queries")
+              .update({ report_data: raw })
+              .eq("user_id", currentUser.id)
+              .eq("vin", targetVin);
+        }
+
       } catch (e) {
         // FETCH FAILED? REFUND CREDITS if we just took them.
-        // We only refund if it wasn't "alreadyOwned" (meaning we just charged them 1 sec ago)
         if (!alreadyOwned && !oneTimeSession && currentUser) {
            console.error(`Fetch failed for ${targetVin}. Refunding user ${currentUser.id}`);
            await supabaseService.rpc('adjust_credits', {
@@ -568,7 +615,9 @@ app.post("/api/email-report", async (req, res) => {
     }
     if (!targetVin) return res.status(400).json({ error: "vin_required" });
 
-    const raw = readCache(targetVin, type.toLowerCase());
+    // [NEW] Use smart fetch (FS then DB)
+    const raw = await getReportData(targetVin, type);
+    
     if (!raw) return res.status(404).json({ error: "not_cached" });
     const decoded = decodeReportBase64(raw);
 
@@ -591,7 +640,10 @@ app.post("/api/share", async (req, res) => {
   try {
     const { vin, type = "carfax" } = req.body || {};
     if (!vin) return res.status(400).json({ error: "vin required" });
-    if (!readCache(vin.toUpperCase(), type.toLowerCase())) return res.status(404).json({ error: "not_cached" });
+    
+    // [NEW] Use smart fetch
+    const raw = await getReportData(vin, type);
+    if (!raw) return res.status(404).json({ error: "not_cached" });
 
     const token = Buffer.from(crypto.randomUUID()).toString("base64url").replace(/=/g, "");
     const exp = Date.now() + 24 * 60 * 60 * 1000;
@@ -605,7 +657,10 @@ app.get("/view/:token", async (req, res) => {
   const t = req.params.token;
   const meta = SHARE_TOKENS[t];
   if (!meta || meta.exp <= Date.now()) return res.status(404).send("Link expired");
-  const raw = readCache(meta.vin, meta.type);
+  
+  // [NEW] Use smart fetch
+  const raw = await getReportData(meta.vin, meta.type);
+  
   if (!raw) return res.status(404).send("Report not found");
   const decoded = decodeReportBase64(raw);
   if (decoded.kind === "html") { res.setHeader("Content-Type", "text/html"); return res.send(decoded.html); }
