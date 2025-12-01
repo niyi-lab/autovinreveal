@@ -712,6 +712,10 @@ app.get("/admin", (req, res) => res.sendFile(path.join(__dirname, "public", "adm
 // 1. Serve Static files
 app.use(express.static(path.join(__dirname, "public")));
 
+app.get("/301", (req, res) => {
+  return res.redirect(301, "/"); 
+});
+
 // 2. Catch-all for SPA/HTML (fixes the "OK" text error)
 app.get("*", (req, res) => {
   if (req.accepts("html")) {
