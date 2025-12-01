@@ -416,7 +416,7 @@ app.post("/api/paypal/create-order", async (_req, res) => {
     request.prefer("return=representation");
     request.requestBody({
       intent: "CAPTURE",
-      purchase_units: [{ amount: { currency_code: "USD", value: "7.00" } }],
+      purchase_units: [{ amount: { currency_code: "USD", value: "6.00" } }],
       application_context: { brand_name: "AutoVINReveal", shipping_preference: "NO_SHIPPING", user_action: "PAY_NOW" },
     });
     const order = await ppClient.execute(request);
