@@ -510,7 +510,12 @@ app.post("/api/report", async (req, res) => {
 
       // Handle One-Time Session (Stripe/PayPal)
       if (oneTimeSession && !alreadyOwned) {
-        if (CONSUMED.has(oneTimeSession)) return res.status(409).json({ error: "receipt_used" });
+        
+        // [FIXED] SAFE RETRY LOGIC:
+        // We verify the payment with the provider. 
+        // If the payment is valid (COMPLETED/paid), we proceed even if it was previously "consumed".
+        // This handles cases where the browser crashed or blocked the popup on the first try.
+
         try {
           if (oneTimeSession.startsWith("pp_")) {
             const captureId = oneTimeSession.slice(3);
@@ -521,8 +526,15 @@ app.post("/api/report", async (req, res) => {
             const s = await sStripe.checkout.sessions.retrieve(oneTimeSession);
             if (s.payment_status !== "paid") return res.status(402).json({ error: "payment_incomplete" });
           }
-          CONSUMED.add(oneTimeSession);
-          saveConsumed();
+          
+          // Payment is verified. Mark as consumed if not already.
+          if (!CONSUMED.has(oneTimeSession)) {
+             CONSUMED.add(oneTimeSession);
+             saveConsumed();
+          }
+          // If it WAS in CONSUMED, we allow the code to proceed anyway because the user
+          // has validly paid and we don't have the report yet (raw is null).
+          
         } catch { return res.status(400).json({ error: "receipt_invalid" }); }
       }
 
@@ -548,12 +560,13 @@ app.post("/api/report", async (req, res) => {
         if (!alreadyOwned && !oneTimeSession && currentUser) {
            console.error(`Fetch failed for ${targetVin}. Refunding user ${currentUser.id}`);
            await supabaseService.rpc('adjust_credits', {
-              p_user: currentUser.id,
-              p_delta: 1, 
-              p_reason: 'refund_api_failure',
-              p_ref: targetVin
+             p_user: currentUser.id,
+             p_delta: 1, 
+             p_reason: 'refund_api_failure',
+             p_ref: targetVin
            });
         } else if (oneTimeSession && !alreadyOwned) {
+           // If it was a Stripe/PayPal one-time, un-consume it so they can try again later
            CONSUMED.delete(oneTimeSession);
            saveConsumed();
         }

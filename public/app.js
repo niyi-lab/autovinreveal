@@ -600,30 +600,55 @@ async function capturePaypalOrder(orderID, user) {
   return r.json(); 
 }
 
+/* ================================
+   FIXED: PayPal Button Logic
+================================ */
 let paypalRendered = false;
 async function renderPaypalButton() {
   if (paypalRendered) return;
   const container = document.getElementById('paypalContainer');
   if (!container) return;
   if (!window.paypal) return;
+  
   paypalRendered = true;
   const { user } = await getSession();
 
   window.paypal.Buttons({
     createOrder: () => createPaypalOrder(user),
+    
     onApprove: async (data) => {
+      // 1. OPEN WINDOW IMMEDIATELY (Before any await)
+      // This ensures the browser knows it was triggered by a user action.
+      const reportWindow = openBlank();
+      
+      // 2. Show a loading state in the new window so the user knows it's working
+      if (reportWindow) {
+        reportWindow.document.write(`
+          <html><body style="font-family:sans-serif; text-align:center; padding-top:50px; background:#f9fafb;">
+            <h2 style="color:#1f2937;">Processing Payment...</h2>
+            <p style="color:#6b7280;">Please wait while we generate your report.</p>
+            <p><strong>Do not close this window.</strong></p>
+          </body></html>
+        `);
+      }
+
       try {
+        // 3. Capture Payment
         const result = await capturePaypalOrder(data.orderID, user);
+        
         let pending = tryLoadPending();
         if (!pending || (!pending.vin && !(pending.state && pending.plate))) pending = lastFormData || null;
 
+        // If just buying credits (no specific report pending)
         if (!pending || (!pending.vin && !(pending.state && pending.plate))) {
+          if (reportWindow) reportWindow.close(); // Close the loading window since we don't need it
           showToast('Payment completed! 1 credit added.', 'ok');
           await refreshBalancePill();
           closeBuyModal?.();
           return;
         }
 
+        // 4. Fetch Report
         const body = { ...pending, as: 'html', allowLive: true };
         if (!user && result?.captureId) body.oneTimeSession = 'pp_' + result.captureId;
 
@@ -633,23 +658,41 @@ async function renderPaypalButton() {
         if (sess.token) headers['Authorization'] = `Bearer ${sess.token}`;
 
         const resp = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(body) });
-        if (!resp.ok) { const t = await resp.text(); throw new Error(t || ('HTTP ' + resp.status)); }
+        if (!resp.ok) { 
+            const t = await resp.text(); 
+            throw new Error(t || ('HTTP ' + resp.status)); 
+        }
+        
         const html = await resp.text();
 
-        const viewer = openBlank();
-        if (viewer) { viewer.document.write(html); viewer.document.close(); }
-        else { document.open(); document.write(html); document.close(); }
-
-        showToast('Report fetched successfully!', 'ok');
+        // 5. Save to history IMMEDIATELY (in case the window fails to render)
         addToHistory({
           vin: pending.vin || '(from plate)', type: pending.type || 'carfax', ts: Date.now(),
           state: pending.state || '', plate: pending.plate || ''
         });
         renderHistory();
+
+        // 6. Write real report to the window we opened earlier
+        if (reportWindow) {
+          reportWindow.document.open(); // Clear the "Loading..." text
+          reportWindow.document.write(html);
+          reportWindow.document.close();
+          reportWindow.focus();
+        } else {
+          // Fallback: If popup was strictly blocked, overwrite current page
+          document.open(); document.write(html); document.close();
+        }
+
+        showToast('Report fetched successfully!', 'ok');
         await refreshBalancePill();
         clearPending?.();
         closeBuyModal?.();
+
       } catch (e) {
+        // If payment or fetch failed, close the blank window so it doesn't hang there
+        if (reportWindow) reportWindow.close();
+        
+        console.error(e);
         showToast(e.message || 'PayPal capture failed', 'error');
       }
     },
