@@ -491,23 +491,56 @@ async function openHistoryHTML(item) {
     else { const w = window.open('', '_blank'); if (w) { w.document.write(html); w.document.close(); } }
   } catch (e) { showToast(e.message || 'Request failed', 'error'); }
 }
-async function downloadHistoryPDF(item) {
+async function downloadHistoryPDF(item, btn = null) {
+  // 1. UI Feedback: Save old text, show loading, disable button
+  let originalText = '';
+  if (btn) {
+    originalText = btn.textContent;
+    btn.textContent = '...'; // Or a spinner icon
+    btn.disabled = true;
+    btn.classList.add('opacity-50', 'cursor-not-allowed');
+  }
+
+  showToast('Generating PDF... this may take a few seconds.', 'ok');
+
   const data = {
     vin: item.vin && item.vin !== '(from plate)' ? item.vin : '',
     state: item.state || '', plate: item.plate || '',
     type: item.type, as: 'pdf', allowLive: false
   };
+
   const headers = { 'Content-Type': 'application/json' };
-  const { token } = await getSession();
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  
   try {
+    const { token } = await getSession();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    
     await ensureBackendReady();
+    
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
-    if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
+    
+    if (!r.ok) { 
+      const t = await r.text(); 
+      showToast(t || ('HTTP ' + r.status), 'error'); 
+      return; 
+    }
+    
     const blob = await r.blob();
     const nameBase = (data.vin || item.plate || 'report').replace(/\W+/g, '_');
     downloadBlob(blob, `${nameBase}_${item.type}.pdf`);
-  } catch (e) { showToast(e.message || 'Request failed', 'error'); }
+    
+    showToast('Download started!', 'ok');
+
+  } catch (e) { 
+    showToast(e.message || 'Request failed', 'error'); 
+  } finally {
+    // 2. Restore UI: Reset text and re-enable button
+    if (btn) {
+      btn.textContent = originalText;
+      btn.disabled = false;
+      btn.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+  }
 }
 
 async function copyShareLink(vin, type) {
@@ -563,7 +596,7 @@ function renderHistory() {
       const i = +e.currentTarget.getAttribute('data-idx');
       const item = loadHistory()[i]; if (!item) return;
       if (action === 'open') openHistoryHTML(item);
-      else if (action === 'pdf') downloadHistoryPDF(item);
+      else if (action === 'pdf') downloadHistoryPDF(item, e.currentTarget);
       else if (action === 'share') copyShareLink(item.vin.replace('(from plate)', '').trim() || item.plate, item.type);
       else if (action === 'del') { const list = loadHistory(); list.splice(i, 1); saveHistory(list); renderHistory(); }
     });
