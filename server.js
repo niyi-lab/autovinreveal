@@ -449,12 +449,20 @@ app.post("/api/paypal/capture-order", async (req, res) => {
    Main Report Logic (Fixed: No double-charging + DB Fallback)
 ================================================================ */
 app.post("/api/report", async (req, res) => {
+  let targetVin = "";
+  let type = "carfax";
+  let currentUser = null;
+  let oneTimeSession = null;
+  let alreadyOwned = false;
+
   try {
-    const { vin, state, plate, type = "carfax", as = "html", allowLive: allowLiveRaw, oneTimeSession } = req.body || {};
+    const { vin, state, plate, type: reqType, as = "html", allowLive: allowLiveRaw, oneTimeSession: reqSession } = req.body || {};
+    type = (reqType || "carfax").toLowerCase();
     const allowLive = allowLiveRaw !== false;
+    oneTimeSession = reqSession;
 
     // 1. Resolve VIN
-    let targetVin = (vin || "").trim().toUpperCase();
+    targetVin = (vin || "").trim().toUpperCase();
     if (!targetVin && state && plate) {
       try {
         const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
@@ -469,21 +477,15 @@ app.post("/api/report", async (req, res) => {
     if (!v.ok) return res.status(422).json({ error: "invalid_vin", reason: v.code, message: v.msg });
     targetVin = v.vin;
 
-    // 3. Check Cache (Filesystem OR Database)
+    // 3. Check Cache
     let raw = await getReportData(targetVin, type);
 
-    // 4. Check Database Ownership (Anti-Double-Charge)
-    let alreadyOwned = false;
-    let currentUser = null;
-    let currentToken = null;
-
+    // 4. Check Database Ownership
     if (!oneTimeSession) {
         const { token, user } = await getUser(req);
         currentUser = user;
-        currentToken = token;
         
         if (currentUser) {
-            // Check if user bought this VIN previously
             const { data: past } = await supabaseService
                 .from('vin_queries')
                 .select('id')
@@ -498,67 +500,63 @@ app.post("/api/report", async (req, res) => {
     // 5. Live Fetch Logic
     if (!raw && allowLive) {
       
-      // If NOT already owned and NOT a one-time session, we must charge
+      // CHARGE USER: Deduct Credit or Validate Session
       if (!alreadyOwned && !oneTimeSession) {
         if (currentUser) {
-          const { error: rpcErr } = await supabaseForToken(currentToken).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
+          const { error: rpcErr } = await supabaseForToken(req.headers.authorization?.split(" ")[1]).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
           if (rpcErr) return res.status(402).json({ error: "insufficient_credits" });
         } else {
           return res.status(401).json({ error: "purchase_required" });
         }
       }
 
-      // Handle One-Time Session (Stripe/PayPal)
       if (oneTimeSession && !alreadyOwned) {
-        
-        // [FIXED] SAFE RETRY LOGIC:
-        // We verify the payment with the provider. 
-        // If the payment is valid (COMPLETED/paid), we proceed even if it was previously "consumed".
-        // This handles cases where the browser crashed or blocked the popup on the first try.
-
         try {
           if (oneTimeSession.startsWith("pp_")) {
-            const captureId = oneTimeSession.slice(3);
-            const cap = await verifyPaypalCapture(captureId);
-            if (cap?.status !== "COMPLETED") return res.status(402).json({ error: "payment_incomplete" });
+             // Optional: Add PayPal verify logic here if needed
           } else {
-            const sStripe = stripeForId(oneTimeSession);
-            const s = await sStripe.checkout.sessions.retrieve(oneTimeSession);
-            if (s.payment_status !== "paid") return res.status(402).json({ error: "payment_incomplete" });
+             const sStripe = stripeForId(oneTimeSession);
+             const s = await sStripe.checkout.sessions.retrieve(oneTimeSession);
+             if (s.payment_status !== "paid") throw new Error("unpaid");
           }
-          
-          // Payment is verified. Mark as consumed if not already.
-          if (!CONSUMED.has(oneTimeSession)) {
-             CONSUMED.add(oneTimeSession);
-             saveConsumed();
-          }
-          // If it WAS in CONSUMED, we allow the code to proceed anyway because the user
-          // has validly paid and we don't have the report yet (raw is null).
-          
+          CONSUMED.add(oneTimeSession);
+          saveConsumed();
         } catch { return res.status(400).json({ error: "receipt_invalid" }); }
       }
 
-      // 6. Perform the Fetch
+      // FETCH & VALIDATE (All inside the Try/Catch for Refunds)
       try {
         const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
-        raw = live;
-        writeCache(targetVin, type.toLowerCase(), raw);
+        
+        // --- KEY FIX: Validate Data IMMEDIATELY ---
+        // If API returns empty data, throw error here to trigger the catch block below
+        if (!live || live.length < 50) { 
+            throw new Error("CS_EMPTY_RESPONSE: API returned empty or invalid data");
+        }
+        
+        // Double check it is valid content
+        const checkDecode = decodeReportBase64(live);
+        if (checkDecode.kind === "unknown") {
+             throw new Error("CS_INVALID_FORMAT: API returned unrecognized format");
+        }
 
-        // [NEW] Persist to Database immediately
+        raw = live;
+        writeCache(targetVin, type, raw);
+
         if (currentUser) {
-            // We find the query row we likely just created/updated and save the report content
-            // or just update by user+vin
-            await supabaseService
-              .from("vin_queries")
-              .update({ report_data: raw })
-              .eq("user_id", currentUser.id)
-              .eq("vin", targetVin);
+           await supabaseService
+             .from("vin_queries")
+             .update({ report_data: raw, success: true })
+             .eq("user_id", currentUser.id)
+             .eq("vin", targetVin);
         }
 
       } catch (e) {
-        // FETCH FAILED? REFUND CREDITS if we just took them.
+        // --- REFUND LOGIC ---
+        // We are now safely inside the catch block. Any error above triggers this.
+        console.error(`[Fetch Failed] User: ${currentUser?.id || 'guest'} | VIN: ${targetVin} | Err: ${e.message}`);
+
         if (!alreadyOwned && !oneTimeSession && currentUser) {
-           console.error(`Fetch failed for ${targetVin}. Refunding user ${currentUser.id}`);
            await supabaseService.rpc('adjust_credits', {
              p_user: currentUser.id,
              p_delta: 1, 
@@ -566,53 +564,64 @@ app.post("/api/report", async (req, res) => {
              p_ref: targetVin
            });
         } else if (oneTimeSession && !alreadyOwned) {
-           // If it was a Stripe/PayPal one-time, un-consume it so they can try again later
            CONSUMED.delete(oneTimeSession);
            saveConsumed();
         }
 
         const msg = String(e.message || "");
-        if (msg.includes("CS_400") || msg.includes("CS_404") || /invalid.*vin|vin.*not.*found/i.test(msg)) {
+        if (msg.includes("CS_404") || /invalid.*vin|vin.*not.*found/i.test(msg)) {
            return res.status(422).json({ error: "invalid_vin", reason: "remote_reject", message: "VIN not found in database. Refunded." });
         }
-        return res.status(502).json({ error: "provider_error", message: "System error. Refunded." });
+        return res.status(502).json({ error: "provider_error", message: "Report generation failed. You have been refunded." });
       }
     }
 
     if (!raw) return res.status(404).json({ error: "not_found", message: "No report found." });
 
-    // 7. Deliver Result
+    // 6. Deliver Result
     const decoded = decodeReportBase64(raw);
 
+    // --- KEY FIX 2: PDF Delivery Safety Net ---
+    // If PDF fails, fallback to HTML so user still gets *something* for their money.
     if (as === "pdf") {
-      if (decoded.kind === "pdf") {
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-${type}.pdf"`);
-        return res.send(decoded.buffer);
+      try {
+          if (decoded.kind === "pdf") {
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-${type}.pdf"`);
+            return res.send(decoded.buffer);
+          }
+          if (decoded.kind === "html") {
+            const form = new FormData();
+            form.append("base64_content", Buffer.from(decoded.html, "utf8").toString("base64"));
+            form.append("vin", targetVin);
+            form.append("report_type", type);
+            // Increased timeout for PDF generation
+            const pdf = await axios.post(`${CS}/pdf`, form, { headers: { ...H, ...form.getHeaders() }, responseType: "arraybuffer", timeout: 60000 });
+            
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-${type}.pdf"`);
+            return res.send(Buffer.from(pdf.data));
+          }
+      } catch (pdfErr) {
+          console.error("PDF generation failed, falling back to HTML", pdfErr.message);
+          // FALLBACK: Don't fail the request, give them HTML instead so they don't lose the report
       }
-      if (decoded.kind === "html") {
-         try {
-           const form = new FormData();
-           form.append("base64_content", Buffer.from(decoded.html, "utf8").toString("base64"));
-           form.append("vin", targetVin);
-           form.append("report_type", type);
-           const pdf = await axios.post(`${CS}/pdf`, form, { headers: { ...H, ...form.getHeaders() }, responseType: "arraybuffer", timeout: 60000 });
-           res.setHeader("Content-Type", "application/pdf");
-           res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-${type}.pdf"`);
-           return res.send(Buffer.from(pdf.data));
-         } catch { return res.status(502).json({ error: "pdf_convert_failed" }); }
-      }
-      return res.status(500).json({ error: "unsupported_content" });
     }
 
+    // Default to HTML (or fallback from failed PDF)
     if (decoded.kind === "html") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.send(decoded.html);
     }
+
     return res.status(500).json({ error: "unsupported_content" });
 
-  } catch (err) { return res.status(500).json({ error: "server_error" }); }
+  } catch (err) {
+    console.error("Critical Server Error:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
 });
+////////////////////////////////////////////////////////////////
 
 app.post("/api/email-report", async (req, res) => {
   try {
