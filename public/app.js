@@ -1,5 +1,4 @@
 // app.js
-console.info('app.js version: 2025-11-27-seo-optimized');
 
 /* ================================
    Config & Utilities
