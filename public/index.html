@@ -1183,14 +1183,15 @@
             />
           </div>
           <div>
-            <label class="block text-xs font-bold text-gray-600 uppercase mb-1"
-              >Password</label
-            >
+            <div class="flex justify-between items-center mb-1">
+              <label class="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase">Password</label>
+              <button id="forgotPasswordBtn" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">Forgot?</button>
+            </div>
             <input
               id="loginPassword"
               type="password"
               placeholder="••••••••"
-              class="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+              class="w-full border border-gray-300 dark:border-gray-600 dark:bg-slate-900 dark:text-white rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
             />
           </div>
           <div class="grid grid-cols-2 gap-3 pt-2">
@@ -1228,6 +1229,25 @@
       >
         Check VIN
       </button>
+    </div>
+    
+    <div id="forgotModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
+        <button id="closeForgotModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">✕</button>
+        <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Reset Password</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Enter your email to receive a recovery link.</p>
+        <input id="forgotEmail" type="email" placeholder="name@example.com" class="w-full border border-gray-300 dark:border-gray-600 dark:bg-slate-900 dark:text-white rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500" />
+        <button id="sendResetLinkBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg">Send Link</button>
+      </div>
+    </div>
+
+    <div id="updatePasswordModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
+        <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Set New Password</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Enter your new secure password below.</p>
+        <input id="newPasswordInput" type="password" placeholder="New Password" class="w-full border border-gray-300 dark:border-gray-600 dark:bg-slate-900 dark:text-white rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500" />
+        <button id="saveNewPasswordBtn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg">Update Password</button>
+      </div>
     </div>
 
     <div id="toastBox" class="fixed top-24 right-4 space-y-3 z-[60]"></div>

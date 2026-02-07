@@ -906,6 +906,87 @@ f?.addEventListener('submit', async (e) => {
   }
 });
 
+/* ================================
+   Forgot / Reset Password Logic
+================================ */
+const forgotBtn = $id('forgotPasswordBtn');
+const forgotModal = $id('forgotModal');
+const closeForgotBtn = $id('closeForgotModal');
+const sendResetBtn = $id('sendResetLinkBtn');
+const forgotEmailInput = $id('forgotEmail');
+
+const updatePassModal = $id('updatePasswordModal');
+const newPassInput = $id('newPasswordInput');
+const savePassBtn = $id('saveNewPasswordBtn');
+
+// 1. Open "Forgot" Modal (closes login first)
+forgotBtn?.addEventListener('click', () => {
+  closeLogin();
+  forgotModal?.classList.remove('hidden');
+  forgotEmailInput.focus();
+});
+
+// 2. Close Modal
+closeForgotBtn?.addEventListener('click', () => {
+  forgotModal?.classList.add('hidden');
+});
+
+// 3. Send the Reset Email
+sendResetBtn?.addEventListener('click', async () => {
+  const email = (forgotEmailInput.value || '').trim();
+  if (!email || !email.includes('@')) return showToast('Invalid email', 'error');
+
+  sendResetBtn.disabled = true;
+  sendResetBtn.textContent = 'Sending...';
+
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin, // Sends them back to your homepage
+    });
+    if (error) throw error;
+    
+    showToast('Recovery link sent! Check your email.', 'ok');
+    forgotModal?.classList.add('hidden');
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    sendResetBtn.disabled = false;
+    sendResetBtn.textContent = 'Send Link';
+  }
+});
+
+// 4. Handle the "Recovery" Event (When user clicks email link)
+if (supabase) {
+  supabase.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      // User clicked the email link. Show the "New Password" modal.
+      updatePassModal?.classList.remove('hidden');
+    }
+  });
+}
+
+// 5. Save the New Password
+savePassBtn?.addEventListener('click', async () => {
+  const newPassword = newPassInput.value;
+  if (newPassword.length < 6) return showToast('Password too short (min 6 chars)', 'error');
+
+  savePassBtn.disabled = true;
+  savePassBtn.textContent = 'Updating...';
+
+  try {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+
+    showToast('Password updated! You are now logged in.', 'ok');
+    updatePassModal?.classList.add('hidden');
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    savePassBtn.disabled = false;
+    savePassBtn.textContent = 'Update Password';
+  }
+});
+
 // Sidebar & Compare listeners
 document.getElementById('buy5Sidebar')?.addEventListener('click', async () => {
   const { user } = await getSession();
