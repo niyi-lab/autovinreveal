@@ -507,7 +507,7 @@ async function downloadHistoryPDF(item, btn = null) {
       return; 
     }
 
-    // CHECK if server fell back to HTML because PDF failed
+    // Check if server fell back to HTML because PDF failed
     const contentType = r.headers.get('content-type') || '';
     if (contentType.includes('text/html')) {
         showToast('PDF service busy. Opening web report instead...', 'ok');
@@ -825,6 +825,19 @@ function hasPlateCombo(formData) {
   return !!(state && plate);
 }
 
+// 1. HELPER: Fetch Car Details (NHTSA) - Defined OUTSIDE reflectVinGate
+async function fetchCarDetails(vin) {
+  try {
+    const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`);
+    const data = await res.json();
+    const make = data.Results.find(r => r.Variable === "Make")?.Value;
+    const model = data.Results.find(r => r.Variable === "Model")?.Value;
+    const year = data.Results.find(r => r.Variable === "Model Year")?.Value;
+    if (make && model && year) return `${year} ${make} ${model}`;
+  } catch (e) { return null; }
+}
+
+// 2. Main Validation Function
 function reflectVinGate() {
   if (!f || !go) return;
   const formData = Object.fromEntries(new FormData(f).entries());
@@ -838,6 +851,7 @@ function reflectVinGate() {
     return;
   }
 
+  // Check VIN
   if (vin.length > 0) {
     if (!looksVinBasic(vin)) {
       setVinHelp('VIN must be 17 chars (no I, O, Q).');
@@ -849,11 +863,27 @@ function reflectVinGate() {
       go.disabled = true;
       return;
     }
-    setVinHelp('VIN looks valid ✓', true);
+
+    // --- NHTSA Lookup Success Logic ---
+    setVinHelp('Checking vehicle details...', true); 
+    
+    // Call the helper (This was missing in your previous file)
+    fetchCarDetails(vin).then(carName => {
+       const currentVin = new FormData(f).get('vin').trim().toUpperCase();
+       if (currentVin === vin) {
+           if (carName) {
+              setVinHelp(`✅ Verified: ${carName}`, true);
+           } else {
+              setVinHelp('VIN valid (Details not found).', true);
+           }
+       }
+    });
+
     go.disabled = false;
     return;
   }
 
+  // Check Plate
   if (hasPlateCombo(formData)) {
     setVinHelp('Plate + State provided ✓', true);
     go.disabled = false;
