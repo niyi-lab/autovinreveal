@@ -17,10 +17,8 @@ function showToast(message, type = 'error') {
   const box = $id('toastBox');
   if (!box) { alert(message); return; }
   const el = document.createElement('div');
-  // Updated toast styles to match modern look
   el.className = `transform transition-all duration-300 flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${type === 'error' ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-green-50 text-green-700 border border-green-100'}`;
   
-  // Icon based on type
   const icon = type === 'error' 
     ? `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`
     : `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
@@ -28,7 +26,6 @@ function showToast(message, type = 'error') {
   el.innerHTML = `${icon}<span>${message}</span>`;
   box.appendChild(el);
   
-  // Animation entrance
   requestAnimationFrame(() => {
     el.style.transform = 'translateY(0)';
     el.style.opacity = '1';
@@ -54,14 +51,10 @@ function openBlank() {
   catch { return null; }
 }
 
-function setUseCreditVisible(show) {
-  // Logic preserved, but handled by primary CTA state now
-}
-
 /* ================================
    VIN Validation (ISO 3779)
 ================================ */
-const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/; // excludes I,O,Q
+const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/; 
 const VIN_WEIGHTS = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
 const VIN_MAP = Object.freeze({
   A:1, B:2, C:3, D:4, E:5, F:6, G:7, H:8,
@@ -73,7 +66,6 @@ function looksVinBasic(v) { return VIN_RE.test((v||'').toUpperCase()); }
 function vinCheckDigitOk(vinRaw) {
   const vin = (vinRaw || '').toUpperCase();
   if (!looksVinBasic(vin)) return false;
-
   let sum = 0;
   for (let i=0;i<17;i++){
     const ch = vin[i];
@@ -84,8 +76,7 @@ function vinCheckDigitOk(vinRaw) {
   }
   const remainder = sum % 11;
   const expected = (remainder === 10) ? 'X' : String(remainder);
-  const actual = vin[8]; // position 9
-  return actual === expected;
+  return vin[8] === expected;
 }
 function looksVin(v) {
   const vin = (v||'').toUpperCase().trim();
@@ -97,10 +88,9 @@ function looksVin(v) {
 function ensureVinHelpEl() {
   let help = $id('vinHelp');
   if (!help) {
-    // Find the VIN input container to place help text UNDER it
     const vinInput = document.querySelector('input[name="vin"]');
     if (!vinInput) return null;
-    const container = vinInput.closest('.group'); // Targeting the parent group div
+    const container = vinInput.closest('.group'); 
     help = document.createElement('div');
     help.id = 'vinHelp';
     help.className = 'text-xs mt-2 font-medium transition-all';
@@ -122,7 +112,6 @@ function setPrimaryCTA(mode = 'view') {
   const btn = $id('go');
   if (!btn) return;
 
-  // Preserve the styling classes from your new HTML
   btn.className = "glow-btn w-full bg-blue-600 hover:bg-blue-700 text-white h-14 rounded-xl font-bold text-lg shadow-xl shadow-blue-600/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed";
 
   if (mode === 'buy') {
@@ -200,10 +189,6 @@ const stripeSessionId = p.get('session_id') || null;
 const ppSuccess = p.get('pp') === 'success';
 const intentParam = p.get('intent') || null;
 const vinParam = (p.get('vin') || '').toUpperCase();
-const oneParam = p.get('one') || null;
-const stateParam = p.get('state') || '';
-const plateParam = p.get('plate') || '';
-const typeParam = p.get('type') || '';
 
 function tryLoadPending() { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; } }
 function clearPending() { localStorage.removeItem(PENDING_KEY); }
@@ -291,7 +276,6 @@ handleSuccessIfNeeded();
 ================================ */
 const themeBtn = $id('themeBtn');
 function setTheme(mode) {
-  // Logic simplified as new HTML uses simple button
   document.documentElement.classList.toggle('dark', mode === 'dark');
   localStorage.setItem('theme', mode);
 }
@@ -491,11 +475,10 @@ async function openHistoryHTML(item) {
   } catch (e) { showToast(e.message || 'Request failed', 'error'); }
 }
 async function downloadHistoryPDF(item, btn = null) {
-  // 1. UI Feedback: Save old text, show loading, disable button
   let originalText = '';
   if (btn) {
     originalText = btn.textContent;
-    btn.textContent = '...'; // Or a spinner icon
+    btn.textContent = '...'; 
     btn.disabled = true;
     btn.classList.add('opacity-50', 'cursor-not-allowed');
   }
@@ -523,6 +506,16 @@ async function downloadHistoryPDF(item, btn = null) {
       showToast(t || ('HTTP ' + r.status), 'error'); 
       return; 
     }
+
+    // CHECK if server fell back to HTML because PDF failed
+    const contentType = r.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+        showToast('PDF service busy. Opening web report instead...', 'ok');
+        const html = await r.text();
+        const w = window.open('', '_blank');
+        if (w) { w.document.write(html); w.document.close(); }
+        return; 
+    }
     
     const blob = await r.blob();
     const nameBase = (data.vin || item.plate || 'report').replace(/\W+/g, '_');
@@ -533,7 +526,6 @@ async function downloadHistoryPDF(item, btn = null) {
   } catch (e) { 
     showToast(e.message || 'Request failed', 'error'); 
   } finally {
-    // 2. Restore UI: Reset text and re-enable button
     if (btn) {
       btn.textContent = originalText;
       btn.disabled = false;
@@ -558,6 +550,60 @@ async function copyShareLink(vin, type) {
   }
 }
 
+/* ================================
+   Email Report Logic (NEW)
+================================ */
+const emailModal = $id('emailModal');
+const emailInput = $id('emailTargetInput');
+const sendEmailBtn = $id('sendEmailBtn');
+const closeEmailModalBtn = $id('closeEmailModal');
+let emailTargetVin = null;
+let emailTargetType = null;
+
+function openEmailModal(vin, type) {
+  emailTargetVin = vin;
+  emailTargetType = type;
+  emailModal?.classList.remove('hidden');
+  if (currentSession?.user?.email) {
+    emailInput.value = currentSession.user.email;
+  }
+  emailInput?.focus();
+}
+
+function closeEmailModal() {
+  emailModal?.classList.add('hidden');
+  emailTargetVin = null;
+}
+
+closeEmailModalBtn?.addEventListener('click', closeEmailModal);
+
+sendEmailBtn?.addEventListener('click', async () => {
+  const to = emailInput.value.trim();
+  if (!to || !to.includes('@')) return showToast('Invalid email', 'error');
+  if (!emailTargetVin) return;
+
+  sendEmailBtn.disabled = true;
+  sendEmailBtn.textContent = 'Sending...';
+
+  try {
+    const r = await fetch('/api/email-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, vin: emailTargetVin, type: emailTargetType || 'carfax' })
+    });
+
+    if (!r.ok) throw new Error(await r.text());
+    
+    showToast(`Report sent to ${to}`, 'ok');
+    closeEmailModal();
+  } catch (e) {
+    showToast('Failed to send email', 'error');
+  } finally {
+    sendEmailBtn.disabled = false;
+    sendEmailBtn.textContent = 'Send Now';
+  }
+});
+
 function renderHistory() {
   const body = $id('historyBody');
   const list = loadHistory();
@@ -569,19 +615,19 @@ function renderHistory() {
   }
   list.forEach((item, idx) => {
     const tr = document.createElement('tr');
-    tr.className = "hover:bg-gray-50 transition-colors";
-    // Updated to match the new Clean Tailwind Table
+    tr.className = "hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors border-b border-gray-100 dark:border-gray-700";
     tr.innerHTML = `
       <td class="px-6 py-4">
         <div class="flex flex-col">
-          <span class="font-mono font-bold text-gray-900">${item.vin}</span>
-          <span class="text-xs text-gray-500">${formatTime(item.ts)}</span>
+          <span class="font-mono font-bold text-gray-900 dark:text-white">${item.vin}</span>
+          <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(item.ts)}</span>
         </div>
       </td>
       <td class="px-6 py-4 text-right">
         <div class="flex justify-end gap-3">
-           <button data-idx="${idx}" data-action="open" class="text-blue-600 hover:text-blue-800 text-xs font-bold uppercase tracking-wider">View</button>
-           <button data-idx="${idx}" data-action="pdf" class="text-blue-600 hover:text-blue-800 text-xs font-bold uppercase tracking-wider">PDF</button>
+           <button data-idx="${idx}" data-action="open" class="text-blue-600 dark:text-blue-400 hover:text-blue-800 text-xs font-bold uppercase">View</button>
+           <button data-idx="${idx}" data-action="pdf" class="text-blue-600 dark:text-blue-400 hover:text-blue-800 text-xs font-bold uppercase">PDF</button>
+           <button data-idx="${idx}" data-action="email" class="text-gray-500 dark:text-gray-400 hover:text-gray-800 text-xs font-bold uppercase">Email</button>
            <button data-idx="${idx}" data-action="share" class="text-gray-400 hover:text-gray-600 text-xs">Link</button>
            <button data-idx="${idx}" data-action="del" class="text-red-300 hover:text-red-500 text-xs">✕</button>
         </div>
@@ -594,8 +640,10 @@ function renderHistory() {
     btn.addEventListener('click', async (e) => {
       const i = +e.currentTarget.getAttribute('data-idx');
       const item = loadHistory()[i]; if (!item) return;
+      
       if (action === 'open') openHistoryHTML(item);
       else if (action === 'pdf') downloadHistoryPDF(item, e.currentTarget);
+      else if (action === 'email') openEmailModal(item.vin.replace('(from plate)', '').trim() || item.plate, item.type);
       else if (action === 'share') copyShareLink(item.vin.replace('(from plate)', '').trim() || item.plate, item.type);
       else if (action === 'del') { const list = loadHistory(); list.splice(i, 1); saveHistory(list); renderHistory(); }
     });
@@ -649,11 +697,8 @@ async function renderPaypalButton() {
     createOrder: () => createPaypalOrder(user),
     
     onApprove: async (data) => {
-      // 1. OPEN WINDOW IMMEDIATELY (Before any await)
-      // This ensures the browser knows it was triggered by a user action.
       const reportWindow = openBlank();
       
-      // 2. Show a loading state in the new window so the user knows it's working
       if (reportWindow) {
         reportWindow.document.write(`
           <html><body style="font-family:sans-serif; text-align:center; padding-top:50px; background:#f9fafb;">
@@ -665,22 +710,19 @@ async function renderPaypalButton() {
       }
 
       try {
-        // 3. Capture Payment
         const result = await capturePaypalOrder(data.orderID, user);
         
         let pending = tryLoadPending();
         if (!pending || (!pending.vin && !(pending.state && pending.plate))) pending = lastFormData || null;
 
-        // If just buying credits (no specific report pending)
         if (!pending || (!pending.vin && !(pending.state && pending.plate))) {
-          if (reportWindow) reportWindow.close(); // Close the loading window since we don't need it
+          if (reportWindow) reportWindow.close();
           showToast('Payment completed! 1 credit added.', 'ok');
           await refreshBalancePill();
           closeBuyModal?.();
           return;
         }
 
-        // 4. Fetch Report
         const body = { ...pending, as: 'html', allowLive: true };
         if (!user && result?.captureId) body.oneTimeSession = 'pp_' + result.captureId;
 
@@ -697,21 +739,18 @@ async function renderPaypalButton() {
         
         const html = await resp.text();
 
-        // 5. Save to history IMMEDIATELY (in case the window fails to render)
         addToHistory({
           vin: pending.vin || '(from plate)', type: pending.type || 'carfax', ts: Date.now(),
           state: pending.state || '', plate: pending.plate || ''
         });
         renderHistory();
 
-        // 6. Write real report to the window we opened earlier
         if (reportWindow) {
-          reportWindow.document.open(); // Clear the "Loading..." text
+          reportWindow.document.open(); 
           reportWindow.document.write(html);
           reportWindow.document.close();
           reportWindow.focus();
         } else {
-          // Fallback: If popup was strictly blocked, overwrite current page
           document.open(); document.write(html); document.close();
         }
 
@@ -721,9 +760,7 @@ async function renderPaypalButton() {
         closeBuyModal?.();
 
       } catch (e) {
-        // If payment or fetch failed, close the blank window so it doesn't hang there
         if (reportWindow) reportWindow.close();
-        
         console.error(e);
         showToast(e.message || 'PayPal capture failed', 'error');
       }
@@ -771,7 +808,6 @@ buy10Btn?.addEventListener('click', async () => {
     return;
   }
   closeBuyModal();
-  // NOTE: Price ID is for 5-pack based on HTML text
   startPurchase({ user, price_id: 'STRIPE_PRICE_10PACK', pendingReport: null });
 });
 
@@ -794,7 +830,6 @@ function reflectVinGate() {
   const formData = Object.fromEntries(new FormData(f).entries());
   const vin = (formData.vin || '').trim().toUpperCase();
 
-  // Hide provider select for simplicity in new design
   if (typeGroup) typeGroup.classList.add('hidden');
 
   if (vin.length === 0 && !hasPlateCombo(formData)) {
@@ -906,6 +941,17 @@ f?.addEventListener('submit', async (e) => {
   }
 });
 
+// Sidebar & Compare listeners
+document.getElementById('buy5Sidebar')?.addEventListener('click', async () => {
+  const { user } = await getSession();
+  if (!user) {
+    showToast('Please sign in to buy a bundle.', 'error');
+    openLogin();
+    return;
+  }
+  startPurchase({ user, price_id: 'STRIPE_PRICE_10PACK', pendingReport: null });
+});
+
 /* ================================
    Forgot / Reset Password Logic
 ================================ */
@@ -985,17 +1031,6 @@ savePassBtn?.addEventListener('click', async () => {
     savePassBtn.disabled = false;
     savePassBtn.textContent = 'Update Password';
   }
-});
-
-// Sidebar & Compare listeners
-document.getElementById('buy5Sidebar')?.addEventListener('click', async () => {
-  const { user } = await getSession();
-  if (!user) {
-    showToast('Please sign in to buy a bundle.', 'error');
-    openLogin();
-    return;
-  }
-  startPurchase({ user, price_id: 'STRIPE_PRICE_10PACK', pendingReport: null });
 });
 
 /* ================================
