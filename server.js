@@ -81,11 +81,13 @@ app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 const stripeLive = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 const STRIPE_TEST_SECRET_KEY = process.env.STRIPE_TEST_SECRET_KEY || null;
 
-const PRICE_SINGLE = process.env.STRIPE_PRICE_SINGLE;
-const PRICE_10PACK = process.env.STRIPE_PRICE_10PACK;
+const PRICE_SINGLE  = process.env.STRIPE_PRICE_SINGLE;
+const PRICE_5PACK   = process.env.STRIPE_PRICE_5PACK;
+const PRICE_10PACK  = process.env.STRIPE_PRICE_10PACK;
 
-const CREDITS_PER_SINGLE = Number(process.env.CREDITS_PER_SINGLE || "1");
-const CREDITS_PER_10PACK = Number(process.env.CREDITS_PER_10PACK || "5");
+const CREDITS_PER_SINGLE  = Number(process.env.CREDITS_PER_SINGLE  || "1");
+const CREDITS_PER_5PACK   = Number(process.env.CREDITS_PER_5PACK   || "5");
+const CREDITS_PER_10PACK  = Number(process.env.CREDITS_PER_10PACK  || "10");
 
 function stripeForId(id) {
   const isTest = typeof id === "string" && id.startsWith("cs_test_");
@@ -99,11 +101,11 @@ function stripeForId(id) {
 /* ================================================================
    Supabase
 ================================================================ */
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
+const SUPABASE_URL    = process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
-const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY;
+const SERVICE_ROLE_KEY  = process.env.SERVICE_ROLE_KEY;
 
-const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseAnon    = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const supabaseService = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const supabaseForToken = (token) =>
   createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -121,22 +123,22 @@ async function getUser(req) {
 /* ================================================================
    Email (Nodemailer)
 ================================================================ */
-const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
-const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
-const SMTP_SECURE = process.env.SMTP_SECURE !== "0"; 
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const SMTP_FROM = process.env.SMTP_FROM || "AutoVINReveal <autovinreveal@gmail.com>";
+const SMTP_HOST   = process.env.SMTP_HOST   || "smtp.gmail.com";
+const SMTP_PORT   = Number(process.env.SMTP_PORT || 465);
+const SMTP_SECURE = process.env.SMTP_SECURE !== "0";
+const SMTP_USER   = process.env.SMTP_USER;
+const SMTP_PASS   = process.env.SMTP_PASS;
+const SMTP_FROM   = process.env.SMTP_FROM || "AutoVINReveal <autovinreveal@gmail.com>";
 
 let mailer = null;
 if (SMTP_USER && SMTP_PASS) {
   mailer = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_SECURE,
+    host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_SECURE,
     auth: { user: SMTP_USER, pass: SMTP_PASS },
   });
-  mailer.verify().then(() => console.log("✅ SMTP mailer ready")).catch(e => console.error("❌ SMTP failed:", e));
+  mailer.verify()
+    .then(() => console.log("✅ SMTP mailer ready"))
+    .catch(e => console.error("❌ SMTP failed:", e));
 } else {
   console.warn("⚠️ SMTP not configured. Emails will fail.");
 }
@@ -144,95 +146,85 @@ if (SMTP_USER && SMTP_PASS) {
 /* ================================================================
    CarSimulcast API
 ================================================================ */
-const CS = "https://connect.carsimulcast.com";
-const KEY = process.env.API_KEY;
+const CS     = "https://connect.carsimulcast.com";
+const KEY    = process.env.API_KEY;
 const SECRET = process.env.API_SECRET;
-const H = { "API-KEY": KEY, "API-SECRET": SECRET };
+const H      = { "API-KEY": KEY, "API-SECRET": SECRET };
 
 async function csGet(url) {
   try {
     const r = await axios.get(url, {
-      headers: H,
-      responseType: "text",
-      timeout: 30000,
+      headers: H, responseType: "text", timeout: 30000,
       validateStatus: () => true,
     });
     if (r.status >= 400) {
-      const body = String(r.data || "");
-      const hint = body.slice(0, 200).toLowerCase();
+      const hint = String(r.data || "").slice(0, 200).toLowerCase();
       throw new Error(`CS_${r.status}:${hint}`);
     }
     return r.data;
   } catch (err) {
-    const msg = String(err?.message || "cs-error");
-    throw new Error(`CS_ERROR:${msg}`);
+    throw new Error(`CS_ERROR:${String(err?.message || "cs-error")}`);
   }
 }
 
 /* ================================================================
-   Cache / Helpers (Updated: Expire Old Reports)
+   Cache / Helpers
 ================================================================ */
 const CACHE_DIR = path.join(__dirname, "cache");
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 const ck = (vin, type) => path.join(CACHE_DIR, `${vin}-${type}.b64`);
 
-// CONFIG: How long is a report valid? (30 Days)
-const REPORT_TTL_DAYS = 30; 
-const MAX_AGE_MS = REPORT_TTL_DAYS * 24 * 60 * 60 * 1000;
-
-const readCache = (vin, type) => fs.existsSync(ck(vin, type)) ? fs.readFileSync(ck(vin, type), "utf8") : null;
+// FIX #1: removed dead `readCache` — getReportData handles all reads directly
 const writeCache = (vin, type, data) => fs.writeFileSync(ck(vin, type), data, "utf8");
+
+const REPORT_TTL_DAYS = 30;
+const MAX_AGE_MS = REPORT_TTL_DAYS * 24 * 60 * 60 * 1000;
 
 async function getReportData(vin, type) {
   const v = (vin || "").toUpperCase();
   const t = (type || "").toLowerCase();
-  
-  // 1. Try Local File System (Check Age)
+
+  // 1. Try local file cache (check age)
   const filePath = ck(v, t);
   if (fs.existsSync(filePath)) {
-      try {
-          const stats = fs.statSync(filePath);
-          const age = Date.now() - stats.mtimeMs;
-          
-          if (age < MAX_AGE_MS) {
-              return fs.readFileSync(filePath, "utf8");
-          } else {
-              fs.unlinkSync(filePath); // Expired
-          }
-      } catch (err) { console.error("Cache file check failed:", err); }
+    try {
+      const stats = fs.statSync(filePath);
+      if (Date.now() - stats.mtimeMs < MAX_AGE_MS) {
+        return fs.readFileSync(filePath, "utf8");
+      } else {
+        fs.unlinkSync(filePath); // expired
+      }
+    } catch (err) { console.error("Cache file check failed:", err); }
   }
 
-  // 2. Try Database (Check Age)
+  // 2. Try database (check age)
   try {
     const { data } = await supabaseService
       .from("vin_queries")
       .select("report_data, created_at")
       .eq("vin", v)
       .not("report_data", "is", null)
-      .order('created_at', { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (data && data.report_data) {
-      const reportDate = new Date(data.created_at).getTime();
-      const age = Date.now() - reportDate;
-
+    if (data?.report_data) {
+      const age = Date.now() - new Date(data.created_at).getTime();
       if (age < MAX_AGE_MS) {
-          writeCache(v, t, data.report_data); // Refresh local cache
-          return data.report_data;
+        writeCache(v, t, data.report_data);
+        return data.report_data;
       }
     }
-  } catch (err) {
-    console.error("Error fetching report from DB backup:", err);
-  }
+  } catch (err) { console.error("DB cache fetch failed:", err); }
 
-  return null; // Forces fresh fetch
+  return null;
 }
 
 const CONSUMED_FILE = path.join(__dirname, ".consumed_sessions.json");
 let CONSUMED = new Set();
 try {
-  if (fs.existsSync(CONSUMED_FILE)) CONSUMED = new Set(JSON.parse(fs.readFileSync(CONSUMED_FILE, "utf8")));
+  if (fs.existsSync(CONSUMED_FILE))
+    CONSUMED = new Set(JSON.parse(fs.readFileSync(CONSUMED_FILE, "utf8")));
 } catch {}
 function saveConsumed() {
   try { fs.writeFileSync(CONSUMED_FILE, JSON.stringify([...CONSUMED], null, 2)); } catch {}
@@ -241,23 +233,24 @@ function saveConsumed() {
 function decodeReportBase64(rawB64) {
   const buf = Buffer.from(rawB64, "base64");
   if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
-    try { return { kind: "html", html: gunzipSync(buf).toString("utf8") }; } 
+    try { return { kind: "html", html: gunzipSync(buf).toString("utf8") }; }
     catch { return { kind: "unknown", buffer: buf, error: "gunzip-failed" }; }
   }
   if (buf.slice(0, 5).toString() === "%PDF-") return { kind: "pdf", buffer: buf };
   const asText = buf.toString("utf8");
-  // Loose HTML check to catch edge cases
-  if (/<!DOCTYPE html|<html|div class=|body>/i.test(asText.slice(0, 2048))) return { kind: "html", html: asText };
+  if (/<!DOCTYPE html|<html|div class=|body>/i.test(asText.slice(0, 2048)))
+    return { kind: "html", html: asText };
   return { kind: "unknown", buffer: buf };
 }
 
 /* ================================================================
    VIN Validation
 ================================================================ */
-const VIN_WEIGHTS = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2];
+const VIN_WEIGHTS = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
 const VIN_MAP = Object.freeze({
-  A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8, J: 1, K: 2, L: 3, M: 4, N: 5, P: 7, R: 9,
-  S: 2, T: 3, U: 4, V: 5, W: 6, X: 7, Y: 8, Z: 9, 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9,
+  A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,
+  S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9,
+  0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,
 });
 function isPlausibleVinFormat(vin) { return /^[A-HJ-NPR-Z0-9]{17}$/.test(vin); }
 function vinCheckDigitOk(vin) {
@@ -268,8 +261,7 @@ function vinCheckDigitOk(vin) {
     sum += val * VIN_WEIGHTS[i];
   }
   const r = sum % 11;
-  const expected = r === 10 ? "X" : String(r);
-  return vin[8] === expected;
+  return vin[8] === (r === 10 ? "X" : String(r));
 }
 function validateVin(vinRaw) {
   const vin = (vinRaw || "").toUpperCase().trim();
@@ -287,42 +279,57 @@ const WH_TEST = process.env.STRIPE_WEBHOOK_SECRET_TEST || null;
 app.get("/api/stripe-webhook", (_req, res) => res.status(200).send("ok"));
 
 app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async (req, res) => {
-    const sig = req.headers["stripe-signature"];
-    let event;
-    try {
-      event = stripeLive.webhooks.constructEvent(req.body, sig, WH_LIVE);
-    } catch (e1) {
-      if (WH_TEST) {
-        try { event = stripeLive.webhooks.constructEvent(req.body, sig, WH_TEST); } 
-        catch (e2) { return res.status(400).send("Webhook verification failed"); }
-      } else { return res.status(400).send("Webhook verification failed"); }
-    }
+  const sig = req.headers["stripe-signature"];
+  let event;
+  try {
+    event = stripeLive.webhooks.constructEvent(req.body, sig, WH_LIVE);
+  } catch (e1) {
+    if (WH_TEST) {
+      try { event = stripeLive.webhooks.constructEvent(req.body, sig, WH_TEST); }
+      catch { return res.status(400).send("Webhook verification failed"); }
+    } else { return res.status(400).send("Webhook verification failed"); }
+  }
 
-    try {
-      if (event.type === "checkout.session.completed") {
-        const session = event.data.object;
-        const sStripe = stripeForId(session.id);
-        const lineItems = await sStripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
+  try {
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object;
+      const sStripe  = stripeForId(session.id);
+      const lineItems = await sStripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
 
-        let creditsToAdd = 0;
-        for (const li of lineItems.data) {
-          const pid = li.price?.id;
-          const qty = li.quantity || 1;
-          const isBundle = pid === PRICE_10PACK;
-          creditsToAdd += qty * (isBundle ? CREDITS_PER_10PACK : CREDITS_PER_SINGLE);
-        }
+      let creditsToAdd = 0;
+      for (const li of lineItems.data) {
+        const pid = li.price?.id;
+        const qty = li.quantity || 1;
+        if      (pid === PRICE_10PACK) creditsToAdd += qty * CREDITS_PER_10PACK;
+        else if (pid === PRICE_5PACK)  creditsToAdd += qty * CREDITS_PER_5PACK;
+        else if (pid === PRICE_SINGLE) creditsToAdd += qty * CREDITS_PER_SINGLE;
+      }
 
-        const userId = session.metadata?.user_id || session.client_reference_id || null;
-        if (userId && creditsToAdd > 0) {
-          const { data: existing } = await supabaseService.from("credits").select("balance").eq("user_id", userId).maybeSingle();
-          if (existing) await supabaseService.from("credits").update({ balance: (existing.balance || 0) + creditsToAdd }).eq("user_id", userId);
-          else await supabaseService.from("credits").insert({ user_id: userId, balance: creditsToAdd });
+      const userId = session.metadata?.user_id || session.client_reference_id || null;
+
+      // FIX #3: log clearly when a guest purchase has no userId so credits aren't silently lost
+      if (!userId && creditsToAdd > 0) {
+        console.warn(`[Webhook] Guest purchase — no userId. Credits (${creditsToAdd}) not stored. Session: ${session.id}`);
+      }
+
+      if (userId && creditsToAdd > 0) {
+        const { data: existing } = await supabaseService
+          .from("credits").select("balance").eq("user_id", userId).maybeSingle();
+        if (existing) {
+          await supabaseService.from("credits")
+            .update({ balance: (existing.balance || 0) + creditsToAdd })
+            .eq("user_id", userId);
+        } else {
+          await supabaseService.from("credits").insert({ user_id: userId, balance: creditsToAdd });
         }
       }
-      return res.status(200).json({ ok: true });
-    } catch (e) { return res.status(500).send("Webhook handler error"); }
+    }
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    console.error("Webhook handler error:", e);
+    return res.status(500).send("Webhook handler error");
   }
-);
+});
 
 /* ================================================================
    Middleware
@@ -331,8 +338,14 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(cors({ origin: ALLOWED_ORIGIN, credentials: false }));
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(morgan("dev"));
+
+// FIX #8: use 'combined' in production, 'dev' locally
+app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+
 app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
+
+// FIX #7: tighter rate limit on PayPal capture (money endpoint)
+const paypalCaptureLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: "Too many PayPal requests" });
 
 /* ================================================================
    Endpoints
@@ -342,7 +355,7 @@ app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
     const { user_id: userIdFromBody, price_id, vin, report_type } = req.body || {};
-    
+
     if (vin) {
       const v = validateVin(vin);
       if (!v.ok) return res.status(422).json({ error: "invalid_vin", reason: v.code, message: v.msg });
@@ -354,18 +367,18 @@ app.post("/api/create-checkout-session", async (req, res) => {
       if (user?.id) userId = user.id;
     }
 
-    const isTenPack = price_id === "STRIPE_PRICE_10PACK" || price_id === "10pack";
-    const priceLive = isTenPack ? PRICE_10PACK : PRICE_SINGLE;
+    const isTenPack  = price_id === "STRIPE_PRICE_10PACK" || price_id === "10pack";
+    const isFivePack = price_id === "STRIPE_PRICE_5PACK"  || price_id === "5pack";
 
-    if (vin) {
-      const type = (report_type || "carfax").toLowerCase();
-      const cachedData = await getReportData((vin || "").toUpperCase(), type);
-      if (cachedData) {
-        return res.status(409).json({ alreadyCached: true, vin, report_type: type });
-      }
-    }
+    let priceLive = PRICE_SINGLE;
+    let intent    = vin ? "buy_report" : "buy_credit_single";
 
-    const intent = vin ? "buy_report" : (isTenPack ? "buy_credits_bundle" : "buy_credit_single");
+    if (isTenPack)       { priceLive = PRICE_10PACK; intent = "buy_credits_10pack"; }
+    else if (isFivePack) { priceLive = PRICE_5PACK;  intent = "buy_credits_5pack"; }
+
+    // FIX #4: removed the 409 alreadyCached check here — it caused silent failures
+    // on the client. The cache is checked again in /api/report, so this is redundant.
+
     const session = await stripeLive.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -374,37 +387,44 @@ app.post("/api/create-checkout-session", async (req, res) => {
       cancel_url: `${SITE_URL}/?checkout=cancel`,
       ...(userId ? { client_reference_id: userId } : {}),
       metadata: {
-        ...(userId ? { user_id: userId } : {}),
-        ...(vin ? { vin } : {}),
-        ...(report_type ? { report_type } : {}),
+        ...(userId      ? { user_id: userId }           : {}),
+        ...(vin         ? { vin }                        : {}),
+        ...(report_type ? { report_type }                : {}),
         intent,
       },
     });
 
     res.json({ url: session.url });
-  } catch (err) { res.status(500).json({ error: "Stripe error" }); }
+  } catch (err) {
+    console.error("Stripe checkout error:", err);
+    res.status(500).json({ error: "Stripe error" });
+  }
 });
 
 // Credits
 app.get("/api/credits/:user_id", async (req, res) => {
   try {
-    const { data, error } = await supabaseService.from("credits").select("balance").eq("user_id", req.params.user_id).maybeSingle();
+    const { data, error } = await supabaseService
+      .from("credits").select("balance").eq("user_id", req.params.user_id).maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
     res.json({ balance: data?.balance ?? 0 });
   } catch { res.status(500).json({ error: "Server error" }); }
 });
 
-// PayPal
+/* ================================================================
+   PayPal
+================================================================ */
 const PAYPAL_ENV = (process.env.PAYPAL_ENV || "sandbox").toLowerCase();
 const ppEnv = PAYPAL_ENV === "live"
-    ? new paypalSdk.core.LiveEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET)
-    : new paypalSdk.core.SandboxEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET);
+  ? new paypalSdk.core.LiveEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET)
+  : new paypalSdk.core.SandboxEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET);
 const ppClient = new paypalSdk.core.PayPalHttpClient(ppEnv);
 
+// FIX #2: verifyPaypalCapture is now actually used in capture-order
 async function verifyPaypalCapture(captureId) {
   const req = new paypalSdk.payments.CapturesGetRequest(captureId);
   const res = await ppClient.execute(req);
-  return res?.result; 
+  return res?.result;
 }
 
 app.post("/api/paypal/create-order", async (_req, res) => {
@@ -421,43 +441,57 @@ app.post("/api/paypal/create-order", async (_req, res) => {
   } catch { res.status(500).json({ error: "PayPal create-order failed" }); }
 });
 
-app.post("/api/paypal/capture-order", async (req, res) => {
+app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => {
   try {
     const { orderID, user_id } = req.body || {};
     if (!orderID) return res.status(400).json({ error: "orderID required" });
 
     const capReq = new paypalSdk.orders.OrdersCaptureRequest(orderID);
     capReq.requestBody({});
-    const capRes = await ppClient.execute(capReq);
-    const cap = capRes?.result?.purchase_units?.[0]?.payments?.captures?.[0];
+    const capRes   = await ppClient.execute(capReq);
+    const cap      = capRes?.result?.purchase_units?.[0]?.payments?.captures?.[0];
     const captureId = cap?.id || null;
-    if (!captureId || cap?.status !== "COMPLETED") return res.status(400).json({ error: "Capture not completed" });
+    if (!captureId || cap?.status !== "COMPLETED")
+      return res.status(400).json({ error: "Capture not completed" });
+
+    // FIX #2: verify the capture server-side before adding credits
+    const verified = await verifyPaypalCapture(captureId);
+    if (!verified || verified.status !== "COMPLETED")
+      return res.status(400).json({ error: "Capture verification failed" });
 
     if (user_id) {
-      const { data: existing } = await supabaseService.from("credits").select("balance").eq("user_id", user_id).maybeSingle();
-      if (existing) await supabaseService.from("credits").update({ balance: (existing.balance || 0) + 1 }).eq("user_id", user_id);
-      else await supabaseService.from("credits").insert({ user_id, balance: 1 });
+      const { data: existing } = await supabaseService
+        .from("credits").select("balance").eq("user_id", user_id).maybeSingle();
+      if (existing) {
+        await supabaseService.from("credits")
+          .update({ balance: (existing.balance || 0) + 1 }).eq("user_id", user_id);
+      } else {
+        await supabaseService.from("credits").insert({ user_id, balance: 1 });
+      }
     }
     res.json({ ok: true, captureId });
-  } catch { res.status(500).json({ error: "PayPal capture failed" }); }
+  } catch (err) {
+    console.error("PayPal capture error:", err);
+    res.status(500).json({ error: "PayPal capture failed" });
+  }
 });
 
 /* ================================================================
-   Main Report Logic (With Final Refund Safety Net)
+   Main Report Logic
 ================================================================ */
 app.post("/api/report", async (req, res) => {
-  let targetVin = "";
-  let type = "carfax";
-  let currentUser = null;
+  let targetVin     = "";
+  let type          = "carfax";
+  let currentUser   = null;
   let oneTimeSession = null;
-  let alreadyOwned = false;
-  let justCharged = false; // TRACKS IF WE JUST TOOK MONEY
+  let alreadyOwned  = false;
+  let justCharged   = false;
 
   try {
     const { vin, state, plate, type: reqType, as = "html", allowLive: allowLiveRaw, oneTimeSession: reqSession } = req.body || {};
-    type = (reqType || "carfax").toLowerCase();
+    type       = (reqType || "carfax").toLowerCase();
     const allowLive = allowLiveRaw !== false;
-    oneTimeSession = reqSession;
+    oneTimeSession  = reqSession;
 
     // 1. Resolve VIN
     targetVin = (vin || "").trim().toUpperCase();
@@ -475,32 +509,34 @@ app.post("/api/report", async (req, res) => {
     if (!v.ok) return res.status(422).json({ error: "invalid_vin", reason: v.code, message: v.msg });
     targetVin = v.vin;
 
-    // 3. Check Cache
+    // 3. Check cache
     let raw = await getReportData(targetVin, type);
 
-    // 4. Check Database Ownership
+    // 4. Check ownership
     if (!oneTimeSession) {
-        const { token, user } = await getUser(req);
-        currentUser = user;
-        if (currentUser) {
-            const { data: past } = await supabaseService
-                .from('vin_queries')
-                .select('id')
-                .eq('user_id', currentUser.id)
-                .eq('vin', targetVin)
-                .eq('success', true)
-                .maybeSingle();
-            if (past) alreadyOwned = true;
-        }
+      const { token, user } = await getUser(req);
+      currentUser = user;
+      if (currentUser) {
+        const { data: past } = await supabaseService
+          .from("vin_queries")
+          .select("id")
+          .eq("user_id", currentUser.id)
+          .eq("vin", targetVin)
+          .eq("success", true)
+          .maybeSingle();
+        if (past) alreadyOwned = true;
+      }
     }
 
-    // 5. Live Fetch Logic
+    // 5. Live fetch
     if (!raw && allowLive) {
-      
-      // CHARGE USER
+
+      // Charge user
       if (!alreadyOwned && !oneTimeSession) {
         if (currentUser) {
-          const { error: rpcErr } = await supabaseForToken(req.headers.authorization?.split(" ")[1]).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
+          const { error: rpcErr } = await supabaseForToken(
+            req.headers.authorization?.split(" ")[1]
+          ).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
           if (rpcErr) return res.status(402).json({ error: "insufficient_credits" });
           justCharged = true;
         } else {
@@ -511,59 +547,59 @@ app.post("/api/report", async (req, res) => {
       if (oneTimeSession && !alreadyOwned) {
         try {
           if (!oneTimeSession.startsWith("pp_")) {
-             const sStripe = stripeForId(oneTimeSession);
-             const s = await sStripe.checkout.sessions.retrieve(oneTimeSession);
-             if (s.payment_status !== "paid") throw new Error("unpaid");
+            const sStripe = stripeForId(oneTimeSession);
+            const s = await sStripe.checkout.sessions.retrieve(oneTimeSession);
+            if (s.payment_status !== "paid") throw new Error("unpaid");
           }
           if (!CONSUMED.has(oneTimeSession)) {
-             CONSUMED.add(oneTimeSession);
-             saveConsumed();
-             justCharged = true;
+            CONSUMED.add(oneTimeSession);
+            saveConsumed();
+            justCharged = true;
           }
         } catch { return res.status(400).json({ error: "receipt_invalid" }); }
       }
 
-      // FETCH & VALIDATE
+      // Fetch & validate
       try {
         const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
-        
         if (!live || live.length < 50) throw new Error("CS_EMPTY_RESPONSE");
-        
         const checkDecode = decodeReportBase64(live);
         if (checkDecode.kind === "unknown") throw new Error("CS_INVALID_FORMAT");
 
         raw = live;
         writeCache(targetVin, type, raw);
 
+        // FIX #5: upsert instead of update to handle first-time rows correctly
         if (currentUser) {
-           await supabaseService
-             .from("vin_queries")
-             .update({ report_data: raw, success: true })
-             .eq("user_id", currentUser.id)
-             .eq("vin", targetVin);
+          await supabaseService.from("vin_queries").upsert({
+            user_id:     currentUser.id,
+            vin:         targetVin,
+            report_data: raw,
+            success:     true,
+          }, { onConflict: "user_id,vin" });
         }
 
       } catch (e) {
-        // --- IMMEDIATE REFUND IF FETCH FAILED ---
-        console.error(`[Fetch Failed] User: ${currentUser?.id || 'guest'} | VIN: ${targetVin} | Err: ${e.message}`);
+        console.error(`[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`);
 
+        // Refund immediately
         if (justCharged) {
-            if (currentUser) {
-               await supabaseService.rpc('adjust_credits', {
-                 p_user: currentUser.id,
-                 p_delta: 1, 
-                 p_reason: 'refund_api_failure',
-                 p_ref: targetVin
-               });
-            } else if (oneTimeSession) {
-               CONSUMED.delete(oneTimeSession);
-               saveConsumed();
-            }
+          if (currentUser) {
+            await supabaseService.rpc("adjust_credits", {
+              p_user:   currentUser.id,
+              p_delta:  1,
+              p_reason: "refund_api_failure",
+              p_ref:    targetVin,
+            });
+          } else if (oneTimeSession) {
+            CONSUMED.delete(oneTimeSession);
+            saveConsumed();
+          }
         }
 
         const msg = String(e.message || "");
         if (msg.includes("CS_404") || /invalid.*vin|vin.*not.*found/i.test(msg)) {
-           return res.status(422).json({ error: "invalid_vin", reason: "remote_reject", message: "VIN not found in database. Refunded." });
+          return res.status(422).json({ error: "invalid_vin", reason: "remote_reject", message: "VIN not found in database. Refunded." });
         }
         return res.status(502).json({ error: "provider_error", message: "Report generation failed. You have been refunded." });
       }
@@ -571,29 +607,32 @@ app.post("/api/report", async (req, res) => {
 
     if (!raw) return res.status(404).json({ error: "not_found", message: "No report found." });
 
-    // 6. Deliver Result & FINAL SAFETY CHECK
+    // 6. Deliver result
     const decoded = decodeReportBase64(raw);
 
     if (as === "pdf") {
       try {
-          if (decoded.kind === "pdf") {
-            res.setHeader("Content-Type", "application/pdf");
-            res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-${type}.pdf"`);
-            return res.send(decoded.buffer);
-          }
-          if (decoded.kind === "html") {
-            const form = new FormData();
-            form.append("base64_content", Buffer.from(decoded.html, "utf8").toString("base64"));
-            form.append("vin", targetVin);
-            form.append("report_type", type);
-            const pdf = await axios.post(`${CS}/pdf`, form, { headers: { ...H, ...form.getHeaders() }, responseType: "arraybuffer", timeout: 60000 });
-            
-            res.setHeader("Content-Type", "application/pdf");
-            res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-${type}.pdf"`);
-            return res.send(Buffer.from(pdf.data));
-          }
+        if (decoded.kind === "pdf") {
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-${type}.pdf"`);
+          return res.send(decoded.buffer);
+        }
+        if (decoded.kind === "html") {
+          const form = new FormData();
+          form.append("base64_content", Buffer.from(decoded.html, "utf8").toString("base64"));
+          form.append("vin", targetVin);
+          form.append("report_type", type);
+          const pdf = await axios.post(`${CS}/pdf`, form, {
+            headers: { ...H, ...form.getHeaders() },
+            responseType: "arraybuffer",
+            timeout: 60000,
+          });
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-${type}.pdf"`);
+          return res.send(Buffer.from(pdf.data));
+        }
       } catch (pdfErr) {
-          console.error("PDF generation failed, falling back to HTML", pdfErr.message);
+        console.error("PDF generation failed, falling back to HTML:", pdfErr.message);
       }
     }
 
@@ -602,24 +641,25 @@ app.post("/api/report", async (req, res) => {
       return res.send(decoded.html);
     }
 
-    // --- FINAL SAFETY NET ---
-    // If we reach here, we have 'raw' data but it's garbage (not PDF, not HTML).
-    // If we JUST charged the user for this garbage, REFUND THEM NOW.
+    // Final safety net — data is neither PDF nor HTML
     if (justCharged) {
-        console.error(`[Delivery Failed] User: ${currentUser?.id || 'guest'} | Data was unsupported format. Refunding.`);
-        if (currentUser) {
-            await supabaseService.rpc('adjust_credits', { p_user: currentUser.id, p_delta: 1, p_reason: 'refund_bad_format', p_ref: targetVin });
-        } else if (oneTimeSession) {
-            CONSUMED.delete(oneTimeSession);
-            saveConsumed();
-        }
-        return res.status(422).json({ error: "provider_error", message: "Report format error. You have been refunded." });
+      console.error(`[Delivery Failed] User: ${currentUser?.id || "guest"} | Unsupported format. Refunding.`);
+      if (currentUser) {
+        await supabaseService.rpc("adjust_credits", {
+          p_user: currentUser.id, p_delta: 1,
+          p_reason: "refund_bad_format", p_ref: targetVin,
+        });
+      } else if (oneTimeSession) {
+        CONSUMED.delete(oneTimeSession);
+        saveConsumed();
+      }
+      return res.status(422).json({ error: "provider_error", message: "Report format error. You have been refunded." });
     }
 
     return res.status(500).json({ error: "unsupported_content" });
 
   } catch (err) {
-    console.error("Critical Server Error:", err);
+    console.error("Critical server error:", err);
     return res.status(500).json({ error: "server_error" });
   }
 });
@@ -635,41 +675,58 @@ app.post("/api/email-report", async (req, res) => {
 
     let targetVin = (vin || "").trim().toUpperCase();
     if (!targetVin && state && plate) {
-       const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
-       const m = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
-       if (m) targetVin = m[0];
+      const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
+      const m = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
+      if (m) targetVin = m[0];
     }
     if (!targetVin) return res.status(400).json({ error: "vin_required" });
 
     const raw = await getReportData(targetVin, type);
     if (!raw) return res.status(404).json({ error: "not_cached" });
-    
+
     const decoded = decodeReportBase64(raw);
     const subject = `${type.toUpperCase()} report for ${targetVin}`;
     const attachments = [];
-    if (decoded.kind === "pdf") attachments.push({ filename: `${targetVin}.pdf`, content: decoded.buffer });
-    else if (decoded.kind === "html") attachments.push({ filename: `${targetVin}.html`, content: decoded.html });
+    if (decoded.kind === "pdf")  attachments.push({ filename: `${targetVin}.pdf`,  content: decoded.buffer });
+    if (decoded.kind === "html") attachments.push({ filename: `${targetVin}.html`, content: decoded.html });
 
     await mailer.sendMail({ from: SMTP_FROM, to, subject, text: `Attached is your report for VIN ${targetVin}.`, attachments });
     return res.json({ ok: true });
   } catch { return res.status(500).json({ error: "email_failed" }); }
 });
 
+/* ================================================================
+   Share Tokens
+================================================================ */
 const SHARE_FILE = path.join(__dirname, ".share_tokens.json");
 let SHARE_TOKENS = {};
-try { if (fs.existsSync(SHARE_FILE)) SHARE_TOKENS = JSON.parse(fs.readFileSync(SHARE_FILE, "utf8")); } catch {}
-function saveShareTokens() { try { fs.writeFileSync(SHARE_FILE, JSON.stringify(SHARE_TOKENS, null, 2)); } catch {} }
+try {
+  if (fs.existsSync(SHARE_FILE))
+    SHARE_TOKENS = JSON.parse(fs.readFileSync(SHARE_FILE, "utf8"));
+} catch {}
+function saveShareTokens() {
+  try { fs.writeFileSync(SHARE_FILE, JSON.stringify(SHARE_TOKENS, null, 2)); } catch {}
+}
+
+// FIX #10: periodically prune expired share tokens so the file doesn't grow forever
+function pruneShareTokens() {
+  const now = Date.now();
+  let pruned = 0;
+  for (const k of Object.keys(SHARE_TOKENS)) {
+    if (SHARE_TOKENS[k].exp <= now) { delete SHARE_TOKENS[k]; pruned++; }
+  }
+  if (pruned > 0) { saveShareTokens(); console.log(`[Share] Pruned ${pruned} expired token(s)`); }
+}
+setInterval(pruneShareTokens, 60 * 60 * 1000); // hourly
 
 app.post("/api/share", async (req, res) => {
   try {
     const { vin, type = "carfax" } = req.body || {};
     if (!vin) return res.status(400).json({ error: "vin required" });
-    
     const raw = await getReportData(vin, type);
     if (!raw) return res.status(404).json({ error: "not_cached" });
-
     const token = Buffer.from(crypto.randomUUID()).toString("base64url").replace(/=/g, "");
-    const exp = Date.now() + 24 * 60 * 60 * 1000;
+    const exp   = Date.now() + 24 * 60 * 60 * 1000;
     SHARE_TOKENS[token] = { vin: vin.toUpperCase(), type: type.toLowerCase(), exp };
     saveShareTokens();
     res.json({ url: `${SITE_URL}/view/${token}`, expiresAt: exp });
@@ -677,25 +734,23 @@ app.post("/api/share", async (req, res) => {
 });
 
 app.get("/view/:token", async (req, res) => {
-  const t = req.params.token;
-  const meta = SHARE_TOKENS[t];
+  const meta = SHARE_TOKENS[req.params.token];
   if (!meta || meta.exp <= Date.now()) return res.status(404).send("Link expired");
-  
   const raw = await getReportData(meta.vin, meta.type);
   if (!raw) return res.status(404).send("Report not found");
-  
   const decoded = decodeReportBase64(raw);
-  if (decoded.kind === "html") { res.setHeader("Content-Type", "text/html"); return res.send(decoded.html); }
-  if (decoded.kind === "pdf") { res.setHeader("Content-Type", "application/pdf"); return res.send(decoded.buffer); }
+  if (decoded.kind === "html") { res.setHeader("Content-Type", "text/html");         return res.send(decoded.html); }
+  if (decoded.kind === "pdf")  { res.setHeader("Content-Type", "application/pdf");   return res.send(decoded.buffer); }
+  res.status(500).send("Unsupported format");
 });
 
 /* ================================================================
    Admin Routes
 ================================================================ */
 function makeAdminToken() {
-  const exp = Date.now() + ADMIN_SESSION_TTL_SECONDS * 1000;
+  const exp     = Date.now() + ADMIN_SESSION_TTL_SECONDS * 1000;
   const payload = JSON.stringify({ exp });
-  const sig = crypto.createHmac("sha256", APP_SECRET).update(payload).digest("base64url");
+  const sig     = crypto.createHmac("sha256", APP_SECRET).update(payload).digest("base64url");
   return Buffer.from(payload).toString("base64url") + "." + sig;
 }
 function verifyAdminToken(token) {
@@ -703,9 +758,12 @@ function verifyAdminToken(token) {
   const [p64, sig] = token.split(".");
   if (!p64 || !sig) return false;
   const payload = Buffer.from(p64, "base64url").toString("utf8");
-  const expect = crypto.createHmac("sha256", APP_SECRET).update(payload).digest("base64url");
+  const expect  = crypto.createHmac("sha256", APP_SECRET).update(payload).digest("base64url");
   if (expect !== sig) return false;
-  try { const obj = JSON.parse(payload); if (!obj?.exp || obj.exp < Date.now()) return false; } catch { return false; }
+  try {
+    const obj = JSON.parse(payload);
+    if (!obj?.exp || obj.exp < Date.now()) return false;
+  } catch { return false; }
   return true;
 }
 function requireAdmin(req, res, next) {
@@ -713,15 +771,29 @@ function requireAdmin(req, res, next) {
   return res.status(401).json({ error: "unauthorized" });
 }
 
+// FIX #9: use timing-safe comparison to prevent timing attacks on admin password
 app.post("/api/admin/login", (req, res) => {
-  if (req.body?.password !== ADMIN_PASSWORD) return res.status(401).json({ error: "bad_password" });
-  res.cookie("admin_session", makeAdminToken(), { httpOnly: true, secure: true, sameSite: "strict", maxAge: ADMIN_SESSION_TTL_SECONDS * 1000, path: "/" });
+  const provided = req.body?.password || "";
+  const expected = ADMIN_PASSWORD;
+  // Pad to same length to allow timingSafeEqual comparison
+  const a = Buffer.alloc(64); const b = Buffer.alloc(64);
+  Buffer.from(provided).copy(a); Buffer.from(expected).copy(b);
+  const match = crypto.timingSafeEqual(a, b) && provided === expected;
+  if (!match) return res.status(401).json({ error: "bad_password" });
+  res.cookie("admin_session", makeAdminToken(), {
+    httpOnly: true, secure: true, sameSite: "strict",
+    maxAge: ADMIN_SESSION_TTL_SECONDS * 1000, path: "/",
+  });
   res.json({ ok: true });
 });
 
 app.get("/api/admin/history", requireAdmin, async (req, res) => {
   try {
-    const { data } = await supabaseService.from("vin_queries").select("id, user_id, vin, success, result_url, created_at").order("created_at", { ascending: false }).limit(200);
+    const { data } = await supabaseService
+      .from("vin_queries")
+      .select("id, user_id, vin, success, result_url, created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
     res.json({ ok: true, rows: data || [] });
   } catch { res.status(500).json({ ok: false }); }
 });
@@ -732,13 +804,13 @@ app.get("/admin", (req, res) => res.sendFile(path.join(__dirname, "public", "adm
    Static Files & Boot
 ================================================================ */
 app.use(express.static(path.join(__dirname, "public")));
-app.get("/301", (req, res) => { return res.redirect(301, "/"); });
+app.get("/301", (_req, res) => res.redirect(301, "/"));
 app.get("*", (req, res) => {
-  if (req.accepts("html")) { res.sendFile(path.join(__dirname, "public", "index.html")); } 
-  else { res.status(404).send("Not found"); }
-}); 
+  if (req.accepts("html")) res.sendFile(path.join(__dirname, "public", "index.html"));
+  else res.status(404).send("Not found");
+});
 
-const server = app.listen(Number(PORT), HOST, () => {
+app.listen(Number(PORT), HOST, () => {
   console.log(`\n🚀 Server is running!`);
   console.log(`-------------------------------------------`);
   console.log(`➡️  Local:   http://localhost:${PORT}`);

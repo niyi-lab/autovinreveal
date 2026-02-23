@@ -4,10 +4,10 @@
    Config & Utilities
 ================================ */
 const API = {
-  report: '/api/report',
+  report:   '/api/report',
   checkout: '/api/create-checkout-session',
-  credits: (uid) => `/api/credits/${uid}`,
-  share: '/api/share',
+  credits:  (uid) => `/api/credits/${uid}`,
+  share:    '/api/share',
 };
 
 const PENDING_KEY = 'pendingReport';
@@ -17,20 +17,17 @@ function showToast(message, type = 'error') {
   const box = $id('toastBox');
   if (!box) { alert(message); return; }
   const el = document.createElement('div');
-  el.className = `transform transition-all duration-300 flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${type === 'error' ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-green-50 text-green-700 border border-green-100'}`;
-  
-  const icon = type === 'error' 
+  el.className = `transform transition-all duration-300 flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${
+    type === 'error'
+      ? 'bg-red-50 text-red-700 border border-red-100'
+      : 'bg-green-50 text-green-700 border border-green-100'
+  }`;
+  const icon = type === 'error'
     ? `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`
     : `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
-
   el.innerHTML = `${icon}<span>${message}</span>`;
   box.appendChild(el);
-  
-  requestAnimationFrame(() => {
-    el.style.transform = 'translateY(0)';
-    el.style.opacity = '1';
-  });
-
+  requestAnimationFrame(() => { el.style.transform = 'translateY(0)'; el.style.opacity = '1'; });
   setTimeout(() => {
     el.style.transition = 'all 0.5s ease';
     el.style.opacity = '0';
@@ -39,66 +36,82 @@ function showToast(message, type = 'error') {
   }, 4000);
 }
 
+/** Track a purchase event via Facebook Pixel, silently ignoring errors. */
+function trackPurchase(value = 7.00) {
+  try {
+    fbq('track', 'Purchase', {
+      value, currency: 'USD',
+      contents: [{ id: 'VinReport', quantity: 1 }],
+      content_ids: ['VinReport'], content_type: 'product'
+    });
+  } catch {}
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
 }
 
 function openBlank() {
-  try { return window.open('', '_blank', 'noopener,noreferrer'); }
-  catch { return null; }
+  try { return window.open('', '_blank', 'noopener,noreferrer'); } catch { return null; }
+}
+
+/** Disable a button and show a loading spinner; returns a restore function. */
+function setBtnLoading(btn, loadingText = 'Processing…') {
+  if (!btn) return () => {};
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg><span>${loadingText}</span>`;
+  btn.classList.add('opacity-70', 'cursor-not-allowed');
+  return () => {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    btn.classList.remove('opacity-70', 'cursor-not-allowed');
+  };
 }
 
 /* ================================
    VIN Validation (ISO 3779)
 ================================ */
-const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/; 
+const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/;
 const VIN_WEIGHTS = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
 const VIN_MAP = Object.freeze({
-  A:1, B:2, C:3, D:4, E:5, F:6, G:7, H:8,
-  J:1, K:2, L:3, M:4, N:5, P:7, R:9,
-  S:2, T:3, U:4, V:5, W:6, X:7, Y:8, Z:9,
-  '0':0, '1':1, '2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9
+  A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,
+  J:1,K:2,L:3,M:4,N:5,P:7,R:9,
+  S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9,
+  '0':0,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9
 });
 function looksVinBasic(v) { return VIN_RE.test((v||'').toUpperCase()); }
 function vinCheckDigitOk(vinRaw) {
-  const vin = (vinRaw || '').toUpperCase();
+  const vin = (vinRaw||'').toUpperCase();
   if (!looksVinBasic(vin)) return false;
   let sum = 0;
-  for (let i=0;i<17;i++){
-    const ch = vin[i];
-    const val = VIN_MAP[ch];
-    const w = VIN_WEIGHTS[i];
+  for (let i = 0; i < 17; i++) {
+    const val = VIN_MAP[vin[i]];
     if (val === undefined) return false;
-    sum += val * w;
+    sum += val * VIN_WEIGHTS[i];
   }
-  const remainder = sum % 11;
-  const expected = (remainder === 10) ? 'X' : String(remainder);
-  return vin[8] === expected;
-}
-function looksVin(v) {
-  const vin = (v||'').toUpperCase().trim();
-  if (!looksVinBasic(vin)) return false;
-  return vinCheckDigitOk(vin);
+  const rem = sum % 11;
+  return vin[8] === (rem === 10 ? 'X' : String(rem));
 }
 
-/* UI Helpers */
+/* UI VIN feedback */
 function ensureVinHelpEl() {
   let help = $id('vinHelp');
   if (!help) {
     const vinInput = document.querySelector('input[name="vin"]');
     if (!vinInput) return null;
-    const container = vinInput.closest('.group'); 
     help = document.createElement('div');
     help.id = 'vinHelp';
     help.className = 'text-xs mt-2 font-medium transition-all';
-    container.appendChild(help);
+    vinInput.closest('.group')?.appendChild(help);
   }
   return help;
 }
-function setVinHelp(text, ok=false) {
+function setVinHelp(text, ok = false) {
   const el = ensureVinHelpEl();
   if (!el) return;
   el.textContent = text || '';
@@ -106,22 +119,15 @@ function setVinHelp(text, ok=false) {
 }
 
 /* ================================
-   Primary CTA switcher: 'view' | 'buy'
+   Primary CTA switcher
 ================================ */
 function setPrimaryCTA(mode = 'view') {
   const btn = $id('go');
   if (!btn) return;
-
-  btn.className = "glow-btn w-full bg-blue-600 hover:bg-blue-700 text-white h-14 rounded-xl font-bold text-lg shadow-xl shadow-blue-600/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed";
-
+  btn.className = 'glow-btn w-full bg-blue-600 hover:bg-blue-700 text-white h-14 rounded-xl font-bold text-lg shadow-xl shadow-blue-600/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed';
   if (mode === 'buy') {
     btn.type = 'button';
-    btn.innerHTML = `
-      <span>Buy Credits</span>
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-      </svg>
-    `;
+    btn.innerHTML = `<span>Buy Credits</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>`;
     btn.onclick = async () => {
       const { user } = await getSession();
       if (!user) { openLogin(); return; }
@@ -129,10 +135,7 @@ function setPrimaryCTA(mode = 'view') {
     };
   } else {
     btn.type = 'submit';
-    btn.innerHTML = `
-      <span>Get CARFAX Report Now</span>
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>
-    `;
+    btn.innerHTML = `<span>Get CARFAX Report Now</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>`;
     btn.onclick = null;
   }
 }
@@ -140,7 +143,7 @@ function setPrimaryCTA(mode = 'view') {
 /* ================================
    Supabase init
 ================================ */
-const SB_URL = window.VITE_SUPABASE_URL || '';
+const SB_URL  = window.VITE_SUPABASE_URL  || '';
 const SB_ANON = window.VITE_SUPABASE_ANON_KEY || '';
 let supabase = null;
 if (window.supabase && SB_URL && SB_ANON) {
@@ -159,8 +162,7 @@ async function pingBackendOnce(timeoutMs = 2000) {
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const r = await fetch('/healthz', { cache: 'no-store', signal: ctrl.signal });
-    clearTimeout(t);
-    return r.ok;
+    clearTimeout(t); return r.ok;
   } catch { clearTimeout(t); return false; }
 }
 async function ensureBackendReady({ timeoutMs = 2000, maxWaitMs = 60000 } = {}) {
@@ -180,48 +182,37 @@ async function ensureBackendReady({ timeoutMs = 2000, maxWaitMs = 60000 } = {}) 
 ensureBackendReady({ timeoutMs: 800, maxWaitMs: 3000 });
 
 /* ================================
-   Success Handling (Stripe/PayPal)
+   URL params / success handling
 ================================ */
 function onSuccessPage() { return location.pathname.endsWith('/success.html'); }
 function params() { return new URLSearchParams(location.search); }
 const p = params();
 const stripeSessionId = p.get('session_id') || null;
-const ppSuccess = p.get('pp') === 'success';
-const intentParam = p.get('intent') || null;
-const vinParam = (p.get('vin') || '').toUpperCase();
+const ppSuccess       = p.get('pp') === 'success';
+const intentParam     = p.get('intent') || null;
+const vinParam        = (p.get('vin') || '').toUpperCase();
 
 function tryLoadPending() { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; } }
-function clearPending() { localStorage.removeItem(PENDING_KEY); }
+function clearPending()   { localStorage.removeItem(PENDING_KEY); }
 
 async function resumePendingPurchase() {
   const pending = tryLoadPending();
   if (!pending) return;
   await ensureBackendReady();
-
   const headers = { 'Content-Type': 'application/json' };
   const { token, user } = await getSession();
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (!user && stripeSessionId) pending.oneTimeSession = stripeSessionId;
-
   try {
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) });
-    if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
+    if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
-
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
-    else { document.open(); document.write(html); document.close(); }
-
-    try {
-      fbq('track', 'Purchase', { value: 7.00, currency: 'USD', contents: [{ id: 'VinReport', quantity: 1 }], content_ids: ['VinReport'], content_type: 'product' });
-    } catch {}
-
+    else   { document.open(); document.write(html); document.close(); }
+    trackPurchase(7.00);
     showToast('Report ready!', 'ok');
-
-    addToHistory({
-      vin: pending.vin || '(from plate)', type: pending.type || 'carfax', ts: Date.now(),
-      state: pending.state || '', plate: pending.plate || ''
-    });
+    addToHistory({ vin: pending.vin || '(from plate)', type: pending.type || 'carfax', ts: Date.now(), state: pending.state || '', plate: pending.plate || '' });
     renderHistory();
   } catch (e) {
     showToast(e.message || 'Failed to resume purchase', 'error');
@@ -232,9 +223,7 @@ async function resumePendingPurchase() {
 }
 
 async function handleSuccessIfNeeded() {
-  const isSuccessContext = onSuccessPage() || stripeSessionId || ppSuccess;
-  if (!isSuccessContext) return;
-
+  if (!(onSuccessPage() || stripeSessionId || ppSuccess)) return;
   if (intentParam === 'buy_report' && stripeSessionId && vinParam) {
     showToast('Payment confirmed. Preparing your report…', 'ok');
     try {
@@ -246,21 +235,14 @@ async function handleSuccessIfNeeded() {
       if (!r.ok) throw new Error(await r.text());
       const html = await r.text();
       document.open(); document.write(html); document.close();
-      try { fbq('track', 'Purchase', { value: 7.00, currency: 'USD', contents: [{ id: 'VinReport', quantity: 1 }], content_ids: ['VinReport'], content_type: 'product' }); } catch {}
-      return;
+      trackPurchase(7.00); return;
     } catch (e) { showToast(e.message || 'Failed to fetch report', 'error'); }
   }
-
   if (ppSuccess || stripeSessionId || onSuccessPage()) {
     const pending = tryLoadPending();
-    if (pending) {
-      showToast('Payment confirmed. Preparing your report…', 'ok');
-      await resumePendingPurchase();
-    }
+    if (pending) { showToast('Payment confirmed. Preparing your report…', 'ok'); await resumePendingPurchase(); }
   }
-
   await refreshBalancePill();
-
   if (onSuccessPage()) {
     setTimeout(() => { window.location.href = '/'; }, 1200);
   } else {
@@ -274,40 +256,32 @@ handleSuccessIfNeeded();
 /* ================================
    Theme toggle
 ================================ */
-const themeBtn = $id('themeBtn');
-function setTheme(mode) {
-  document.documentElement.classList.toggle('dark', mode === 'dark');
-  localStorage.setItem('theme', mode);
-}
-themeBtn?.addEventListener('click', () => {
+$id('themeBtn')?.addEventListener('click', () => {
   const nowDark = !document.documentElement.classList.contains('dark');
-  setTheme(nowDark ? 'dark' : 'light');
+  document.documentElement.classList.toggle('dark', nowDark);
+  localStorage.setItem('theme', nowDark ? 'dark' : 'light');
 });
 (() => {
   const saved = localStorage.getItem('theme');
-  const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
-  if (saved === 'dark' || (!saved && prefersDark)) document.documentElement.classList.add('dark');
+  if (saved === 'dark' || (!saved && matchMedia('(prefers-color-scheme: dark)').matches))
+    document.documentElement.classList.add('dark');
 })();
 
 /* ================================
    Auth & Modals
 ================================ */
-const loginBtn = $id('loginBtn');
-const loginModal = $id('loginModal');
-const closeLoginModal = $id('closeLoginModal');
-const emailEl = $id('loginEmail');
-const pwEl = $id('loginPassword');
-const doLoginBtn = $id('doLogin');
-const doSignupBtn = $id('doSignup');
-const userChip = $id('userChip');
-const userEmailEl = $id('userEmail');
-const logoutBtn = $id('logoutBtn');
+const loginModal    = $id('loginModal');
+const emailEl       = $id('loginEmail');
+const pwEl          = $id('loginPassword');
+const userChip      = $id('userChip');
+const userEmailEl   = $id('userEmail');
 
-function openLogin() { loginModal?.classList.remove('hidden'); }
+function openLogin()  { loginModal?.classList.remove('hidden'); }
 function closeLogin() { loginModal?.classList.add('hidden'); }
-closeLoginModal?.addEventListener('click', closeLogin);
-logoutBtn?.addEventListener('click', doLogout);
-loginBtn?.addEventListener('click', () => openLogin());
+
+$id('closeLoginModal')?.addEventListener('click', closeLogin);
+$id('logoutBtn')?.addEventListener('click', doLogout);
+$id('loginBtn')?.addEventListener('click', openLogin);
 
 async function doSignup() {
   if (!supabase) return showToast('Supabase not loaded', 'error');
@@ -315,27 +289,14 @@ async function doSignup() {
   const password = pwEl.value || '';
   if (!email) return showToast('Enter your email', 'error');
   if (password.length < 6) return showToast('Password must be at least 6 characters', 'error');
-
   try {
-    const { data, error } = await supabase.auth.signUp({
-      email, password,
-      options: { emailRedirectTo: `${window.location.origin}/email-confirmed` }
-    });
-
+    const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: `${location.origin}/email-confirmed` } });
     if (error) {
-      const msg = String(error.message || '').toLowerCase();
-      if (msg.includes('already') || msg.includes('registered')) {
-        showToast('Account already exists. Please sign in.', 'error');
-        return;
-      }
+      if (/already|registered/i.test(error.message)) return showToast('Account already exists. Please sign in.', 'error');
       throw error;
     }
-
     if (!data.session) showToast('Check your email to confirm account.', 'ok');
-    else {
-      showToast('Account created!', 'ok'); closeLogin();
-      try { localStorage.setItem('fb_em', (email || '').trim().toLowerCase()); } catch {}
-    }
+    else { showToast('Account created!', 'ok'); closeLogin(); try { localStorage.setItem('fb_em', email.toLowerCase()); } catch {} }
     await refreshBalancePill();
   } catch (e) { showToast(e.message || 'Sign up failed', 'error'); }
 }
@@ -360,14 +321,11 @@ async function doLogout() {
   await refreshBalancePill();
 }
 
-doSignupBtn?.addEventListener('click', doSignup);
-doLoginBtn?.addEventListener('click', doLogin);
-document.getElementById('googleLogin')?.addEventListener('click', async () => {
+$id('doSignup')?.addEventListener('click', doSignup);
+$id('doLogin')?.addEventListener('click', doLogin);
+$id('googleLogin')?.addEventListener('click', async () => {
   try {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin }
-    });
+    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin } });
     if (error) showToast(error.message);
   } catch (e) { showToast(e.message); }
 });
@@ -378,28 +336,26 @@ function reflectAuthUI(session) {
   if (session?.user) {
     if (userEmailEl) userEmailEl.textContent = session.user.email || '';
     userChip?.classList.remove('hidden');
-    loginBtn?.classList.add('hidden');
+    $id('loginBtn')?.classList.add('hidden');
   } else {
     userChip?.classList.add('hidden');
-    loginBtn?.classList.remove('hidden');
-    if (loginBtn) loginBtn.textContent = 'Log in';
+    const lb = $id('loginBtn');
+    if (lb) { lb.classList.remove('hidden'); lb.textContent = 'Log in'; }
   }
 }
 
 (async () => {
   if (!supabase) return;
-  const fromAuthLink = /[?&]code=/.test(location.search);
-  if (fromAuthLink) {
+  if (/[?&]code=/.test(location.search)) {
     const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
     const url = new URL(location.href);
     url.searchParams.delete('code'); url.searchParams.delete('state');
     history.replaceState({}, '', url.pathname + url.search);
-    if (!error) showToast('You’re signed in!', 'ok');
+    if (!error) showToast('You\'re signed in!', 'ok');
   }
   const { data } = await supabase.auth.getSession();
   reflectAuthUI(data.session);
   await refreshBalancePill();
-
   supabase.auth.onAuthStateChange((_event, session) => {
     reflectAuthUI(session);
     refreshBalancePill();
@@ -426,24 +382,20 @@ async function fetchBalance() {
 }
 async function refreshBalancePill() {
   const pill = $id('balancePill');
-  const txt = $id('balanceText');
+  const txt  = $id('balanceText');
   const { user } = await getSession();
-
   if (!user) {
     pill?.classList.add('hidden');
     setPrimaryCTA('view');
     reflectAuthUI(null);
     return;
   }
-
   const { balance = 0 } = await fetchBalance();
   if (pill && txt) {
     txt.textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
     pill.classList.remove('hidden');
   }
-
-  if (balance <= 0) setPrimaryCTA('buy');
-  else setPrimaryCTA('view');
+  setPrimaryCTA(balance <= 0 ? 'buy' : 'view');
 }
 
 /* ================================
@@ -456,11 +408,7 @@ function addToHistory(item) { const list = loadHistory(); list.unshift(item); sa
 function formatTime(ts) { return new Date(ts).toLocaleString(); }
 
 async function openHistoryHTML(item) {
-  const data = {
-    vin: item.vin && item.vin !== '(from plate)' ? item.vin : '',
-    state: item.state || '', plate: item.plate || '',
-    type: item.type, as: 'html', allowLive: false
-  };
+  const data = { vin: item.vin !== '(from plate)' ? item.vin : '', state: item.state || '', plate: item.plate || '', type: item.type, as: 'html', allowLive: false };
   const headers = { 'Content-Type': 'application/json' };
   const { token } = await getSession();
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -468,140 +416,76 @@ async function openHistoryHTML(item) {
     await ensureBackendReady();
     const viewer = openBlank();
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
-    if (!r.ok) { const t = await r.text(); if (viewer) viewer.close(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
+    if (!r.ok) { if (viewer) viewer.close(); showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
     if (viewer) { viewer.document.write(html); viewer.document.close(); }
     else { const w = window.open('', '_blank'); if (w) { w.document.write(html); w.document.close(); } }
   } catch (e) { showToast(e.message || 'Request failed', 'error'); }
 }
+
 async function downloadHistoryPDF(item, btn = null) {
-  let originalText = '';
-  if (btn) {
-    originalText = btn.textContent;
-    btn.textContent = '...'; 
-    btn.disabled = true;
-    btn.classList.add('opacity-50', 'cursor-not-allowed');
-  }
-
-  showToast('Generating PDF... this may take a few seconds.', 'ok');
-
-  const data = {
-    vin: item.vin && item.vin !== '(from plate)' ? item.vin : '',
-    state: item.state || '', plate: item.plate || '',
-    type: item.type, as: 'pdf', allowLive: false
-  };
-
+  const restore = setBtnLoading(btn, '…');
+  showToast('Generating PDF… this may take a few seconds.', 'ok');
+  const data = { vin: item.vin !== '(from plate)' ? item.vin : '', state: item.state || '', plate: item.plate || '', type: item.type, as: 'pdf', allowLive: false };
   const headers = { 'Content-Type': 'application/json' };
-  
   try {
     const { token } = await getSession();
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    
     await ensureBackendReady();
-    
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
-    
-    if (!r.ok) { 
-      const t = await r.text(); 
-      showToast(t || ('HTTP ' + r.status), 'error'); 
-      return; 
+    if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
+    if ((r.headers.get('content-type') || '').includes('text/html')) {
+      showToast('PDF service busy. Opening web report instead…', 'ok');
+      const html = await r.text();
+      const w = window.open('', '_blank');
+      if (w) { w.document.write(html); w.document.close(); }
+      return;
     }
-
-    // Check if server fell back to HTML because PDF failed
-    const contentType = r.headers.get('content-type') || '';
-    if (contentType.includes('text/html')) {
-        showToast('PDF service busy. Opening web report instead...', 'ok');
-        const html = await r.text();
-        const w = window.open('', '_blank');
-        if (w) { w.document.write(html); w.document.close(); }
-        return; 
-    }
-    
     const blob = await r.blob();
-    const nameBase = (data.vin || item.plate || 'report').replace(/\W+/g, '_');
-    downloadBlob(blob, `${nameBase}_${item.type}.pdf`);
-    
+    downloadBlob(blob, `${(data.vin || item.plate || 'report').replace(/\W+/g,'_')}_${item.type}.pdf`);
     showToast('Download started!', 'ok');
-
-  } catch (e) { 
-    showToast(e.message || 'Request failed', 'error'); 
-  } finally {
-    if (btn) {
-      btn.textContent = originalText;
-      btn.disabled = false;
-      btn.classList.remove('opacity-50', 'cursor-not-allowed');
-    }
-  }
+  } catch (e) {
+    showToast(e.message || 'Request failed', 'error');
+  } finally { restore(); }
 }
 
 async function copyShareLink(vin, type) {
   try {
-    const r = await fetch(API.share, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ vin, type })
-    });
-    if (!r.ok) { const t = await r.text(); throw new Error(t || ('HTTP ' + r.status)); }
+    const r = await fetch(API.share, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vin, type }) });
+    if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
     const { url } = await r.json();
     await navigator.clipboard.writeText(url);
-    showToast('Share link copied to clipboard!', 'ok');
-  } catch (e) {
-    showToast(e.message || 'Could not create share link', 'error');
-  }
+    showToast('Share link copied!', 'ok');
+  } catch (e) { showToast(e.message || 'Could not create share link', 'error'); }
 }
 
-/* ================================
-   Email Report Logic (NEW)
-================================ */
-const emailModal = $id('emailModal');
-const emailInput = $id('emailTargetInput');
-const sendEmailBtn = $id('sendEmailBtn');
-const closeEmailModalBtn = $id('closeEmailModal');
-let emailTargetVin = null;
-let emailTargetType = null;
+/* Email report */
+const emailModal    = $id('emailModal');
+const emailInput    = $id('emailTargetInput');
+const sendEmailBtn  = $id('sendEmailBtn');
+let emailTargetVin  = null, emailTargetType = null;
 
 function openEmailModal(vin, type) {
-  emailTargetVin = vin;
-  emailTargetType = type;
+  emailTargetVin = vin; emailTargetType = type;
+  if (currentSession?.user?.email) emailInput.value = currentSession.user.email;
   emailModal?.classList.remove('hidden');
-  if (currentSession?.user?.email) {
-    emailInput.value = currentSession.user.email;
-  }
   emailInput?.focus();
 }
-
-function closeEmailModal() {
-  emailModal?.classList.add('hidden');
-  emailTargetVin = null;
-}
-
-closeEmailModalBtn?.addEventListener('click', closeEmailModal);
+function closeEmailModal() { emailModal?.classList.add('hidden'); emailTargetVin = null; }
+$id('closeEmailModal')?.addEventListener('click', closeEmailModal);
 
 sendEmailBtn?.addEventListener('click', async () => {
   const to = emailInput.value.trim();
   if (!to || !to.includes('@')) return showToast('Invalid email', 'error');
   if (!emailTargetVin) return;
-
-  sendEmailBtn.disabled = true;
-  sendEmailBtn.textContent = 'Sending...';
-
+  const restore = setBtnLoading(sendEmailBtn, 'Sending…');
   try {
-    const r = await fetch('/api/email-report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, vin: emailTargetVin, type: emailTargetType || 'carfax' })
-    });
-
+    const r = await fetch('/api/email-report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to, vin: emailTargetVin, type: emailTargetType || 'carfax' }) });
     if (!r.ok) throw new Error(await r.text());
-    
     showToast(`Report sent to ${to}`, 'ok');
     closeEmailModal();
-  } catch (e) {
-    showToast('Failed to send email', 'error');
-  } finally {
-    sendEmailBtn.disabled = false;
-    sendEmailBtn.textContent = 'Send Now';
-  }
+  } catch { showToast('Failed to send email', 'error'); }
+  finally { restore(); }
 });
 
 function renderHistory() {
@@ -610,108 +494,81 @@ function renderHistory() {
   if (!body) return;
   body.innerHTML = '';
   if (!list.length) {
-    body.innerHTML = `<tr><td colspan="5" class="px-6 py-6 text-center text-sm text-gray-400">No reports generated yet.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="2" class="px-6 py-6 text-center text-sm text-gray-400">No reports generated yet.</td></tr>`;
     return;
   }
   list.forEach((item, idx) => {
     const tr = document.createElement('tr');
-    tr.className = "hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors border-b border-gray-100 dark:border-gray-700";
+    tr.className = 'hover:bg-gray-50 transition-colors border-b border-gray-100';
     tr.innerHTML = `
       <td class="px-6 py-4">
         <div class="flex flex-col">
-          <span class="font-mono font-bold text-gray-900 dark:text-white">${item.vin}</span>
-          <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(item.ts)}</span>
+          <span class="font-mono font-bold text-gray-900">${item.vin}</span>
+          <span class="text-xs text-gray-500">${formatTime(item.ts)}</span>
         </div>
       </td>
       <td class="px-6 py-4 text-right">
         <div class="flex justify-end gap-3">
-           <button data-idx="${idx}" data-action="open" class="text-blue-600 dark:text-blue-400 hover:text-blue-800 text-xs font-bold uppercase">View</button>
-           <button data-idx="${idx}" data-action="pdf" class="text-blue-600 dark:text-blue-400 hover:text-blue-800 text-xs font-bold uppercase">PDF</button>
-           <button data-idx="${idx}" data-action="email" class="text-gray-500 dark:text-gray-400 hover:text-gray-800 text-xs font-bold uppercase">Email</button>
-           <button data-idx="${idx}" data-action="share" class="text-gray-400 hover:text-gray-600 text-xs">Link</button>
-           <button data-idx="${idx}" data-action="del" class="text-red-300 hover:text-red-500 text-xs">✕</button>
+          <button data-idx="${idx}" data-action="open"  class="text-blue-600 hover:text-blue-800 text-xs font-bold uppercase">View</button>
+          <button data-idx="${idx}" data-action="pdf"   class="text-blue-600 hover:text-blue-800 text-xs font-bold uppercase">PDF</button>
+          <button data-idx="${idx}" data-action="email" class="text-gray-500 hover:text-gray-800 text-xs font-bold uppercase">Email</button>
+          <button data-idx="${idx}" data-action="share" class="text-gray-400 hover:text-gray-600 text-xs">Link</button>
+          <button data-idx="${idx}" data-action="del"   class="text-red-300 hover:text-red-500 text-xs">✕</button>
         </div>
       </td>`;
     body.appendChild(tr);
   });
-  
   body.querySelectorAll('button').forEach(btn => {
-    const action = btn.getAttribute('data-action');
     btn.addEventListener('click', async (e) => {
       const i = +e.currentTarget.getAttribute('data-idx');
       const item = loadHistory()[i]; if (!item) return;
-      
-      if (action === 'open') openHistoryHTML(item);
-      else if (action === 'pdf') downloadHistoryPDF(item, e.currentTarget);
-      else if (action === 'email') openEmailModal(item.vin.replace('(from plate)', '').trim() || item.plate, item.type);
-      else if (action === 'share') copyShareLink(item.vin.replace('(from plate)', '').trim() || item.plate, item.type);
-      else if (action === 'del') { const list = loadHistory(); list.splice(i, 1); saveHistory(list); renderHistory(); }
+      const action = e.currentTarget.getAttribute('data-action');
+      if (action === 'open')  openHistoryHTML(item);
+      if (action === 'pdf')   downloadHistoryPDF(item, e.currentTarget);
+      if (action === 'email') openEmailModal(item.vin !== '(from plate)' ? item.vin : item.plate, item.type);
+      if (action === 'share') copyShareLink(item.vin !== '(from plate)' ? item.vin : item.plate, item.type);
+      if (action === 'del')   { const list = loadHistory(); list.splice(i, 1); saveHistory(list); renderHistory(); }
     });
   });
 }
 $id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(HISTORY_KEY); renderHistory(); });
 
 /* ================================
-   Buy Credits modal (tiers) + PayPal
+   Buy Credits Modal
 ================================ */
 const buyModal = $id('buyCreditsModal');
-const buy1Btn = $id('buy1Btn');
-const buy10Btn = $id('buy10Btn');
-const closeBuyBtn = $id('closeModalBtn');
-function openBuyModal() { buyModal?.classList.remove('hidden'); renderPaypalButton(); }
+function openBuyModal()  { buyModal?.classList.remove('hidden'); renderPaypalButton(); }
 function closeBuyModal() { buyModal?.classList.add('hidden'); }
-closeBuyBtn?.addEventListener('click', closeBuyModal);
+$id('closeModalBtn')?.addEventListener('click', closeBuyModal);
 
-async function createPaypalOrder(user) {
-  const r = await fetch('/api/paypal/create-order', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_id: user?.id || null })
-  });
-  if (!r.ok) throw new Error(await r.text() || 'PayPal create failed');
-  const { orderID } = await r.json();
-  return orderID;
-}
-async function capturePaypalOrder(orderID, user) {
-  const r = await fetch('/api/paypal/capture-order', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orderID, user_id: user?.id || null })
-  });
-  if (!r.ok) throw new Error(await r.text() || 'PayPal capture failed');
-  return r.json(); 
-}
-
-/* ================================
-   FIXED: PayPal Button Logic
-================================ */
+/* ─── PayPal (single report only) ─── */
 let paypalRendered = false;
 async function renderPaypalButton() {
   if (paypalRendered) return;
-  const container = document.getElementById('paypalContainer');
-  if (!container) return;
-  if (!window.paypal) return;
-  
+  const container = $id('paypalContainer');
+  if (!container || !window.paypal) return;
   paypalRendered = true;
   const { user } = await getSession();
 
   window.paypal.Buttons({
-    createOrder: () => createPaypalOrder(user),
-    
+    createOrder: async () => {
+      const r = await fetch('/api/paypal/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user?.id || null }) });
+      if (!r.ok) throw new Error(await r.text() || 'PayPal create failed');
+      return (await r.json()).orderID;
+    },
     onApprove: async (data) => {
       const reportWindow = openBlank();
-      
       if (reportWindow) {
-        reportWindow.document.write(`
-          <html><body style="font-family:sans-serif; text-align:center; padding-top:50px; background:#f9fafb;">
-            <h2 style="color:#1f2937;">Processing Payment...</h2>
-            <p style="color:#6b7280;">Please wait while we generate your report.</p>
-            <p><strong>Do not close this window.</strong></p>
-          </body></html>
-        `);
+        reportWindow.document.write(`<html><body style="font-family:sans-serif;text-align:center;padding-top:50px;background:#f9fafb;">
+          <h2 style="color:#1f2937;">Processing Payment…</h2>
+          <p style="color:#6b7280;">Please wait — do not close this window.</p>
+        </body></html>`);
       }
-
       try {
-        const result = await capturePaypalOrder(data.orderID, user);
-        
+        const r = await fetch('/api/paypal/capture-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderID: data.orderID, user_id: user?.id || null }) });
+        if (!r.ok) throw new Error(await r.text() || 'PayPal capture failed');
+        const result = await r.json();
+
         let pending = tryLoadPending();
         if (!pending || (!pending.vin && !(pending.state && pending.plate))) pending = lastFormData || null;
 
@@ -719,7 +576,7 @@ async function renderPaypalButton() {
           if (reportWindow) reportWindow.close();
           showToast('Payment completed! 1 credit added.', 'ok');
           await refreshBalancePill();
-          closeBuyModal?.();
+          closeBuyModal();
           return;
         }
 
@@ -728,40 +585,26 @@ async function renderPaypalButton() {
 
         await ensureBackendReady();
         const headers = { 'Content-Type': 'application/json' };
-        const sess = await getSession();
-        if (sess.token) headers['Authorization'] = `Bearer ${sess.token}`;
+        const { token } = await getSession();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
 
         const resp = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(body) });
-        if (!resp.ok) { 
-            const t = await resp.text(); 
-            throw new Error(t || ('HTTP ' + resp.status)); 
-        }
-        
-        const html = await resp.text();
+        if (!resp.ok) throw new Error(await resp.text() || ('HTTP ' + resp.status));
 
-        addToHistory({
-          vin: pending.vin || '(from plate)', type: pending.type || 'carfax', ts: Date.now(),
-          state: pending.state || '', plate: pending.plate || ''
-        });
+        const html = await resp.text();
+        addToHistory({ vin: pending.vin || '(from plate)', type: pending.type || 'carfax', ts: Date.now(), state: pending.state || '', plate: pending.plate || '' });
         renderHistory();
 
-        if (reportWindow) {
-          reportWindow.document.open(); 
-          reportWindow.document.write(html);
-          reportWindow.document.close();
-          reportWindow.focus();
-        } else {
-          document.open(); document.write(html); document.close();
-        }
+        if (reportWindow) { reportWindow.document.open(); reportWindow.document.write(html); reportWindow.document.close(); reportWindow.focus(); }
+        else { document.open(); document.write(html); document.close(); }
 
+        trackPurchase(6.00);
         showToast('Report fetched successfully!', 'ok');
         await refreshBalancePill();
-        clearPending?.();
-        closeBuyModal?.();
-
+        clearPending();
+        closeBuyModal();
       } catch (e) {
         if (reportWindow) reportWindow.close();
-        console.error(e);
         showToast(e.message || 'PayPal capture failed', 'error');
       }
     },
@@ -769,155 +612,146 @@ async function renderPaypalButton() {
   }).render('#paypalContainer');
 }
 
-/* ================================
-   Purchase flow (Stripe)
-================================ */
-async function startPurchase({ user, price_id, pendingReport = null }) {
-  try {
-    await ensureBackendReady();
-    const body = { user_id: user?.id || null, price_id };
-    if (pendingReport?.vin) {
-      localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport));
-      body.vin = pendingReport.vin;
-      body.report_type = pendingReport.type || 'carfax';
-    }
-    const r = await fetch(API.checkout, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    if (!r.ok) { const t = await r.text(); throw new Error(t || 'Stripe error'); }
-    const { url } = await r.json();
-    window.location.href = url;
-  } catch (e) { showToast(e.message || 'Failed to start checkout', 'error'); }
-}
-
-let lastFormData = null;
-
-buy1Btn?.addEventListener('click', async () => {
-  const { user } = await getSession();
-  closeBuyModal();
-  startPurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: lastFormData || null });
-});
-buy10Btn?.addEventListener('click', async () => {
-  const { user } = await getSession();
-  if (!user) {
+/* ─── Stripe purchase helper ─── */
+async function startStripePurchase({ user, price_id, pendingReport = null, requireLogin = false }) {
+  // Guard: bundles require an account
+  if (requireLogin && !user) {
     closeBuyModal();
     showToast('Please sign in to buy a bundle.', 'error');
     openLogin();
     return;
   }
+  try {
+    await ensureBackendReady();
+    const body = { user_id: user?.id || null, price_id };
+    if (pendingReport?.vin) {
+      localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport));
+      // Also back up to sessionStorage in case localStorage is cleared
+      try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport)); } catch {}
+      body.vin = pendingReport.vin;
+      body.report_type = pendingReport.type || 'carfax';
+    }
+    const r = await fetch(API.checkout, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(await r.text() || 'Stripe error');
+    window.location.href = (await r.json()).url;
+  } catch (e) { showToast(e.message || 'Failed to start checkout', 'error'); }
+}
+
+let lastFormData = null;
+
+/* ─── Single: Stripe ─── */
+$id('buy1Btn')?.addEventListener('click', async () => {
+  const btn = $id('buy1Btn');
+  const restore = setBtnLoading(btn, 'Redirecting…');
+  const { user } = await getSession();
   closeBuyModal();
-  startPurchase({ user, price_id: 'STRIPE_PRICE_10PACK', pendingReport: null });
+  // No requireLogin — anonymous checkout OK for single report
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: lastFormData || null });
+  restore();
 });
 
+/* ─── 5-Pack: Stripe only, account required ─── */
+$id('buy5Btn')?.addEventListener('click', async () => {
+  const btn = $id('buy5Btn');
+  const restore = setBtnLoading(btn, 'Redirecting…');
+  const { user } = await getSession();
+  closeBuyModal();
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_5PACK', requireLogin: true });
+  restore();
+});
+
+/* ─── 10-Pack: Stripe only, account required ─── */
+$id('buy10Btn')?.addEventListener('click', async () => {
+  const btn = $id('buy10Btn');
+  const restore = setBtnLoading(btn, 'Redirecting…');
+  const { user } = await getSession();
+  closeBuyModal();
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_10PACK', requireLogin: true });
+  restore();
+});
+
+/* ─── Sidebar buttons ─── */
+$id('buy1Sidebar')?.addEventListener('click', () => openBuyModal());
+$id('buy5Sidebar')?.addEventListener('click', async () => {
+  const { user } = await getSession();
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_5PACK', requireLogin: true });
+});
+$id('buy10Sidebar')?.addEventListener('click', async () => {
+  const { user } = await getSession();
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_10PACK', requireLogin: true });
+});
+
+/* ─── Pricing-section buttons ─── */
+['pricingBuy1Btn', 'pricingBuy5Btn', 'pricingBuy10Btn'].forEach(id => {
+  $id(id)?.addEventListener('click', () => openBuyModal());
+});
+
+/* ─── Mobile "Plans" button ─── */
+$id('mobileViewPlans')?.addEventListener('click', () => openBuyModal());
+
 /* ================================
-   VIN + Form Gate
+   VIN + Form gate
 ================================ */
-const f = $id('f');
-const go = $id('go');
+const f       = $id('f');
+const go      = $id('go');
 const loading = $id('loading');
-const typeGroup = $id('typeGroup');
 
-function hasPlateCombo(formData) {
-  const state = (formData.state || '').trim();
-  const plate = (formData.plate || '').trim();
-  return !!(state && plate);
-}
+function hasPlateCombo(fd) { return !!(fd.state?.trim() && fd.plate?.trim()); }
 
-// 1. HELPER: Fetch Car Details (NHTSA) - Defined OUTSIDE reflectVinGate
 async function fetchCarDetails(vin) {
   try {
-    const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`);
+    const res  = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`);
     const data = await res.json();
-    const make = data.Results.find(r => r.Variable === "Make")?.Value;
-    const model = data.Results.find(r => r.Variable === "Model")?.Value;
-    const year = data.Results.find(r => r.Variable === "Model Year")?.Value;
-    if (make && model && year) return `${year} ${make} ${model}`;
-  } catch (e) { return null; }
+    const get  = (v) => data.Results.find(r => r.Variable === v)?.Value;
+    const make = get('Make'), model = get('Model'), year = get('Model Year');
+    return (make && model && year) ? `${year} ${make} ${model}` : null;
+  } catch { return null; }
 }
 
-// 2. Main Validation Function
 function reflectVinGate() {
   if (!f || !go) return;
-  const formData = Object.fromEntries(new FormData(f).entries());
-  const vin = (formData.vin || '').trim().toUpperCase();
+  const fd  = Object.fromEntries(new FormData(f).entries());
+  const vin = (fd.vin || '').trim().toUpperCase();
 
-  if (typeGroup) typeGroup.classList.add('hidden');
-
-  if (vin.length === 0 && !hasPlateCombo(formData)) {
-    setVinHelp('Enter a 17-char VIN or Plate+State.');
-    go.disabled = true;
-    return;
-  }
-
-  // Check VIN
+  if (!vin && !hasPlateCombo(fd)) { setVinHelp('Enter a 17-char VIN or Plate + State.'); go.disabled = true; return; }
   if (vin.length > 0) {
-    if (!looksVinBasic(vin)) {
-      setVinHelp('VIN must be 17 chars (no I, O, Q).');
-      go.disabled = true;
-      return;
-    }
-    if (!vinCheckDigitOk(vin)) {
-      setVinHelp('Invalid VIN Check Digit. Verify VIN.', false);
-      go.disabled = true;
-      return;
-    }
-
-    // --- NHTSA Lookup Success Logic ---
-    setVinHelp('Checking vehicle details...', true); 
-    
-    // Call the helper (This was missing in your previous file)
-    fetchCarDetails(vin).then(carName => {
-       const currentVin = new FormData(f).get('vin').trim().toUpperCase();
-       if (currentVin === vin) {
-           if (carName) {
-              setVinHelp(`✅ Verified: ${carName}`, true);
-           } else {
-              setVinHelp('VIN valid (Details not found).', true);
-           }
-       }
+    if (!looksVinBasic(vin))      { setVinHelp('VIN must be 17 chars (no I, O, Q).'); go.disabled = true; return; }
+    if (!vinCheckDigitOk(vin))    { setVinHelp('Invalid check digit — please verify VIN.'); go.disabled = true; return; }
+    setVinHelp('Checking vehicle details…', true);
+    fetchCarDetails(vin).then(name => {
+      if (new FormData(f).get('vin')?.trim().toUpperCase() !== vin) return;
+      setVinHelp(name ? `✅ Verified: ${name}` : 'VIN valid (details not found).', true);
     });
-
-    go.disabled = false;
-    return;
+    go.disabled = false; return;
   }
-
-  // Check Plate
-  if (hasPlateCombo(formData)) {
-    setVinHelp('Plate + State provided ✓', true);
-    go.disabled = false;
-    return;
-  }
+  if (hasPlateCombo(fd)) { setVinHelp('Plate + State provided ✓', true); go.disabled = false; return; }
   go.disabled = true;
 }
 
-f?.addEventListener('input', () => { reflectVinGate(); });
+f?.addEventListener('input', reflectVinGate);
 
 f?.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const formData = Object.fromEntries(new FormData(f).entries());
+  const fd = Object.fromEntries(new FormData(f).entries());
   const data = {
-    vin: (formData.vin || '').trim().toUpperCase(),
-    state: (formData.state || '').trim(),
-    plate: (formData.plate || '').trim(),
-    type: formData.type || 'carfax',
-    as: 'html',
+    vin:      (fd.vin || '').trim().toUpperCase(),
+    state:    (fd.state || '').trim(),
+    plate:    (fd.plate || '').trim(),
+    type:     fd.type || 'carfax',
+    as:       'html',
     allowLive: true
   };
+  if (!data.vin && !(data.state && data.plate)) { showToast('Enter a VIN or Plate', 'error'); return; }
 
-  if (!data.vin && !(data.state && data.plate)) {
-    showToast('Enter a VIN or Plate', 'error');
-    return;
-  }
+  // Persist so PayPal / Stripe can resume
+  lastFormData = data;
+  try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(data)); } catch {}
 
   go.disabled = true;
   loading?.classList.remove('hidden');
 
-  let headers = { 'Content-Type': 'application/json' };
-  let currentUser = null;
-  let token = null;
-
+  const headers = { 'Content-Type': 'application/json' };
+  let currentUser = null, token = null;
   await ensureBackendReady();
 
   if (supabase) {
@@ -926,41 +760,27 @@ f?.addEventListener('submit', async (e) => {
     if (token) headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // Check credits
+  // Check balance for logged-in users
   if (currentUser?.id) {
     try {
-      const r = await fetch(API.credits(currentUser.id));
-      const { balance = 0 } = await r.json();
-      if (balance <= 0) {
-        lastFormData = data;
-        openBuyModal();
-        go.disabled = false; loading?.classList.add('hidden');
-        return;
-      }
+      const { balance = 0 } = await (await fetch(API.credits(currentUser.id))).json();
+      if (balance <= 0) { localStorage.setItem(PENDING_KEY, JSON.stringify(data)); openBuyModal(); go.disabled = false; loading?.classList.add('hidden'); return; }
     } catch {}
   }
 
   try {
     if (!currentUser && stripeSessionId) data.oneTimeSession = stripeSessionId;
     const r = await fetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
-
-    if (r.status === 401 || r.status === 402) {
-      lastFormData = data;
-      openBuyModal();
-      return;
-    }
-    if (!r.ok) { const t = await r.text(); showToast(t || ('HTTP ' + r.status), 'error'); return; }
+    if (r.status === 401 || r.status === 402) { localStorage.setItem(PENDING_KEY, JSON.stringify(data)); openBuyModal(); return; }
+    if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
 
     const html = await r.text();
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
-    else { document.open(); document.write(html); document.close(); }
+    else   { document.open(); document.write(html); document.close(); }
 
     showToast('Report fetched successfully!', 'ok');
-    addToHistory({
-      vin: data.vin || '(from plate)', type: data.type, ts: Date.now(),
-      state: data.state || '', plate: data.plate || ''
-    });
+    addToHistory({ vin: data.vin || '(from plate)', type: data.type, ts: Date.now(), state: data.state, plate: data.plate });
     renderHistory();
     await refreshBalancePill();
   } catch (err) {
@@ -971,96 +791,48 @@ f?.addEventListener('submit', async (e) => {
   }
 });
 
-// Sidebar & Compare listeners
-document.getElementById('buy5Sidebar')?.addEventListener('click', async () => {
-  const { user } = await getSession();
-  if (!user) {
-    showToast('Please sign in to buy a bundle.', 'error');
-    openLogin();
-    return;
-  }
-  startPurchase({ user, price_id: 'STRIPE_PRICE_10PACK', pendingReport: null });
-});
-
 /* ================================
-   Forgot / Reset Password Logic
+   Forgot / Reset Password
 ================================ */
-const forgotBtn = $id('forgotPasswordBtn');
-const forgotModal = $id('forgotModal');
-const closeForgotBtn = $id('closeForgotModal');
-const sendResetBtn = $id('sendResetLinkBtn');
-const forgotEmailInput = $id('forgotEmail');
-
-const updatePassModal = $id('updatePasswordModal');
-const newPassInput = $id('newPasswordInput');
-const savePassBtn = $id('saveNewPasswordBtn');
-
-// 1. Open "Forgot" Modal (closes login first)
-forgotBtn?.addEventListener('click', () => {
+$id('forgotPasswordBtn')?.addEventListener('click', () => {
   closeLogin();
-  forgotModal?.classList.remove('hidden');
-  forgotEmailInput.focus();
+  $id('forgotModal')?.classList.remove('hidden');
+  $id('forgotEmail')?.focus();
 });
+$id('closeForgotModal')?.addEventListener('click', () => $id('forgotModal')?.classList.add('hidden'));
 
-// 2. Close Modal
-closeForgotBtn?.addEventListener('click', () => {
-  forgotModal?.classList.add('hidden');
-});
-
-// 3. Send the Reset Email
-sendResetBtn?.addEventListener('click', async () => {
-  const email = (forgotEmailInput.value || '').trim();
+$id('sendResetLinkBtn')?.addEventListener('click', async () => {
+  const btn   = $id('sendResetLinkBtn');
+  const email = ($id('forgotEmail').value || '').trim();
   if (!email || !email.includes('@')) return showToast('Invalid email', 'error');
-
-  sendResetBtn.disabled = true;
-  sendResetBtn.textContent = 'Sending...';
-
+  const restore = setBtnLoading(btn, 'Sending…');
   try {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin, // Sends them back to your homepage
-    });
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: location.origin });
     if (error) throw error;
-    
     showToast('Recovery link sent! Check your email.', 'ok');
-    forgotModal?.classList.add('hidden');
-  } catch (e) {
-    showToast(e.message, 'error');
-  } finally {
-    sendResetBtn.disabled = false;
-    sendResetBtn.textContent = 'Send Link';
-  }
+    $id('forgotModal')?.classList.add('hidden');
+  } catch (e) { showToast(e.message, 'error'); }
+  finally { restore(); }
 });
 
-// 4. Handle the "Recovery" Event (When user clicks email link)
 if (supabase) {
-  supabase.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'PASSWORD_RECOVERY') {
-      // User clicked the email link. Show the "New Password" modal.
-      updatePassModal?.classList.remove('hidden');
-    }
+  supabase.auth.onAuthStateChange(async (event) => {
+    if (event === 'PASSWORD_RECOVERY') $id('updatePasswordModal')?.classList.remove('hidden');
   });
 }
 
-// 5. Save the New Password
-savePassBtn?.addEventListener('click', async () => {
-  const newPassword = newPassInput.value;
-  if (newPassword.length < 6) return showToast('Password too short (min 6 chars)', 'error');
-
-  savePassBtn.disabled = true;
-  savePassBtn.textContent = 'Updating...';
-
+$id('saveNewPasswordBtn')?.addEventListener('click', async () => {
+  const btn = $id('saveNewPasswordBtn');
+  const pw  = $id('newPasswordInput').value;
+  if (pw.length < 6) return showToast('Password too short (min 6 chars)', 'error');
+  const restore = setBtnLoading(btn, 'Updating…');
   try {
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    const { error } = await supabase.auth.updateUser({ password: pw });
     if (error) throw error;
-
     showToast('Password updated! You are now logged in.', 'ok');
-    updatePassModal?.classList.add('hidden');
-  } catch (e) {
-    showToast(e.message, 'error');
-  } finally {
-    savePassBtn.disabled = false;
-    savePassBtn.textContent = 'Update Password';
-  }
+    $id('updatePasswordModal')?.classList.add('hidden');
+  } catch (e) { showToast(e.message, 'error'); }
+  finally { restore(); }
 });
 
 /* ================================
@@ -1069,14 +841,9 @@ savePassBtn?.addEventListener('click', async () => {
 (async () => {
   await refreshBalancePill();
   renderHistory();
-  if (stripeSessionId || ppSuccess) {
-    if (!intentParam || intentParam !== 'buy_report') {
-      const pending = tryLoadPending();
-      if (pending) {
-        showToast('Payment confirmed. Processing...', 'ok');
-        await resumePendingPurchase();
-      }
-    }
+  if ((stripeSessionId || ppSuccess) && !intentParam) {
+    const pending = tryLoadPending() || JSON.parse(sessionStorage.getItem(PENDING_KEY) || 'null');
+    if (pending) { showToast('Payment confirmed. Processing…', 'ok'); await resumePendingPurchase(); }
   }
   reflectVinGate();
 })();

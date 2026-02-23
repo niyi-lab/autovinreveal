@@ -1,94 +1,243 @@
-/* ===== Theme tokens ===== */
-:root{
-  --bg:#f8fafc; --text:#0f172a; --muted:#6b7280;
-  --card:#ffffff; --border:#e5e7eb; --tableHead:#eef2f7;
-  --brand:#2563eb; --brand-dark:#1d4ed8;
-  --toast-err:#dc2626; --toast-ok:#16a34a;
-}
-.dark{
-  --bg:#0f172a; --text:#e6edf5; --muted:#9aa4b2;
-  --card:#1f2937; --border:#374151; --tableHead:#111827;
-}
-
-/* ===== Base ===== */
-html, body { height:100%; }
-body { background:var(--bg); color:var(--text); font-family:system-ui, Arial, sans-serif; }
-
-/* ===== Utilities ===== */
-.lbl{display:block;font-size:.9rem;font-weight:500;margin-bottom:.25rem;color:var(--text)}
-.sep{height:1px;width:40px;background:var(--border)}
-.th{ text-align:left; padding:.5rem 1rem; color:var(--muted); font-weight:600 }
-
-/* ===== Card ===== */
-.card{
-  background:var(--card); border:1px solid var(--border);
-  border-radius:16px; padding:24px; box-shadow:0 12px 30px rgba(0,0,0,.06);
-  position:relative;
+/* ================================
+   Theme tokens
+================================ */
+:root {
+  --bg:         #f8fafc;
+  --text:       #0f172a;
+  --muted:      #6b7280;
+  --card:       #ffffff;
+  --border:     #e5e7eb;
+  --tableHead:  #eef2f7;
+  --brand:      #2563eb;
+  --brand-dark: #1d4ed8;
+  --panel:      #ffffff;   /* promo card bg — light mode */
+  --fg:         #0f172a;   /* promo card text — light mode */
+  --toast-err:  #dc2626;
+  --toast-ok:   #16a34a;
 }
 
-/* ===== Inputs ===== */
-.input,.select{
-  width:100%; padding:10px 12px; border-radius:12px;
-  border:1px solid var(--border); background:var(--card); color:var(--text);
-  outline:none; transition:border-color .2s, box-shadow .2s;
-}
-.input:focus,.select:focus{
-  border-color:var(--brand);
-  box-shadow:0 0 0 2px color-mix(in srgb, var(--brand) 30%, transparent);
+.dark {
+  --bg:        #0f172a;
+  --text:      #e6edf5;
+  --muted:     #9aa4b2;
+  --card:      #1f2937;
+  --border:    #374151;
+  --tableHead: #111827;
+  --panel:     #0b1220;   /* promo card bg — dark mode */
+  --fg:        #e5e7eb;   /* promo card text — dark mode */
 }
 
-/* ===== Buttons ===== */
-.btn{
-  display:inline-flex; align-items:center; justify-content:center; gap:.5rem;
-  padding:10px 14px; border-radius:12px; font-weight:600;
-  box-shadow:0 6px 16px rgba(0,0,0,.10);
-  transition:transform .05s, background .2s;
+/* ================================
+   Base
+================================ */
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, Arial, sans-serif;
 }
-.btn:active{ transform:scale(.99) }
-.btn-primary{ background:var(--brand); color:#fff; border:0 }
-.btn-primary:hover{ background:var(--brand-dark) }
 
-.btn-outline{
-  border:1px solid var(--border); padding:8px 12px; border-radius:10px;
-  background:var(--card); color:var(--text);
+/* ================================
+   Utilities
+================================ */
+.lbl {
+  display: block;
+  font-size: .9rem;
+  font-weight: 500;
+  margin-bottom: .25rem;
+  color: var(--text);
 }
-.btn-outline:hover{ filter:brightness(1.03) }
-
-.theme-btn{
-  display:inline-flex; align-items:center; gap:.5rem;
-  padding:6px 12px; font-size:.9rem; border-radius:12px;
-  background:var(--card); color:var(--text); border:1px solid var(--border);
+.sep {
+  height: 1px;
+  width: 40px;
+  background: var(--border);
 }
-.theme-btn:hover{ filter:brightness(1.03) }
+.th {
+  text-align: left;
+  padding: .5rem 1rem;
+  color: var(--muted);
+  font-weight: 600;
+}
 
-/* ===== Loading ===== */
-.loading{
-  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+/* ================================
+   Card
+================================ */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .06);
+  position: relative;
+}
+
+/* ================================
+   Inputs
+================================ */
+.input,
+.select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  font-family: inherit;   /* prevent browser default font fallback */
+  outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+.input:focus,
+.select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+/* ================================
+   Buttons  (single source of truth)
+================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .10);
+  transition: transform .05s, background .2s, filter .2s;
+}
+.btn:active { transform: scale(.99); }
+
+.btn-primary {
+  background: var(--brand);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.btn-primary:hover { background: var(--brand-dark); }
+
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.btn-outline:hover { filter: brightness(1.03); }
+
+.theme-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: 6px 12px;
+  font-size: .9rem;
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.theme-btn:hover { filter: brightness(1.03); }
+
+/* ================================
+   Loading overlay
+================================ */
+.loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: color-mix(in srgb, var(--card) 70%, transparent);
+  /* Fallback for older browsers */
+  background: rgba(255, 255, 255, 0.70);
   backdrop-filter: blur(2px);
-  border-radius:16px;
+  border-radius: 16px;
+}
+.dark .loading {
+  background: rgba(31, 41, 55, 0.70);
 }
 
-/* ===== Table ===== */
-.table-wrap{ overflow:auto; border-radius:12px; border:1px solid var(--border); background:var(--card) }
-table{ width:100%; border-collapse:collapse }
-thead{ background:var(--tableHead) }
-tbody{ background:var(--card) }
-tbody tr + tr{ border-top:1px solid var(--border) }
+/* ================================
+   Table
+================================ */
+.table-wrap {
+  overflow: auto;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+thead {
+  background: var(--tableHead);
+}
+tbody {
+  background: var(--card);
+}
+tbody tr + tr {
+  border-top: 1px solid var(--border);
+}
 
+/* Consistent column alignment */
+.table-wrap th,
+.table-wrap td {
+  padding: .75rem 1rem;
+  text-align: left;
+  vertical-align: middle;
+}
 
+/* VIN column: truncate cleanly */
+.table-wrap td:first-child {
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-/* ===== Toasts ===== */
-@keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
-.animate-fadeIn{ animation: fadeIn .25s ease-out }
-.toast{ padding:.75rem 1rem; border-radius:.75rem; color:#fff; box-shadow:0 8px 24px rgba(0,0,0,.18) }
-.toast.error{ background:var(--toast-err) }
-.toast.ok{ background:var(--toast-ok) }
+/* Actions column: right-align */
+.table-wrap td:last-child {
+  text-align: right;
+}
 
-/* ===== Auth Modal ===== */
-#authModal input {
+/* Row hover — works in both light and dark */
+.table-wrap tbody tr:hover {
+  background-color: color-mix(in srgb, var(--brand) 5%, transparent);
+  /* Fallback */
+  background-color: rgba(37, 99, 235, 0.05);
+}
+
+/* ================================
+   Toasts
+================================ */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fadeIn { animation: fadeIn .25s ease-out; }
+
+.toast {
+  padding: .75rem 1rem;
+  border-radius: .75rem;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+}
+.toast.error { background: var(--toast-err); }
+.toast.ok    { background: var(--toast-ok); }
+
+/* ================================
+   Auth Modal
+================================ */
+#authModal input[type="text"],
+#authModal input[type="email"],
+#authModal input[type="password"] {
   width: 100%;
   padding: 10px;
+  font-family: inherit;
 }
 #authModal .btn {
   background: var(--brand);
@@ -98,75 +247,46 @@ tbody tr + tr{ border-top:1px solid var(--border) }
   background: var(--brand-dark);
 }
 
-
-/* Keep header and rows perfectly aligned */
-.table-wrap th, .table-wrap td {
-  padding: 0.75rem 1rem;
-  text-align: left;
-  vertical-align: middle;
-}
-
-/* VIN should truncate cleanly and stay aligned */
-.table-wrap td:first-child {
-  font-family: monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Align the last column to the right for buttons */
-.table-wrap td:last-child {
-  text-align: right;
-}
-
-/* Fix header background contrast */
-.table-wrap thead {
-  background: var(--tableHead);
-}
-
-/* Give subtle hover highlight for rows */
-.table-wrap tbody tr:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-/* in public/style.css */
-.card .border { border-color: color-mix(in srgb, var(--brand) 18%, transparent); }
-.card .border:hover { border-color: color-mix(in srgb, var(--brand) 35%, transparent); }
-
-
+/* ================================
+   Promo / Sidebar card
+================================ */
 .promo-card {
-  border: 1px solid rgba(0,0,0,.08);
-  background: var(--panel, #0b1220);
-  color: var(--fg, #e5e7eb);
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
   border-radius: 14px;
   padding: 16px;
-  box-shadow: 0 6px 24px rgba(0,0,0,.18);
-  position: sticky; top: 16px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .12);
+  position: sticky;
+  top: 16px;
 }
 
 .promo-head {
-  font-weight: 800; letter-spacing: .2px;
-  font-size: 0.95rem; color: var(--brand, #60a5fa);
+  font-weight: 800;
+  letter-spacing: .2px;
+  font-size: .95rem;
+  color: var(--brand);
   margin-bottom: 8px;
 }
 
-.promo-price { margin-top: 6px; font-size: .95rem; }
-.promo-price .big { font-size: 1.85rem; font-weight: 800; margin-right: 6px; }
-.promo-sub { margin: 6px 0 12px; color: var(--muted, #94a3b8); }
+.promo-price       { margin-top: 6px; font-size: .95rem; }
+.promo-price .big  { font-size: 1.85rem; font-weight: 800; margin-right: 6px; }
 
-.promo-points { margin: 0 0 14px; padding-left: 18px; }
-.promo-points li { margin: 6px 0; color: var(--muted, #94a3b8); }
-
-.promo-actions { display: flex; gap: 10px; }
-.btn-primary {
-  background: var(--brand, #3b82f6);
-  color: white; border: none; padding: 10px 14px;
-  border-radius: 10px; font-weight: 600; cursor: pointer;
+.promo-sub {
+  margin: 6px 0 12px;
+  color: var(--muted);
 }
-.btn-primary:hover { filter: brightness(1.05); }
 
-.btn-outline {
-  background: transparent; border: 1px solid rgba(255,255,255,.18);
-  color: inherit; padding: 10px 14px; border-radius: 10px; cursor: pointer;
+.promo-points {
+  margin: 0 0 14px;
+  padding-left: 18px;
 }
-.btn-outline:hover { border-color: rgba(255,255,255,.35); }
+.promo-points li {
+  margin: 6px 0;
+  color: var(--muted);
+}
+
+.promo-actions {
+  display: flex;
+  gap: 10px;
+}
