@@ -64,6 +64,7 @@
     </script>
 
     <style>
+      html, body { overflow-x: hidden; max-width: 100%; }
       body { font-family: "Inter", sans-serif; background-color: #f8fafc; }
       h1, h2, h3, .brand-font { font-family: "Poppins", sans-serif; }
       .hero-bg { background: radial-gradient(circle at top right, #2563eb 0%, #1e3a8a 100%); }
@@ -129,7 +130,7 @@
     </nav>
 
     <!-- ═══════════════ HERO ═══════════════ -->
-    <header class="relative hero-bg pt-12 pb-32 lg:pt-20 lg:pb-48 px-4 overflow-hidden">
+    <header class="relative hero-bg pt-12 pb-32 lg:pt-20 lg:pb-48 px-3 sm:px-4 overflow-hidden">
       <div class="absolute top-0 left-0 w-full h-full overflow-hidden opacity-10 pointer-events-none">
         <div class="absolute top-10 left-10 w-64 h-64 bg-white rounded-full mix-blend-overlay filter blur-3xl"></div>
         <div class="absolute bottom-10 right-10 w-96 h-96 bg-blue-400 rounded-full mix-blend-overlay filter blur-3xl"></div>
@@ -151,49 +152,49 @@
     </header>
 
     <!-- ═══════════════ MAIN ═══════════════ -->
-    <main class="flex-grow -mt-24 px-4 relative z-20 pb-16">
+    <main class="flex-grow -mt-24 px-2 sm:px-4 relative z-20 pb-16">
       <div class="max-w-5xl mx-auto">
 
         <!-- Search Card -->
         <div class="glass-card bg-white rounded-2xl shadow-2xl shadow-blue-900/20 overflow-hidden ring-1 ring-black/5">
           <!-- Pricing strip -->
-          <div class="border-b border-gray-100 bg-white px-4 sm:px-6 py-3">
-            <div class="flex flex-wrap items-center justify-center sm:justify-between gap-y-2 gap-x-4">
+          <div class="border-b border-gray-100 bg-white px-3 sm:px-6 py-2">
+            <div class="flex items-center justify-between gap-2">
 
               <!-- Tier pills -->
-              <div class="flex items-center gap-2 sm:gap-3 flex-wrap justify-center">
+              <div class="flex items-center gap-1.5 sm:gap-3 flex-nowrap">
 
                 <!-- Single -->
-                <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-200">
-                  <span class="text-[11px] font-semibold text-gray-500">1 Report</span>
-                  <span class="font-black text-slate-900 text-base leading-none">$6</span>
+                <div class="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-gray-50 border border-gray-200">
+                  <span class="text-[10px] sm:text-[11px] font-semibold text-gray-500">1 Report</span>
+                  <span class="font-black text-slate-900 text-sm sm:text-base leading-none">$6</span>
                 </div>
 
                 <svg class="w-3 h-3 text-gray-300 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
 
                 <!-- 5-pack -->
-                <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200">
-                  <span class="text-[11px] font-semibold text-blue-500">5-Pack</span>
-                  <span class="font-black text-blue-700 text-base leading-none">$25</span>
+                <div class="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-blue-50 border border-blue-200">
+                  <span class="text-[10px] sm:text-[11px] font-semibold text-blue-500">5-Pack</span>
+                  <span class="font-black text-blue-700 text-sm sm:text-base leading-none">$25</span>
                   <span class="text-[10px] font-bold text-blue-400 bg-blue-100 px-1.5 py-0.5 rounded-full hidden sm:inline">$5 each</span>
                 </div>
 
                 <svg class="w-3 h-3 text-gray-300 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
 
                 <!-- 10-pack -->
-                <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 border border-green-200">
-                  <span class="text-[11px] font-semibold text-green-600">10-Pack</span>
-                  <span class="font-black text-green-700 text-base leading-none">$40</span>
+                <div class="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-green-50 border border-green-200">
+                  <span class="text-[10px] sm:text-[11px] font-semibold text-green-600">10-Pack</span>
+                  <span class="font-black text-green-700 text-sm sm:text-base leading-none">$40</span>
                   <span class="text-[10px] font-bold text-green-500 bg-green-100 px-1.5 py-0.5 rounded-full hidden sm:inline">$4 each</span>
                 </div>
 
               </div>
 
               <!-- Trust signals -->
-              <div class="flex items-center gap-3 text-[11px] text-gray-400 font-medium">
+              <div class="flex items-center gap-3 text-[11px] text-gray-400 font-medium flex-shrink-0">
                 <span class="flex items-center gap-1">
                   <svg class="w-3.5 h-3.5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                  No subscription
+                  <span class="hidden xs:inline">No subscription</span>
                 </span>
                 <span class="hidden sm:flex items-center gap-1">
                   <svg class="w-3.5 h-3.5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
@@ -204,7 +205,7 @@
             </div>
           </div>
 
-          <div class="p-6 sm:p-10 bg-white">
+          <div class="p-4 sm:p-6 md:p-10 bg-white">
             <form id="f" class="space-y-8">
               <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                 <div class="space-y-2 group">
@@ -218,18 +219,18 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                       </svg>
                     </div>
-                    <input name="vin" maxlength="17" placeholder="ENTER VIN (17 CHARS)" class="flex-1 bg-transparent outline-none text-gray-900 placeholder-gray-400 font-mono font-medium uppercase tracking-wider text-base sm:text-lg" autocomplete="off" />
+                    <input name="vin" maxlength="17" placeholder="VIN (17 CHARS)" class="flex-1 bg-transparent outline-none text-gray-900 placeholder-gray-400 font-mono font-medium uppercase sm:tracking-wider text-sm sm:text-base sm:text-lg min-w-0" autocomplete="off" />
                   </div>
                 </div>
                 <div class="space-y-2">
                   <label class="block text-sm font-bold text-gray-700">Search by Plate</label>
-                  <div class="flex gap-2">
-                    <div class="relative flex-1 flex items-center rounded-xl border border-gray-300 focus-within:border-blue-600 focus-within:ring-4 focus-within:ring-blue-600/10 transition-all bg-gray-50 h-14">
+                  <div class="grid grid-cols-[1fr_auto] gap-2">
+                    <div class="relative min-w-0 flex items-center rounded-xl border border-gray-300 focus-within:border-blue-600 focus-within:ring-4 focus-within:ring-blue-600/10 transition-all bg-gray-50 h-14">
                       <div class="pl-4 pr-3 text-gray-400 font-serif font-bold">A</div>
-                      <input name="plate" placeholder="PLATE #" class="flex-1 bg-transparent outline-none text-gray-900 placeholder-gray-400 font-mono font-medium uppercase text-base sm:text-lg" autocomplete="off" />
+                      <input name="plate" placeholder="PLATE #" class="flex-1 bg-transparent outline-none text-gray-900 placeholder-gray-400 font-mono font-medium uppercase text-sm sm:text-base sm:text-lg min-w-0" autocomplete="off" />
                     </div>
-                    <div class="relative w-28 shrink-0">
-                      <select name="state" class="w-full h-14 rounded-xl border border-gray-300 bg-gray-50 focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10 outline-none appearance-none pl-3 pr-8 font-bold text-gray-700 cursor-pointer transition-all hover:bg-white">
+                    <div class="relative w-20 sm:w-28">
+                      <select name="state" class="w-full h-14 rounded-xl border border-gray-300 bg-gray-50 focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10 outline-none appearance-none pl-2 pr-6 sm:pl-3 sm:pr-8 font-bold text-gray-700 cursor-pointer transition-all hover:bg-white text-sm sm:text-base">
                         <option value="">State</option>
                         <option value="AL">AL</option><option value="AK">AK</option><option value="AZ">AZ</option><option value="AR">AR</option><option value="CA">CA</option><option value="CO">CO</option><option value="CT">CT</option><option value="DE">DE</option><option value="FL">FL</option><option value="GA">GA</option><option value="HI">HI</option><option value="ID">ID</option><option value="IL">IL</option><option value="IN">IN</option><option value="IA">IA</option><option value="KS">KS</option><option value="KY">KY</option><option value="LA">LA</option><option value="ME">ME</option><option value="MD">MD</option><option value="MA">MA</option><option value="MI">MI</option><option value="MN">MN</option><option value="MS">MS</option><option value="MO">MO</option><option value="MT">MT</option><option value="NE">NE</option><option value="NV">NV</option><option value="NH">NH</option><option value="NJ">NJ</option><option value="NM">NM</option><option value="NY">NY</option><option value="NC">NC</option><option value="ND">ND</option><option value="OH">OH</option><option value="OK">OK</option><option value="OR">OR</option><option value="PA">PA</option><option value="RI">RI</option><option value="SC">SC</option><option value="SD">SD</option><option value="TN">TN</option><option value="TX">TX</option><option value="UT">UT</option><option value="VT">VT</option><option value="VA">VA</option><option value="WA">WA</option><option value="WV">WV</option><option value="WI">WI</option><option value="WY">WY</option>
                       </select>
