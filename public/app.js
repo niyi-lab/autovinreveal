@@ -494,28 +494,28 @@ function renderHistory() {
   if (!body) return;
   body.innerHTML = '';
   if (!list.length) {
-    body.innerHTML = `<tr><td colspan="2" class="px-6 py-6 text-center text-sm text-gray-400">No reports generated yet.</td></tr>`;
+    body.innerHTML = `<div class="px-4 py-8 text-center text-sm text-gray-400">No reports yet — search a VIN above ↑</div>`;
     return;
   }
   list.forEach((item, idx) => {
-    const tr = document.createElement('tr');
-    tr.className = 'hover:bg-gray-50 transition-colors border-b border-gray-100';
+    const tr = document.createElement('div');
+    tr.className = 'hover:bg-gray-50 transition-colors px-4 py-3';
     tr.innerHTML = `
-      <td class="px-6 py-4">
-        <div class="flex flex-col">
-          <span class="font-mono font-bold text-gray-900">${item.vin}</span>
-          <span class="text-xs text-gray-500">${formatTime(item.ts)}</span>
+      <div class="flex flex-col gap-2">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <span class="font-mono font-bold text-gray-900 text-sm">${item.vin}</span>
+            <div class="text-xs text-gray-400 mt-0.5">${formatTime(item.ts)}</div>
+          </div>
+          <button data-idx="${idx}" data-action="del" class="text-red-300 hover:text-red-500 text-base leading-none flex-shrink-0 mt-0.5">✕</button>
         </div>
-      </td>
-      <td class="px-6 py-4 text-right">
-        <div class="flex justify-end gap-3">
-          <button data-idx="${idx}" data-action="open"  class="text-blue-600 hover:text-blue-800 text-xs font-bold uppercase">View</button>
-          <button data-idx="${idx}" data-action="pdf"   class="text-blue-600 hover:text-blue-800 text-xs font-bold uppercase">PDF</button>
-          <button data-idx="${idx}" data-action="email" class="text-gray-500 hover:text-gray-800 text-xs font-bold uppercase">Email</button>
-          <button data-idx="${idx}" data-action="share" class="text-gray-400 hover:text-gray-600 text-xs">Link</button>
-          <button data-idx="${idx}" data-action="del"   class="text-red-300 hover:text-red-500 text-xs">✕</button>
+        <div class="flex items-center gap-2 flex-wrap">
+          <button data-idx="${idx}" data-action="open"  class="flex-1 min-w-0 text-center bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-1.5 px-2 rounded-lg transition-colors">View</button>
+          <button data-idx="${idx}" data-action="pdf"   class="flex-1 min-w-0 text-center bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-1.5 px-2 rounded-lg transition-colors">PDF</button>
+          <button data-idx="${idx}" data-action="email" class="flex-1 min-w-0 text-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-xs font-bold py-1.5 px-2 rounded-lg transition-colors">Email</button>
+          <button data-idx="${idx}" data-action="share" class="flex-1 min-w-0 text-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-xs font-bold py-1.5 px-2 rounded-lg transition-colors">Link</button>
         </div>
-      </td>`;
+      </div>`;
     body.appendChild(tr);
   });
   body.querySelectorAll('button').forEach(btn => {

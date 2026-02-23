@@ -403,21 +403,11 @@
           <div class="space-y-8">
             <!-- History Table -->
             <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <div class="px-4 sm:px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                 <h3 class="font-bold text-gray-800">Your Recent Reports</h3>
-                <button id="clearHistory" class="text-xs text-red-500 hover:underline">Clear</button>
+                <button id="clearHistory" class="text-xs text-red-500 hover:underline">Clear all</button>
               </div>
-              <div class="overflow-x-auto">
-                <table class="w-full text-sm text-left">
-                  <thead class="text-gray-500 bg-white border-b border-gray-100">
-                    <tr>
-                      <th class="px-6 py-3 font-medium">VIN / Details</th>
-                      <th class="px-6 py-3 font-medium text-right">Download</th>
-                    </tr>
-                  </thead>
-                  <tbody id="historyBody" class="divide-y divide-gray-100"></tbody>
-                </table>
-              </div>
+              <div id="historyBody" class="divide-y divide-gray-100"></div>
             </div>
 
             <!-- Included features -->
