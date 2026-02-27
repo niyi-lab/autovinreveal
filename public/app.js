@@ -145,10 +145,26 @@ function showReportOverlay(html) {
   overlay.appendChild(iframe);
   document.body.appendChild(overlay);
 
+  // --- NEW: History API Logic ---
+  // Push a "fake" state into the browser history so the Back button has something to pop
+  window.history.pushState({ reportOverlayOpen: true }, "");
+
+  // Make the "✕ Close" button trigger a physical "Back" action to keep history clean
   overlay.querySelector('#closeReportOverlay')
-    .addEventListener('click', () => overlay.remove());
+    .addEventListener('click', () => {
+      window.history.back(); 
+    });
 }
 
+// --- NEW: Global Back Button Listener ---
+// When the user clicks the physical Back button (or the ✕ Close button), this catches it
+window.addEventListener('popstate', (e) => {
+  const overlay = document.getElementById('reportOverlay');
+  // If the overlay exists but the current history state doesn't say it should be open, remove it
+  if (overlay && !e.state?.reportOverlayOpen) {
+    overlay.remove();
+  }
+});
 /* ================================
    VIN Validation (ISO 3779)
 ================================ */
