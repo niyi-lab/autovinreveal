@@ -137,7 +137,6 @@ function showReportOverlay(html) {
     </button>`;
 
   const iframe = document.createElement('iframe');
-  iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-forms';
   iframe.style.cssText = 'flex:1;border:none;width:100%;';
   iframe.srcdoc = html;
 
