@@ -279,7 +279,7 @@ async function unmarkSessionConsumed(sessionId) {
 ================================================================ */
 async function createShareToken(vin, type) {
   const token     = Buffer.from(crypto.randomUUID()).toString("base64url").replace(/=/g, "");
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   await supabaseService.from("share_tokens").insert({
     token,
     vin:        vin.toUpperCase(),

@@ -3,7 +3,10 @@
 //   #4  — document.write replaced with safe blob-URL / sandboxed-iframe approach
 //   #11 — lastFormData scoped to buy modal; cleared after use
 //   #12 — PayPal button re-renders when user login state changes
+//   #13 — openBlank() removed from PayPal onApprove — was causing double-tab bug
+//   #14 — reflectAuthUI uses style.display instead of classList (userChip HTML uses style="display:none")
 //   #15 — All API.report fetches wrapped in apiFetch() with 30 s timeout
+//   #16 — Fixed double-tab race condition by removing redundant success check in Init and upgrading tryLoadPending()
 
 /* ================================
    Config & Utilities
@@ -16,7 +19,7 @@ const API = {
 };
 
 const PENDING_KEY    = 'pendingReport';
-const API_TIMEOUT_MS = 30_000;   // FIX 15
+const API_TIMEOUT_MS = 30_000;
 
 function $id(id) { return document.getElementById(id); }
 
@@ -43,7 +46,7 @@ function showToast(message, type = 'error') {
   }, 4000);
 }
 
-function trackPurchase(value = 6.00) {  // was inconsistently 6 or 7
+function trackPurchase(value = 6.00) {
   try {
     fbq('track', 'Purchase', {
       value, currency: 'USD',
@@ -61,9 +64,17 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-function openBlank() {
-  try { return window.open('', '_blank', 'noopener,noreferrer'); } catch { return null; }
-}
+// FIX 13: openBlank() has been REMOVED.
+// Old pattern in PayPal onApprove:
+//   1. openBlank()            → placeholder tab A opens
+//   2. async work...
+//   3. reportWindow.close()   → FAILS silently (browser security blocks closing
+//                               a window that has navigated away)
+//   4. openReport(html)       → blob URL tab B opens
+//   Result: both tabs open simultaneously
+//
+// New pattern: just call openReport(html) directly after the async work.
+// One call → one tab (or one inline overlay if popups are blocked). Never two.
 
 function setBtnLoading(btn, loadingText = 'Processing…') {
   if (!btn) return () => {};
@@ -80,7 +91,6 @@ function setBtnLoading(btn, loadingText = 'Processing…') {
 
 /* ================================
    FIX 15: fetch with timeout
-   Wraps all API calls — throws a readable error if the server hangs
 ================================ */
 async function apiFetch(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
   const ctrl  = new AbortController();
@@ -98,28 +108,16 @@ async function apiFetch(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
 
 /* ================================
    FIX 4: Safe report renderer
-   Replaces ALL document.write() calls.
-   - Uses a blob URL so the HTML is never eval'd in the current origin's context
-   - If popup is blocked, falls back to a sandboxed inline overlay
+================================ */
+/* ================================
+   FIX 4: Safe report renderer (Overlay Only)
 ================================ */
 function openReport(html) {
-  const blob    = new Blob([html], { type: 'text/html; charset=utf-8' });
-  const blobUrl = URL.createObjectURL(blob);
-
-  const w = window.open(blobUrl, '_blank', 'noopener,noreferrer');
-  if (w) {
-    // Revoke after 60 s — long enough for the page to fully load
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    return;
-  }
-
-  // Popup was blocked — clean up blob URL and render inline instead
-  URL.revokeObjectURL(blobUrl);
+  // Always render inline with the close button. No new tabs, no blob URLs.
   showReportOverlay(html);
 }
 
 function showReportOverlay(html) {
-  // Remove any existing overlay
   document.getElementById('reportOverlay')?.remove();
 
   const overlay = document.createElement('div');
@@ -138,8 +136,6 @@ function showReportOverlay(html) {
       ✕ Close
     </button>`;
 
-  // sandbox: allow-same-origin lets the report's own scripts run;
-  // the blob is served from a different origin so it cannot touch the parent page.
   const iframe = document.createElement('iframe');
   iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-forms';
   iframe.style.cssText = 'flex:1;border:none;width:100%;';
@@ -178,7 +174,6 @@ function vinCheckDigitOk(vinRaw) {
   return vin[8] === (rem === 10 ? 'X' : String(rem));
 }
 
-/* UI VIN feedback */
 function ensureVinHelpEl() {
   let help = $id('vinHelp');
   if (!help) {
@@ -272,14 +267,26 @@ const ppSuccess       = p.get('pp') === 'success';
 const intentParam     = p.get('intent') || null;
 const vinParam        = (p.get('vin') || '').toUpperCase();
 
-function tryLoadPending() { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; } }
-function clearPending()   { localStorage.removeItem(PENDING_KEY); }
+// FIX 16: Check local AND session storage to ensure we don't drop data
+function tryLoadPending() {
+  try {
+    const local = localStorage.getItem(PENDING_KEY);
+    if (local) return JSON.parse(local);
+    
+    const session = sessionStorage.getItem(PENDING_KEY);
+    if (session) return JSON.parse(session);
+    
+    return null;
+  } catch {
+    return null;
+  }
+}
+function clearPending()   { localStorage.removeItem(PENDING_KEY); sessionStorage.removeItem(PENDING_KEY); }
 
 async function resumePendingPurchase() {
   const pending = tryLoadPending();
   if (!pending) return;
 
-  // FIX 11: Guard against the '(from plate)' sentinel being sent as a VIN
   if (pending.vin === '(from plate)') pending.vin = '';
 
   await ensureBackendReady();
@@ -288,11 +295,10 @@ async function resumePendingPurchase() {
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (!user && stripeSessionId) pending.oneTimeSession = stripeSessionId;
   try {
-    // FIX 15: use apiFetch for timeout
     const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) });
     if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
-    openReport(html);   // FIX 4
+    openReport(html);
     trackPurchase(6.00);
     showToast('Report ready!', 'ok');
     addToHistory({
@@ -316,7 +322,6 @@ async function handleSuccessIfNeeded() {
   if (intentParam === 'buy_report' && stripeSessionId && vinParam) {
     showToast('Payment confirmed. Preparing your report…', 'ok');
     try {
-      // FIX 15: timeout on success-page fetch
       const r = await apiFetch(API.report, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -324,7 +329,7 @@ async function handleSuccessIfNeeded() {
       });
       if (!r.ok) throw new Error(await r.text());
       const html = await r.text();
-      openReport(html);   // FIX 4
+      openReport(html);
       trackPurchase(6.00); return;
     } catch (e) { showToast(e.message || 'Failed to fetch report', 'error'); }
   }
@@ -373,11 +378,16 @@ $id('closeLoginModal')?.addEventListener('click', closeLogin);
 $id('logoutBtn')?.addEventListener('click', doLogout);
 $id('loginBtn')?.addEventListener('click', openLogin);
 
+// FIX 14: wire up the close button added to updatePasswordModal in index.html
+$id('closeUpdatePasswordModal')?.addEventListener('click', () => {
+  $id('updatePasswordModal')?.classList.add('hidden');
+});
+
 async function doSignup() {
   if (!supabase) return showToast('Supabase not loaded', 'error');
   const email    = (emailEl.value || '').trim();
   const password = pwEl.value || '';
-  if (!email)             return showToast('Enter your email', 'error');
+  if (!email)              return showToast('Enter your email', 'error');
   if (password.length < 6) return showToast('Password must be at least 6 characters', 'error');
   try {
     const { data, error } = await supabase.auth.signUp({
@@ -428,14 +438,20 @@ $id('googleLogin')?.addEventListener('click', async () => {
 });
 
 let currentSession = null;
+
+// FIX 14: userChip uses style.display, NOT classList.
+// The HTML element has style="display:none" — Tailwind's 'hidden' class is
+// additive (display:none via CSS), but classList.remove('hidden') only removes
+// the class; since there's no 'flex' class left, the element stays invisible.
+// Using style.display directly overrides inline style correctly.
 function reflectAuthUI(session) {
   currentSession = session;
   if (session?.user) {
     if (userEmailEl) userEmailEl.textContent = session.user.email || '';
-    userChip?.classList.remove('hidden');
+    if (userChip)    userChip.style.display = 'flex';   // FIX 14
     $id('loginBtn')?.classList.add('hidden');
   } else {
-    userChip?.classList.add('hidden');
+    if (userChip)    userChip.style.display = 'none';   // FIX 14
     const lb = $id('loginBtn');
     if (lb) { lb.classList.remove('hidden'); lb.textContent = 'Log in'; }
   }
@@ -473,7 +489,6 @@ async function fetchBalance() {
   try {
     const { user, token } = await getSession();
     if (!user) return { balance: 0 };
-    // FIX 15: timeout on balance fetch
     const r = await apiFetch(
       API.credits(user.id),
       { headers: { Authorization: `Bearer ${token}` } },
@@ -525,11 +540,10 @@ async function openHistoryHTML(item) {
   if (token) headers['Authorization'] = `Bearer ${token}`;
   try {
     await ensureBackendReady();
-    // FIX 15: timeout
     const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
     if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
-    openReport(html);   // FIX 4
+    openReport(html);
   } catch (e) { showToast(e.message || 'Request failed', 'error'); }
 }
 
@@ -549,13 +563,12 @@ async function downloadHistoryPDF(item, btn = null) {
     const { token } = await getSession();
     if (token) headers['Authorization'] = `Bearer ${token}`;
     await ensureBackendReady();
-    // FIX 15: longer timeout for PDF generation
     const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) }, 60_000);
     if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
     if ((r.headers.get('content-type') || '').includes('text/html')) {
       showToast('PDF service busy. Opening web report instead…', 'ok');
       const html = await r.text();
-      openReport(html);   // FIX 4
+      openReport(html);
       return;
     }
     const blob = await r.blob();
@@ -661,13 +674,8 @@ $id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(H
 
 /* ================================
    Buy Credits Modal
-   FIX 11: pendingData is explicitly passed into openBuyModal and stored in
-           currentBuyModalPendingData — not read from the module-level lastFormData.
-           It is cleared on modal close so stale data can't leak.
 ================================ */
 const buyModal = $id('buyCreditsModal');
-
-// FIX 11: Replaces unscoped lastFormData as the PayPal data source
 let currentBuyModalPendingData = null;
 
 function openBuyModal(pendingData = null) {
@@ -678,14 +686,12 @@ function openBuyModal(pendingData = null) {
 
 function closeBuyModal() {
   buyModal?.classList.add('hidden');
-  currentBuyModalPendingData = null;   // FIX 11: clear on close
+  currentBuyModalPendingData = null;
 }
 
 $id('closeModalBtn')?.addEventListener('click', closeBuyModal);
 
-/* ─── PayPal (single report only) ───
-   FIX 12: Track which userId the button was rendered for.
-            Re-renders whenever the user logs in/out. ─── */
+/* ─── PayPal ─── */
 let paypalRenderedForUserId = '__not_rendered__';
 
 async function renderPaypalButton() {
@@ -695,10 +701,8 @@ async function renderPaypalButton() {
   const { user } = await getSession();
   const userId   = user?.id || null;
 
-  // FIX 12: Skip re-render only if user state hasn't changed AND button exists
   if (paypalRenderedForUserId === userId && container.children.length > 0) return;
 
-  // Clear any previous render and reset tracking
   container.innerHTML = '';
   paypalRenderedForUserId = userId;
 
@@ -715,19 +719,13 @@ async function renderPaypalButton() {
     },
 
     onApprove: async (data) => {
-      // FIX 11: Use explicitly scoped pending data, not module-level lastFormData
       const pending = currentBuyModalPendingData;
-      currentBuyModalPendingData = null;   // consumed — prevent double-use
+      currentBuyModalPendingData = null;
 
-      const reportWindow = openBlank();
-      if (reportWindow) {
-        reportWindow.document.write(
-          `<html><body style="font-family:sans-serif;text-align:center;padding-top:50px;background:#f9fafb;">
-            <h2 style="color:#1f2937;">Processing Payment…</h2>
-            <p style="color:#6b7280;">Please wait — do not close this window.</p>
-          </body></html>`
-        );
-      }
+      // FIX 13: No openBlank() here. Show a toast while processing instead.
+      // The old placeholder tab frequently failed to close (browser security),
+      // leaving it open alongside the blob URL tab = two tabs simultaneously.
+      showToast('Processing payment…', 'ok');
 
       try {
         const r = await apiFetch(
@@ -740,7 +738,6 @@ async function renderPaypalButton() {
         const result = await r.json();
 
         if (!pending || (!pending.vin && !(pending.state && pending.plate))) {
-          if (reportWindow) reportWindow.close();
           showToast('Payment completed! 1 credit added.', 'ok');
           await refreshBalancePill();
           closeBuyModal();
@@ -755,7 +752,6 @@ async function renderPaypalButton() {
         const { token } = await getSession();
         if (token) headers['Authorization'] = `Bearer ${token}`;
 
-        // FIX 15: timeout on report fetch
         const resp = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(body) });
         if (!resp.ok) throw new Error(await resp.text() || ('HTTP ' + resp.status));
 
@@ -769,10 +765,7 @@ async function renderPaypalButton() {
         });
         renderHistory();
 
-        // FIX 4: safe report renderer
-        if (reportWindow) {
-          reportWindow.close();
-        }
+        // FIX 13: one call → one tab (or one overlay). Never two.
         openReport(html);
 
         trackPurchase(6.00);
@@ -781,7 +774,6 @@ async function renderPaypalButton() {
         clearPending();
         closeBuyModal();
       } catch (e) {
-        if (reportWindow) reportWindow.close();
         showToast(e.message || 'PayPal capture failed', 'error');
       }
     },
@@ -807,7 +799,6 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
       body.vin         = pendingReport.vin;
       body.report_type = pendingReport.type || 'carfax';
     }
-    // FIX 15: timeout on checkout session creation
     const r = await apiFetch(
       API.checkout,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
@@ -818,18 +809,16 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
   } catch (e) { showToast(e.message || 'Failed to start checkout', 'error'); }
 }
 
-/* ─── Single: Stripe ─── */
 $id('buy1Btn')?.addEventListener('click', async () => {
   const btn     = $id('buy1Btn');
   const restore = setBtnLoading(btn, 'Redirecting…');
   const { user } = await getSession();
-  const pending = currentBuyModalPendingData;   // FIX 11
+  const pending = currentBuyModalPendingData;
   closeBuyModal();
   await startStripePurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: pending });
   restore();
 });
 
-/* ─── 5-Pack: Stripe only, account required ─── */
 $id('buy5Btn')?.addEventListener('click', async () => {
   const btn     = $id('buy5Btn');
   const restore = setBtnLoading(btn, 'Redirecting…');
@@ -839,7 +828,6 @@ $id('buy5Btn')?.addEventListener('click', async () => {
   restore();
 });
 
-/* ─── 10-Pack: Stripe only, account required ─── */
 $id('buy10Btn')?.addEventListener('click', async () => {
   const btn     = $id('buy10Btn');
   const restore = setBtnLoading(btn, 'Redirecting…');
@@ -849,7 +837,6 @@ $id('buy10Btn')?.addEventListener('click', async () => {
   restore();
 });
 
-/* ─── Sidebar buttons ─── */
 $id('buy1Sidebar')?.addEventListener('click',  () => openBuyModal());
 $id('buy5Sidebar')?.addEventListener('click',  async () => {
   const { user } = await getSession();
@@ -860,7 +847,6 @@ $id('buy10Sidebar')?.addEventListener('click', async () => {
   await startStripePurchase({ user, price_id: 'STRIPE_PRICE_10PACK', requireLogin: true });
 });
 
-/* ─── Pricing-section & mobile buttons ─── */
 ['pricingBuy1Btn', 'pricingBuy5Btn', 'pricingBuy10Btn'].forEach(id => {
   $id(id)?.addEventListener('click', () => openBuyModal());
 });
@@ -875,7 +861,6 @@ const loading = $id('loading');
 
 function hasPlateCombo(fd) { return !!(fd.state?.trim() && fd.plate?.trim()); }
 
-// Debounced NHTSA lookup — fires once after 400 ms of no typing
 let vinDebounceTimer = null;
 async function fetchCarDetails(vin) {
   try {
@@ -906,10 +891,8 @@ function reflectVinGate() {
     setVinHelp('Looking up vehicle…', true);
     go.disabled = false;
 
-    // FIX: debounce the network call — was firing on every keystroke
     vinDebounceTimer = setTimeout(() => {
       fetchCarDetails(vin).then(name => {
-        // Ignore if VIN has changed while we were waiting
         const current = (document.querySelector('input[name="vin"]')?.value || '').trim().toUpperCase();
         if (current !== vin) return;
         setVinHelp(name ? `✅ Verified: ${name}` : 'VIN valid (details not found).', true);
@@ -937,14 +920,12 @@ f?.addEventListener('submit', async (e) => {
   };
   if (!data.vin && !(data.state && data.plate)) { showToast('Enter a VIN or Plate', 'error'); return; }
 
-  // FIX 11: Store in sessionStorage for resume; lastFormData removed in favour of
-  //         passing data explicitly to openBuyModal below.
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(data)); } catch {}
 
   go.disabled = true;
   loading?.classList.remove('hidden');
 
-  const headers  = { 'Content-Type': 'application/json' };
+  const headers   = { 'Content-Type': 'application/json' };
   let currentUser = null;
   await ensureBackendReady();
 
@@ -963,7 +944,7 @@ f?.addEventListener('submit', async (e) => {
       )).json();
       if (balance <= 0) {
         localStorage.setItem(PENDING_KEY, JSON.stringify(data));
-        openBuyModal(data);   // FIX 11: pass data explicitly
+        openBuyModal(data);
         go.disabled = false;
         loading?.classList.add('hidden');
         return;
@@ -974,18 +955,17 @@ f?.addEventListener('submit', async (e) => {
   try {
     if (!currentUser && stripeSessionId) data.oneTimeSession = stripeSessionId;
 
-    // FIX 15: timeout on report request
     const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
 
     if (r.status === 401 || r.status === 402) {
       localStorage.setItem(PENDING_KEY, JSON.stringify(data));
-      openBuyModal(data);   // FIX 11
+      openBuyModal(data);
       return;
     }
     if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
 
     const html = await r.text();
-    openReport(html);   // FIX 4
+    openReport(html);
 
     showToast('Report fetched successfully!', 'ok');
     addToHistory({ vin: data.vin || '(from plate)', type: data.type, ts: Date.now(), state: data.state, plate: data.plate });
@@ -1049,9 +1029,6 @@ $id('saveNewPasswordBtn')?.addEventListener('click', async () => {
 (async () => {
   await refreshBalancePill();
   renderHistory();
-  if ((stripeSessionId || ppSuccess) && !intentParam) {
-    const pending = tryLoadPending() || JSON.parse(sessionStorage.getItem(PENDING_KEY) || 'null');
-    if (pending) { showToast('Payment confirmed. Processing…', 'ok'); await resumePendingPurchase(); }
-  }
+  // FIX 16: Removed the duplicate intent/session success logic here that was racing handleSuccessIfNeeded()
   reflectVinGate();
 })();
