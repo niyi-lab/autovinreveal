@@ -27,6 +27,20 @@
     <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32" />
     <meta name="theme-color" content="#1e3a8a" />
 
+    <!-- FIX: JSON-LD moved before render-blocking scripts -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org/",
+      "@type": "Product",
+      "name": "CARFAX Vehicle History Report",
+      "image": "https://autovinreveal.com/og-image.png",
+      "description": "Comprehensive CARFAX vehicle history report including accident data, service records, and title status.",
+      "brand": { "@type": "Brand", "name": "AutoVINReveal" },
+      "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.9", "reviewCount": "1240" },
+      "offers": { "@type": "Offer", "url": "https://autovinreveal.com", "priceCurrency": "USD", "price": "6.00", "availability": "https://schema.org/InStock" }
+    }
+    </script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = { darkMode: 'class' };
@@ -49,19 +63,12 @@
       fbq("init", window.FB_PIXEL_ID);
       fbq("track", "PageView");
     </script>
-
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org/",
-      "@type": "Product",
-      "name": "CARFAX Vehicle History Report",
-      "image": "https://autovinreveal.com/og-image.png",
-      "description": "Comprehensive CARFAX vehicle history report including accident data, service records, and title status.",
-      "brand": { "@type": "Brand", "name": "AutoVINReveal" },
-      "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.9", "reviewCount": "1240" },
-      "offers": { "@type": "Offer", "url": "https://autovinreveal.com", "priceCurrency": "USD", "price": "6.00", "availability": "https://schema.org/InStock" }
-    }
-    </script>
+    <!-- FIX: noscript fallback for FB pixel -->
+    <noscript>
+      <img height="1" width="1" style="display:none"
+        src="https://www.facebook.com/tr?id=1059594989434590&ev=PageView&noscript=1"
+        alt="" />
+    </noscript>
 
     <style>
       html, body { overflow-x: hidden; max-width: 100%; }
@@ -86,6 +93,10 @@
 
       /* ── Modal scroll fix ── */
       .modal-body { max-height: calc(100dvh - 80px); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+      /* FIX: userChip needs display:flex when .hidden is removed —
+         removing Tailwind's .hidden restores block, not flex */
+      #userChip:not(.hidden) { display: flex; align-items: center; gap: 0.75rem; }
 
       /* ── Mobile pricing: horizontal scroll if needed ── */
       @media (max-width: 639px) {
@@ -115,7 +126,8 @@
             <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
             <span id="balanceText">0 credits</span>
           </div>
-          <div id="userChip" class="hidden items-center gap-3">
+          <!-- FIX: items-center gap-3 removed from class — handled by CSS rule above -->
+          <div id="userChip" class="hidden">
             <span id="userEmail" class="text-sm font-medium text-gray-600 hidden sm:block"></span>
             <button id="logoutBtn" class="text-xs text-red-500 hover:text-red-700 font-medium">Sign out</button>
           </div>
@@ -497,7 +509,6 @@
 
           <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
 
-            <!-- Suggestion 1 -->
             <div class="bg-amber-50 border border-amber-100 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">🔍</div>
               <div>
@@ -506,7 +517,6 @@
               </div>
             </div>
 
-            <!-- Suggestion 2 -->
             <div class="bg-red-50 border border-red-100 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">⚠️</div>
               <div>
@@ -515,7 +525,6 @@
               </div>
             </div>
 
-            <!-- Suggestion 3 -->
             <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">📋</div>
               <div>
@@ -524,7 +533,6 @@
               </div>
             </div>
 
-            <!-- Suggestion 4 -->
             <div class="bg-green-50 border border-green-100 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">🏛️</div>
               <div>
@@ -533,7 +541,6 @@
               </div>
             </div>
 
-            <!-- Suggestion 5 -->
             <div class="bg-purple-50 border border-purple-100 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">🔔</div>
               <div>
@@ -542,7 +549,6 @@
               </div>
             </div>
 
-            <!-- Suggestion 6 -->
             <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">🤝</div>
               <div>
@@ -590,7 +596,7 @@
             </div>
             <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
               <div class="flex items-center gap-1 text-yellow-400 mb-3">★★★★★</div>
-              <p class="text-gray-700 text-sm leading-relaxed">"I flip cars for a living. The <strong>5-pack bundle for $25</strong> is a no-brainer. Same CARFAX PDF I used to pay $40 for. Highly recommended."</p>
+              <p class="text-gray-700 text-sm leading-relaxed">"I am a dealer and The <strong>5-pack bundle for $25</strong> is a no-brainer. Same CARFAX PDF I used to pay $40 for. Highly recommended."</p>
               <div class="mt-4 flex items-center gap-3">
                 <div class="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center text-xs font-bold text-gray-600">ST</div>
                 <div class="text-xs"><div class="font-bold text-gray-900">Sarah T.</div><div class="text-gray-500">Dealer / Reseller</div></div>
@@ -598,7 +604,7 @@
             </div>
             <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
               <div class="flex items-center gap-1 text-yellow-400 mb-3">★★★★★</div>
-              <p class="text-gray-700 text-sm leading-relaxed">"Fast and simple. Typed the VIN, paid with Apple Pay, and the PDF opened instantly. Checked the service history and bought the car confidently."</p>
+              <p class="text-gray-700 text-sm leading-relaxed">"Fast and simple. Typed the VIN, and the PDF opened instantly. Checked the service history and was able to buy the car confidently."</p>
               <div class="mt-4 flex items-center gap-3">
                 <div class="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center text-xs font-bold text-gray-600">JL</div>
                 <div class="text-xs"><div class="font-bold text-gray-900">James L.</div><div class="text-gray-500">Private Buyer</div></div>
@@ -703,13 +709,15 @@
     </footer>
 
     <!-- ═══════════════ MODAL: BUY CREDITS ═══════════════ -->
-    <div id="buyCreditsModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <!-- FIX: role, aria-modal, aria-labelledby added -->
+    <div id="buyCreditsModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      role="dialog" aria-modal="true" aria-labelledby="buyCreditsModalTitle">
       <div class="bg-white w-full sm:max-w-lg md:max-w-2xl lg:max-w-3xl sm:rounded-2xl rounded-t-2xl shadow-2xl relative animate-[fadeIn_0.2s_ease-out] flex flex-col modal-body">
 
         <!-- Header -->
         <div class="bg-blue-600 px-6 py-5 text-white text-center sm:rounded-t-2xl rounded-t-2xl flex-shrink-0">
-          <button id="closeModalBtn" class="absolute top-4 right-4 text-white/70 hover:text-white text-2xl font-bold leading-none">✕</button>
-          <h3 class="font-bold text-xl">Choose Your Package</h3>
+          <button id="closeModalBtn" class="absolute top-4 right-4 text-white/70 hover:text-white text-2xl font-bold leading-none" aria-label="Close">✕</button>
+          <h3 id="buyCreditsModalTitle" class="font-bold text-xl">Choose Your Package</h3>
           <p class="text-blue-100 text-sm mt-0.5">No subscriptions · Credits never expire · Instant delivery</p>
         </div>
 
@@ -727,19 +735,16 @@
                 <p class="hidden sm:block text-xs text-gray-500 mt-1">One-time check. No account needed.</p>
               </div>
               <div class="sm:space-y-2 shrink-0 sm:shrink sm:w-full">
-                <!-- Stripe -->
                 <button id="buy1Btn"
                   class="whitespace-nowrap sm:w-full flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-700 text-white font-bold py-2 px-4 sm:py-2.5 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
                   Pay with Card
                 </button>
-                <!-- PayPal divider -->
                 <div class="hidden sm:flex items-center gap-2 my-1">
                   <div class="flex-1 h-px bg-gray-100"></div>
                   <span class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">or</span>
                   <div class="flex-1 h-px bg-gray-100"></div>
                 </div>
-                <!-- PayPal button renders here -->
                 <div id="paypalContainer" class="hidden sm:block min-h-[40px] relative z-0"></div>
               </div>
             </div>
@@ -762,7 +767,6 @@
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
                   Pay with Card
                 </button>
-                <!-- Stripe-only badge -->
                 <p class="hidden sm:flex items-center justify-center gap-1 text-[10px] text-gray-400 pt-0.5">
                   <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
                   Secured by Stripe
@@ -815,16 +819,18 @@
       </div>
     </div>
 
-    <!-- Login Modal -->
-    <div id="loginModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+    <!-- ═══════════════ MODAL: LOGIN ═══════════════ -->
+    <!-- FIX: role, aria-modal, aria-labelledby added; autofocus on email input -->
+    <div id="loginModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+      role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 relative">
-        <button id="closeLoginModal" class="absolute top-4 right-4 text-gray-300 hover:text-gray-600 text-xl">✕</button>
+        <button id="closeLoginModal" class="absolute top-4 right-4 text-gray-300 hover:text-gray-600 text-xl" aria-label="Close">✕</button>
         <div class="text-center mb-6">
-          <h2 class="text-2xl font-bold text-gray-900">Welcome Back</h2>
+          <h2 id="loginModalTitle" class="text-2xl font-bold text-gray-900">Welcome Back</h2>
           <p class="text-sm text-gray-500 mt-1">Access your report history</p>
         </div>
         <button id="googleLogin" class="w-full border border-gray-300 rounded-lg py-2.5 flex items-center justify-center gap-3 hover:bg-gray-50 transition-colors mb-5">
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-5 h-5" />
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-5 h-5" alt="" />
           <span class="text-sm font-medium text-gray-700">Continue with Google</span>
         </button>
         <div class="relative flex py-2 items-center mb-4">
@@ -834,15 +840,17 @@
         </div>
         <div class="space-y-4">
           <div>
-            <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Email Address</label>
-            <input id="loginEmail" type="email" placeholder="you@example.com" class="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all" />
+            <label for="loginEmail" class="block text-xs font-bold text-gray-600 uppercase mb-1">Email Address</label>
+            <input id="loginEmail" type="email" placeholder="you@example.com" autofocus
+              class="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all" />
           </div>
           <div>
             <div class="flex justify-between items-center mb-1">
-              <label class="text-xs font-bold text-gray-600 uppercase">Password</label>
+              <label for="loginPassword" class="text-xs font-bold text-gray-600 uppercase">Password</label>
               <button id="forgotPasswordBtn" class="text-xs text-blue-600 hover:underline">Forgot?</button>
             </div>
-            <input id="loginPassword" type="password" placeholder="••••••••" class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all" />
+            <input id="loginPassword" type="password" placeholder="••••••••"
+              class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all" />
           </div>
           <div class="grid grid-cols-2 gap-3 pt-2">
             <button id="doLogin" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors shadow-lg shadow-blue-500/30">Sign In</button>
@@ -868,32 +876,46 @@
       </div>
     </div>
 
-    <!-- Forgot / Reset / Email modals (unchanged) -->
-    <div id="forgotModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+    <!-- ═══════════════ MODAL: FORGOT PASSWORD ═══════════════ -->
+    <!-- FIX: role, aria-modal, aria-labelledby added; autofocus on email input -->
+    <div id="forgotModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+      role="dialog" aria-modal="true" aria-labelledby="forgotModalTitle">
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
-        <button id="closeForgotModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">✕</button>
-        <h3 class="text-xl font-bold text-gray-900 mb-2">Reset Password</h3>
+        <button id="closeForgotModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600" aria-label="Close">✕</button>
+        <h3 id="forgotModalTitle" class="text-xl font-bold text-gray-900 mb-2">Reset Password</h3>
         <p class="text-sm text-gray-500 mb-4">Enter your email to receive a recovery link.</p>
-        <input id="forgotEmail" type="email" placeholder="name@example.com" class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500" />
+        <label for="forgotEmail" class="sr-only">Email address</label>
+        <input id="forgotEmail" type="email" placeholder="name@example.com" autofocus
+          class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500" />
         <button id="sendResetLinkBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg">Send Link</button>
       </div>
     </div>
 
-    <div id="updatePasswordModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+    <!-- ═══════════════ MODAL: UPDATE PASSWORD ═══════════════ -->
+    <!-- FIX: role, aria-modal, aria-labelledby added; autofocus on password input -->
+    <div id="updatePasswordModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+      role="dialog" aria-modal="true" aria-labelledby="updatePasswordModalTitle">
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
-        <h3 class="text-xl font-bold text-gray-900 mb-2">Set New Password</h3>
+        <h3 id="updatePasswordModalTitle" class="text-xl font-bold text-gray-900 mb-2">Set New Password</h3>
         <p class="text-sm text-gray-500 mb-4">Enter your new secure password below.</p>
-        <input id="newPasswordInput" type="password" placeholder="New Password" class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500" />
+        <label for="newPasswordInput" class="sr-only">New password</label>
+        <input id="newPasswordInput" type="password" placeholder="New Password" autofocus
+          class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500" />
         <button id="saveNewPasswordBtn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg">Update Password</button>
       </div>
     </div>
 
-    <div id="emailModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+    <!-- ═══════════════ MODAL: EMAIL REPORT ═══════════════ -->
+    <!-- FIX: role, aria-modal, aria-labelledby added; autofocus on email input -->
+    <div id="emailModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+      role="dialog" aria-modal="true" aria-labelledby="emailModalTitle">
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
-        <button id="closeEmailModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">✕</button>
-        <h3 class="text-xl font-bold text-gray-900 mb-2">Email Report</h3>
+        <button id="closeEmailModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600" aria-label="Close">✕</button>
+        <h3 id="emailModalTitle" class="text-xl font-bold text-gray-900 mb-2">Email Report</h3>
         <p class="text-sm text-gray-500 mb-4">Where should we send this PDF?</p>
-        <input id="emailTargetInput" type="email" placeholder="name@example.com" class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500" />
+        <label for="emailTargetInput" class="sr-only">Recipient email address</label>
+        <input id="emailTargetInput" type="email" placeholder="name@example.com" autofocus
+          class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500" />
         <button id="sendEmailBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg">Send Now</button>
       </div>
     </div>

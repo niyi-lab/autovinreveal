@@ -1,10 +1,17 @@
 /********************************************************************
- * AutoVINReveal Server – Refund Safety Net + Expiration
+ * AutoVINReveal Server
+ * FIXES APPLIED:
+ *   #1  — consumed_sessions moved from disk to Supabase DB
+ *   #2  — share_tokens moved from disk to Supabase DB
+ *   #3  — /api/credits/:user_id now requires auth + ownership check
+ *   #5  — webhook & PayPal credit updates use atomic add_credits RPC
+ *   #6  — justCharged boolean replaced with DB-backed pending_charges
+ *   #7  — server throws on startup if APP_SECRET is default value
  ********************************************************************/
 
 import dotenv from "dotenv";
-dotenv.config({ path: "/etc/secrets/.env" }); // Production
-dotenv.config(); // Local dev
+dotenv.config({ path: "/etc/secrets/.env" });
+dotenv.config();
 
 import express from "express";
 import path from "path";
@@ -28,22 +35,30 @@ const require = createRequire(import.meta.url);
 const paypalSdk = require("@paypal/checkout-server-sdk");
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
 
-const app = express();
+const app  = express();
 const PORT = process.env.PORT || 3000;
 const HOST = "0.0.0.0";
 
 /* ================================================================
    Config (env)
 ================================================================ */
-const SITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
+const SITE_URL     = process.env.SITE_URL     || `http://localhost:${PORT}`;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || SITE_URL;
-const FORCE_WWW = process.env.FORCE_WWW === "1";
+const FORCE_WWW    = process.env.FORCE_WWW === "1";
 
-const APP_SECRET = process.env.APP_SECRET || "change_me_in_env_file";
+const APP_SECRET   = process.env.APP_SECRET   || "change_me_in_env_file";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 const ADMIN_SESSION_TTL_SECONDS = Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 12);
+
+// ── FIX 7: Hard-fail on startup instead of silently using a known-weak secret ──
+if (!APP_SECRET || APP_SECRET === "change_me_in_env_file") {
+  throw new Error(
+    "FATAL: APP_SECRET must be set to a strong random secret in your environment variables. " +
+    "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
+  );
+}
 
 /* ================================================================
    Security / redirects
@@ -65,7 +80,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use((req, res, next) => {
+app.use((_req, res, next) => {
   res.setHeader("Content-Security-Policy", "upgrade-insecure-requests");
   next();
 });
@@ -101,7 +116,7 @@ function stripeForId(id) {
 /* ================================================================
    Supabase
 ================================================================ */
-const SUPABASE_URL    = process.env.VITE_SUPABASE_URL;
+const SUPABASE_URL      = process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY  = process.env.SERVICE_ROLE_KEY;
 
@@ -128,7 +143,7 @@ const SMTP_PORT   = Number(process.env.SMTP_PORT || 465);
 const SMTP_SECURE = process.env.SMTP_SECURE !== "0";
 const SMTP_USER   = process.env.SMTP_USER;
 const SMTP_PASS   = process.env.SMTP_PASS;
-const SMTP_FROM   = process.env.SMTP_FROM || "AutoVINReveal <autovinreveal@gmail.com>";
+const SMTP_FROM   = process.env.SMTP_FROM   || "AutoVINReveal <autovinreveal@gmail.com>";
 
 let mailer = null;
 if (SMTP_USER && SMTP_PASS) {
@@ -137,10 +152,10 @@ if (SMTP_USER && SMTP_PASS) {
     auth: { user: SMTP_USER, pass: SMTP_PASS },
   });
   mailer.verify()
-    .then(() => console.log("✅ SMTP mailer ready"))
-    .catch(e => console.error("❌ SMTP failed:", e));
+    .then(()  => console.log("✅ SMTP mailer ready"))
+    .catch(e  => console.error("❌ SMTP failed:", e));
 } else {
-  console.warn("⚠️ SMTP not configured. Emails will fail.");
+  console.warn("⚠️  SMTP not configured. Emails will fail.");
 }
 
 /* ================================================================
@@ -174,17 +189,15 @@ const CACHE_DIR = path.join(__dirname, "cache");
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 const ck = (vin, type) => path.join(CACHE_DIR, `${vin}-${type}.b64`);
 
-// FIX #1: removed dead `readCache` — getReportData handles all reads directly
 const writeCache = (vin, type, data) => fs.writeFileSync(ck(vin, type), data, "utf8");
 
 const REPORT_TTL_DAYS = 30;
-const MAX_AGE_MS = REPORT_TTL_DAYS * 24 * 60 * 60 * 1000;
+const MAX_AGE_MS      = REPORT_TTL_DAYS * 24 * 60 * 60 * 1000;
 
 async function getReportData(vin, type) {
-  const v = (vin || "").toUpperCase();
+  const v = (vin  || "").toUpperCase();
   const t = (type || "").toLowerCase();
 
-  // 1. Try local file cache (check age)
   const filePath = ck(v, t);
   if (fs.existsSync(filePath)) {
     try {
@@ -192,12 +205,11 @@ async function getReportData(vin, type) {
       if (Date.now() - stats.mtimeMs < MAX_AGE_MS) {
         return fs.readFileSync(filePath, "utf8");
       } else {
-        fs.unlinkSync(filePath); // expired
+        fs.unlinkSync(filePath);
       }
     } catch (err) { console.error("Cache file check failed:", err); }
   }
 
-  // 2. Try database (check age)
   try {
     const { data } = await supabaseService
       .from("vin_queries")
@@ -220,16 +232,6 @@ async function getReportData(vin, type) {
   return null;
 }
 
-const CONSUMED_FILE = path.join(__dirname, ".consumed_sessions.json");
-let CONSUMED = new Set();
-try {
-  if (fs.existsSync(CONSUMED_FILE))
-    CONSUMED = new Set(JSON.parse(fs.readFileSync(CONSUMED_FILE, "utf8")));
-} catch {}
-function saveConsumed() {
-  try { fs.writeFileSync(CONSUMED_FILE, JSON.stringify([...CONSUMED], null, 2)); } catch {}
-}
-
 function decodeReportBase64(rawB64) {
   const buf = Buffer.from(rawB64, "base64");
   if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
@@ -242,6 +244,128 @@ function decodeReportBase64(rawB64) {
     return { kind: "html", html: asText };
   return { kind: "unknown", buffer: buf };
 }
+
+/* ================================================================
+   FIX 1: Consumed Sessions — DB-backed (was .consumed_sessions.json)
+   Requires: CREATE TABLE consumed_sessions (session_id TEXT PRIMARY KEY, ...)
+================================================================ */
+async function isSessionConsumed(sessionId) {
+  try {
+    const { data } = await supabaseService
+      .from("consumed_sessions")
+      .select("session_id")
+      .eq("session_id", sessionId)
+      .maybeSingle();
+    return !!data;
+  } catch { return false; }
+}
+
+async function markSessionConsumed(sessionId) {
+  await supabaseService
+    .from("consumed_sessions")
+    .insert({ session_id: sessionId });
+}
+
+async function unmarkSessionConsumed(sessionId) {
+  await supabaseService
+    .from("consumed_sessions")
+    .delete()
+    .eq("session_id", sessionId);
+}
+
+/* ================================================================
+   FIX 2: Share Tokens — DB-backed (was .share_tokens.json)
+   Requires: CREATE TABLE share_tokens (token TEXT PRIMARY KEY, ...)
+================================================================ */
+async function createShareToken(vin, type) {
+  const token     = Buffer.from(crypto.randomUUID()).toString("base64url").replace(/=/g, "");
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  await supabaseService.from("share_tokens").insert({
+    token,
+    vin:        vin.toUpperCase(),
+    type:       type.toLowerCase(),
+    expires_at: expiresAt,
+  });
+  return { token, expiresAt };
+}
+
+async function getShareToken(token) {
+  const { data } = await supabaseService
+    .from("share_tokens")
+    .select("vin, type, expires_at")
+    .eq("token", token)
+    .maybeSingle();
+  if (!data) return null;
+  if (new Date(data.expires_at).getTime() <= Date.now()) return null;
+  return data;
+}
+
+/* ================================================================
+   FIX 5: Atomic Credit Updates
+   Uses add_credits(p_user, p_delta) SQL function — no race condition.
+   Requires: CREATE OR REPLACE FUNCTION add_credits(p_user UUID, p_delta INT)
+================================================================ */
+async function addCreditsAtomic(userId, delta) {
+  const { error } = await supabaseService.rpc("add_credits", {
+    p_user:  userId,
+    p_delta: delta,
+  });
+  if (error) throw new Error(`Credit update failed: ${error.message}`);
+}
+
+/* ================================================================
+   FIX 6: Pending Charges — DB-backed crash-safe refunds
+   A row is written BEFORE charging and deleted on success.
+   On restart, reconcileStalePendingCharges() refunds orphaned rows.
+   Requires: CREATE TABLE pending_charges (id UUID PRIMARY KEY, ...)
+================================================================ */
+async function createPendingCharge({ userId = null, sessionId = null, vin }) {
+  const { data, error } = await supabaseService
+    .from("pending_charges")
+    .insert({ user_id: userId, session_id: sessionId, vin })
+    .select("id")
+    .single();
+  if (error) throw new Error(`Failed to record charge: ${error.message}`);
+  return data.id;
+}
+
+async function resolvePendingCharge(chargeId) {
+  await supabaseService.from("pending_charges").delete().eq("id", chargeId);
+}
+
+async function refundAndResolve(chargeId, userId, sessionId) {
+  try {
+    if (userId)    await addCreditsAtomic(userId, 1);
+    else if (sessionId) await unmarkSessionConsumed(sessionId);
+  } catch (e) {
+    console.error(`[Refund] Failed to refund charge ${chargeId}:`, e.message);
+  }
+  // Always delete the pending record, even if the refund itself errored
+  await supabaseService.from("pending_charges").delete().eq("id", chargeId);
+}
+
+// Run at startup — any charge row older than 5 min means the server died
+// mid-transaction. Refund those users automatically.
+async function reconcileStalePendingCharges() {
+  try {
+    const threshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data } = await supabaseService
+      .from("pending_charges")
+      .select("*")
+      .lt("created_at", threshold);
+
+    if (!data?.length) return;
+    console.log(`[Reconcile] Found ${data.length} stale charge(s) — refunding...`);
+
+    for (const charge of data) {
+      console.log(`[Reconcile] Refunding charge ${charge.id} for VIN ${charge.vin}`);
+      await refundAndResolve(charge.id, charge.user_id, charge.session_id);
+    }
+  } catch (e) {
+    console.error("[Reconcile] Startup reconciliation failed:", e.message);
+  }
+}
+reconcileStalePendingCharges();
 
 /* ================================================================
    VIN Validation
@@ -265,8 +389,10 @@ function vinCheckDigitOk(vin) {
 }
 function validateVin(vinRaw) {
   const vin = (vinRaw || "").toUpperCase().trim();
-  if (!isPlausibleVinFormat(vin)) return { ok: false, code: "format", msg: "VIN must be 17 characters (no I, O, Q)." };
-  if (!vinCheckDigitOk(vin)) return { ok: false, code: "check_digit", msg: "VIN check digit is invalid." };
+  if (!isPlausibleVinFormat(vin))
+    return { ok: false, code: "format",      msg: "VIN must be 17 characters (no I, O, Q)." };
+  if (!vinCheckDigitOk(vin))
+    return { ok: false, code: "check_digit", msg: "VIN check digit is invalid." };
   return { ok: true, vin };
 }
 
@@ -292,8 +418,8 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
 
   try {
     if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-      const sStripe  = stripeForId(session.id);
+      const session   = event.data.object;
+      const sStripe   = stripeForId(session.id);
       const lineItems = await sStripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
 
       let creditsToAdd = 0;
@@ -307,21 +433,15 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
 
       const userId = session.metadata?.user_id || session.client_reference_id || null;
 
-      // FIX #3: log clearly when a guest purchase has no userId so credits aren't silently lost
       if (!userId && creditsToAdd > 0) {
-        console.warn(`[Webhook] Guest purchase — no userId. Credits (${creditsToAdd}) not stored. Session: ${session.id}`);
+        console.warn(
+          `[Webhook] Guest purchase — no userId. Credits (${creditsToAdd}) not stored. Session: ${session.id}`
+        );
       }
 
+      // FIX 5: Atomic upsert — no race condition from concurrent webhooks
       if (userId && creditsToAdd > 0) {
-        const { data: existing } = await supabaseService
-          .from("credits").select("balance").eq("user_id", userId).maybeSingle();
-        if (existing) {
-          await supabaseService.from("credits")
-            .update({ balance: (existing.balance || 0) + creditsToAdd })
-            .eq("user_id", userId);
-        } else {
-          await supabaseService.from("credits").insert({ user_id: userId, balance: creditsToAdd });
-        }
+        await addCreditsAtomic(userId, creditsToAdd);
       }
     }
     return res.status(200).json({ ok: true });
@@ -338,14 +458,14 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(cors({ origin: ALLOWED_ORIGIN, credentials: false }));
 app.use(helmet({ contentSecurityPolicy: false }));
-
-// FIX #8: use 'combined' in production, 'dev' locally
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
-
 app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
-// FIX #7: tighter rate limit on PayPal capture (money endpoint)
-const paypalCaptureLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: "Too many PayPal requests" });
+const paypalCaptureLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: "Too many PayPal requests",
+});
 
 /* ================================================================
    Endpoints
@@ -372,24 +492,20 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
     let priceLive = PRICE_SINGLE;
     let intent    = vin ? "buy_report" : "buy_credit_single";
-
     if (isTenPack)       { priceLive = PRICE_10PACK; intent = "buy_credits_10pack"; }
     else if (isFivePack) { priceLive = PRICE_5PACK;  intent = "buy_credits_5pack"; }
-
-    // FIX #4: removed the 409 alreadyCached check here — it caused silent failures
-    // on the client. The cache is checked again in /api/report, so this is redundant.
 
     const session = await stripeLive.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
       line_items: [{ price: priceLive, quantity: 1 }],
       success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ""}`,
-      cancel_url: `${SITE_URL}/?checkout=cancel`,
+      cancel_url:  `${SITE_URL}/?checkout=cancel`,
       ...(userId ? { client_reference_id: userId } : {}),
       metadata: {
-        ...(userId      ? { user_id: userId }           : {}),
-        ...(vin         ? { vin }                        : {}),
-        ...(report_type ? { report_type }                : {}),
+        ...(userId      ? { user_id: userId }    : {}),
+        ...(vin         ? { vin }                 : {}),
+        ...(report_type ? { report_type }         : {}),
         intent,
       },
     });
@@ -401,11 +517,20 @@ app.post("/api/create-checkout-session", async (req, res) => {
   }
 });
 
-// Credits
+// FIX 3: Credits endpoint — requires auth, user can only read their own balance
 app.get("/api/credits/:user_id", async (req, res) => {
   try {
+    const { user } = await getUser(req);
+    if (!user)                    return res.status(401).json({ error: "unauthorized" });
+    if (user.id !== req.params.user_id)
+                                  return res.status(403).json({ error: "forbidden" });
+
     const { data, error } = await supabaseService
-      .from("credits").select("balance").eq("user_id", req.params.user_id).maybeSingle();
+      .from("credits")
+      .select("balance")
+      .eq("user_id", req.params.user_id)
+      .maybeSingle();
+
     if (error) return res.status(500).json({ error: error.message });
     res.json({ balance: data?.balance ?? 0 });
   } catch { res.status(500).json({ error: "Server error" }); }
@@ -420,7 +545,6 @@ const ppEnv = PAYPAL_ENV === "live"
   : new paypalSdk.core.SandboxEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET);
 const ppClient = new paypalSdk.core.PayPalHttpClient(ppEnv);
 
-// FIX #2: verifyPaypalCapture is now actually used in capture-order
 async function verifyPaypalCapture(captureId) {
   const req = new paypalSdk.payments.CapturesGetRequest(captureId);
   const res = await ppClient.execute(req);
@@ -434,7 +558,11 @@ app.post("/api/paypal/create-order", async (_req, res) => {
     request.requestBody({
       intent: "CAPTURE",
       purchase_units: [{ amount: { currency_code: "USD", value: "6.00" } }],
-      application_context: { brand_name: "AutoVINReveal", shipping_preference: "NO_SHIPPING", user_action: "PAY_NOW" },
+      application_context: {
+        brand_name: "AutoVINReveal",
+        shipping_preference: "NO_SHIPPING",
+        user_action: "PAY_NOW",
+      },
     });
     const order = await ppClient.execute(request);
     res.json({ orderID: order.result.id });
@@ -448,27 +576,20 @@ app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => 
 
     const capReq = new paypalSdk.orders.OrdersCaptureRequest(orderID);
     capReq.requestBody({});
-    const capRes   = await ppClient.execute(capReq);
-    const cap      = capRes?.result?.purchase_units?.[0]?.payments?.captures?.[0];
+    const capRes    = await ppClient.execute(capReq);
+    const cap       = capRes?.result?.purchase_units?.[0]?.payments?.captures?.[0];
     const captureId = cap?.id || null;
+
     if (!captureId || cap?.status !== "COMPLETED")
       return res.status(400).json({ error: "Capture not completed" });
 
-    // FIX #2: verify the capture server-side before adding credits
     const verified = await verifyPaypalCapture(captureId);
     if (!verified || verified.status !== "COMPLETED")
       return res.status(400).json({ error: "Capture verification failed" });
 
-    if (user_id) {
-      const { data: existing } = await supabaseService
-        .from("credits").select("balance").eq("user_id", user_id).maybeSingle();
-      if (existing) {
-        await supabaseService.from("credits")
-          .update({ balance: (existing.balance || 0) + 1 }).eq("user_id", user_id);
-      } else {
-        await supabaseService.from("credits").insert({ user_id, balance: 1 });
-      }
-    }
+    // FIX 5: Atomic credit add — no race condition
+    if (user_id) await addCreditsAtomic(user_id, 1);
+
     res.json({ ok: true, captureId });
   } catch (err) {
     console.error("PayPal capture error:", err);
@@ -480,16 +601,27 @@ app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => 
    Main Report Logic
 ================================================================ */
 app.post("/api/report", async (req, res) => {
-  let targetVin     = "";
-  let type          = "carfax";
-  let currentUser   = null;
+  let targetVin      = "";
+  let type           = "carfax";
+  let currentUser    = null;
   let oneTimeSession = null;
-  let alreadyOwned  = false;
-  let justCharged   = false;
+  let alreadyOwned   = false;
+
+  // FIX 6: DB-backed charge ID replaces the in-memory `justCharged` boolean.
+  //        If the server crashes after this is set, reconcileStalePendingCharges()
+  //        will issue the refund automatically on next startup.
+  let pendingChargeId = null;
 
   try {
-    const { vin, state, plate, type: reqType, as = "html", allowLive: allowLiveRaw, oneTimeSession: reqSession } = req.body || {};
-    type       = (reqType || "carfax").toLowerCase();
+    const {
+      vin, state, plate,
+      type:           reqType,
+      as:             as           = "html",
+      allowLive:      allowLiveRaw,
+      oneTimeSession: reqSession,
+    } = req.body || {};
+
+    type           = (reqType || "carfax").toLowerCase();
     const allowLive = allowLiveRaw !== false;
     oneTimeSession  = reqSession;
 
@@ -498,7 +630,7 @@ app.post("/api/report", async (req, res) => {
     if (!targetVin && state && plate) {
       try {
         const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
-        const m = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
+        const m   = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
         if (m) targetVin = m[0];
       } catch { return res.status(400).json({ error: "plate_lookup_failed" }); }
     }
@@ -512,9 +644,9 @@ app.post("/api/report", async (req, res) => {
     // 3. Check cache
     let raw = await getReportData(targetVin, type);
 
-    // 4. Check ownership
+    // 4. Check ownership (skip for one-time sessions — they bypass credits)
     if (!oneTimeSession) {
-      const { token, user } = await getUser(req);
+      const { user } = await getUser(req);
       currentUser = user;
       if (currentUser) {
         const { data: past } = await supabaseService
@@ -531,45 +663,56 @@ app.post("/api/report", async (req, res) => {
     // 5. Live fetch
     if (!raw && allowLive) {
 
-      // Charge user
+      // ── Charge logged-in user ──
       if (!alreadyOwned && !oneTimeSession) {
         if (currentUser) {
           const { error: rpcErr } = await supabaseForToken(
             req.headers.authorization?.split(" ")[1]
           ).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
+
           if (rpcErr) return res.status(402).json({ error: "insufficient_credits" });
-          justCharged = true;
+
+          // FIX 6: Record the deduction in DB before making the external call
+          pendingChargeId = await createPendingCharge({
+            userId: currentUser.id,
+            vin:    targetVin,
+          });
         } else {
           return res.status(401).json({ error: "purchase_required" });
         }
       }
 
+      // ── Verify one-time session (Stripe / PayPal) ──
       if (oneTimeSession && !alreadyOwned) {
         try {
           if (!oneTimeSession.startsWith("pp_")) {
             const sStripe = stripeForId(oneTimeSession);
-            const s = await sStripe.checkout.sessions.retrieve(oneTimeSession);
+            const s       = await sStripe.checkout.sessions.retrieve(oneTimeSession);
             if (s.payment_status !== "paid") throw new Error("unpaid");
           }
-          if (!CONSUMED.has(oneTimeSession)) {
-            CONSUMED.add(oneTimeSession);
-            saveConsumed();
-            justCharged = true;
+          // FIX 1: DB-backed idempotency check
+          const alreadyConsumed = await isSessionConsumed(oneTimeSession);
+          if (!alreadyConsumed) {
+            await markSessionConsumed(oneTimeSession);
+            // FIX 6: Record pending charge for session-based purchases
+            pendingChargeId = await createPendingCharge({
+              sessionId: oneTimeSession,
+              vin:       targetVin,
+            });
           }
         } catch { return res.status(400).json({ error: "receipt_invalid" }); }
       }
 
-      // Fetch & validate
+      // ── Fetch from CarSimulcast ──
       try {
         const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
-        if (!live || live.length < 50) throw new Error("CS_EMPTY_RESPONSE");
+        if (!live || live.length < 50)         throw new Error("CS_EMPTY_RESPONSE");
         const checkDecode = decodeReportBase64(live);
-        if (checkDecode.kind === "unknown") throw new Error("CS_INVALID_FORMAT");
+        if (checkDecode.kind === "unknown")    throw new Error("CS_INVALID_FORMAT");
 
         raw = live;
         writeCache(targetVin, type, raw);
 
-        // FIX #5: upsert instead of update to handle first-time rows correctly
         if (currentUser) {
           await supabaseService.from("vin_queries").upsert({
             user_id:     currentUser.id,
@@ -579,35 +722,37 @@ app.post("/api/report", async (req, res) => {
           }, { onConflict: "user_id,vin" });
         }
 
-      } catch (e) {
-        console.error(`[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`);
+        // FIX 6: Report delivered — mark charge as resolved
+        if (pendingChargeId) await resolvePendingCharge(pendingChargeId);
 
-        // Refund immediately
-        if (justCharged) {
-          if (currentUser) {
-            await supabaseService.rpc("adjust_credits", {
-              p_user:   currentUser.id,
-              p_delta:  1,
-              p_reason: "refund_api_failure",
-              p_ref:    targetVin,
-            });
-          } else if (oneTimeSession) {
-            CONSUMED.delete(oneTimeSession);
-            saveConsumed();
-          }
+      } catch (e) {
+        console.error(
+          `[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`
+        );
+
+        // FIX 6: Refund using DB record (survives process crashes)
+        if (pendingChargeId) {
+          await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
+          pendingChargeId = null;
         }
 
         const msg = String(e.message || "");
         if (msg.includes("CS_404") || /invalid.*vin|vin.*not.*found/i.test(msg)) {
-          return res.status(422).json({ error: "invalid_vin", reason: "remote_reject", message: "VIN not found in database. Refunded." });
+          return res.status(422).json({
+            error: "invalid_vin", reason: "remote_reject",
+            message: "VIN not found in database. You have been refunded.",
+          });
         }
-        return res.status(502).json({ error: "provider_error", message: "Report generation failed. You have been refunded." });
+        return res.status(502).json({
+          error: "provider_error",
+          message: "Report generation failed. You have been refunded.",
+        });
       }
     }
 
     if (!raw) return res.status(404).json({ error: "not_found", message: "No report found." });
 
-    // 6. Deliver result
+    // 6. Deliver
     const decoded = decodeReportBase64(raw);
 
     if (as === "pdf") {
@@ -620,7 +765,7 @@ app.post("/api/report", async (req, res) => {
         if (decoded.kind === "html") {
           const form = new FormData();
           form.append("base64_content", Buffer.from(decoded.html, "utf8").toString("base64"));
-          form.append("vin", targetVin);
+          form.append("vin",         targetVin);
           form.append("report_type", type);
           const pdf = await axios.post(`${CS}/pdf`, form, {
             headers: { ...H, ...form.getHeaders() },
@@ -641,31 +786,35 @@ app.post("/api/report", async (req, res) => {
       return res.send(decoded.html);
     }
 
-    // Final safety net — data is neither PDF nor HTML
-    if (justCharged) {
-      console.error(`[Delivery Failed] User: ${currentUser?.id || "guest"} | Unsupported format. Refunding.`);
-      if (currentUser) {
-        await supabaseService.rpc("adjust_credits", {
-          p_user: currentUser.id, p_delta: 1,
-          p_reason: "refund_bad_format", p_ref: targetVin,
-        });
-      } else if (oneTimeSession) {
-        CONSUMED.delete(oneTimeSession);
-        saveConsumed();
-      }
-      return res.status(422).json({ error: "provider_error", message: "Report format error. You have been refunded." });
+    // Unsupported format — refund if we charged for this
+    if (pendingChargeId) {
+      console.error(`[Delivery Failed] User: ${currentUser?.id || "guest"} | Bad format. Refunding.`);
+      await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
+      pendingChargeId = null;
+      return res.status(422).json({
+        error: "provider_error",
+        message: "Report format error. You have been refunded.",
+      });
     }
 
     return res.status(500).json({ error: "unsupported_content" });
 
   } catch (err) {
+    // FIX 6: Last-resort refund — catches any unexpected crash in the outer try block
+    if (pendingChargeId) {
+      try {
+        await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
+      } catch (refundErr) {
+        console.error("[Critical] Outer-catch refund failed:", refundErr.message);
+      }
+    }
     console.error("Critical server error:", err);
     return res.status(500).json({ error: "server_error" });
   }
 });
 
 /* ================================================================
-   Email & Share
+   Email
 ================================================================ */
 app.post("/api/email-report", async (req, res) => {
   try {
@@ -676,7 +825,7 @@ app.post("/api/email-report", async (req, res) => {
     let targetVin = (vin || "").trim().toUpperCase();
     if (!targetVin && state && plate) {
       const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
-      const m = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
+      const m   = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
       if (m) targetVin = m[0];
     }
     if (!targetVin) return res.status(400).json({ error: "vin_required" });
@@ -684,64 +833,46 @@ app.post("/api/email-report", async (req, res) => {
     const raw = await getReportData(targetVin, type);
     if (!raw) return res.status(404).json({ error: "not_cached" });
 
-    const decoded = decodeReportBase64(raw);
-    const subject = `${type.toUpperCase()} report for ${targetVin}`;
+    const decoded     = decodeReportBase64(raw);
+    const subject     = `${type.toUpperCase()} report for ${targetVin}`;
     const attachments = [];
     if (decoded.kind === "pdf")  attachments.push({ filename: `${targetVin}.pdf`,  content: decoded.buffer });
     if (decoded.kind === "html") attachments.push({ filename: `${targetVin}.html`, content: decoded.html });
 
-    await mailer.sendMail({ from: SMTP_FROM, to, subject, text: `Attached is your report for VIN ${targetVin}.`, attachments });
+    await mailer.sendMail({
+      from: SMTP_FROM, to, subject,
+      text: `Attached is your report for VIN ${targetVin}.`,
+      attachments,
+    });
     return res.json({ ok: true });
   } catch { return res.status(500).json({ error: "email_failed" }); }
 });
 
 /* ================================================================
-   Share Tokens
+   FIX 2: Share Tokens — DB-backed endpoints
 ================================================================ */
-const SHARE_FILE = path.join(__dirname, ".share_tokens.json");
-let SHARE_TOKENS = {};
-try {
-  if (fs.existsSync(SHARE_FILE))
-    SHARE_TOKENS = JSON.parse(fs.readFileSync(SHARE_FILE, "utf8"));
-} catch {}
-function saveShareTokens() {
-  try { fs.writeFileSync(SHARE_FILE, JSON.stringify(SHARE_TOKENS, null, 2)); } catch {}
-}
-
-// FIX #10: periodically prune expired share tokens so the file doesn't grow forever
-function pruneShareTokens() {
-  const now = Date.now();
-  let pruned = 0;
-  for (const k of Object.keys(SHARE_TOKENS)) {
-    if (SHARE_TOKENS[k].exp <= now) { delete SHARE_TOKENS[k]; pruned++; }
-  }
-  if (pruned > 0) { saveShareTokens(); console.log(`[Share] Pruned ${pruned} expired token(s)`); }
-}
-setInterval(pruneShareTokens, 60 * 60 * 1000); // hourly
-
 app.post("/api/share", async (req, res) => {
   try {
     const { vin, type = "carfax" } = req.body || {};
     if (!vin) return res.status(400).json({ error: "vin required" });
     const raw = await getReportData(vin, type);
     if (!raw) return res.status(404).json({ error: "not_cached" });
-    const token = Buffer.from(crypto.randomUUID()).toString("base64url").replace(/=/g, "");
-    const exp   = Date.now() + 24 * 60 * 60 * 1000;
-    SHARE_TOKENS[token] = { vin: vin.toUpperCase(), type: type.toLowerCase(), exp };
-    saveShareTokens();
-    res.json({ url: `${SITE_URL}/view/${token}`, expiresAt: exp });
+    const { token, expiresAt } = await createShareToken(vin, type);
+    res.json({ url: `${SITE_URL}/view/${token}`, expiresAt });
   } catch { res.status(500).json({ error: "Failed to create share link" }); }
 });
 
 app.get("/view/:token", async (req, res) => {
-  const meta = SHARE_TOKENS[req.params.token];
-  if (!meta || meta.exp <= Date.now()) return res.status(404).send("Link expired");
-  const raw = await getReportData(meta.vin, meta.type);
-  if (!raw) return res.status(404).send("Report not found");
-  const decoded = decodeReportBase64(raw);
-  if (decoded.kind === "html") { res.setHeader("Content-Type", "text/html");         return res.send(decoded.html); }
-  if (decoded.kind === "pdf")  { res.setHeader("Content-Type", "application/pdf");   return res.send(decoded.buffer); }
-  res.status(500).send("Unsupported format");
+  try {
+    const meta = await getShareToken(req.params.token);
+    if (!meta) return res.status(404).send("Link expired or not found");
+    const raw = await getReportData(meta.vin, meta.type);
+    if (!raw)  return res.status(404).send("Report not found");
+    const decoded = decodeReportBase64(raw);
+    if (decoded.kind === "html") { res.setHeader("Content-Type", "text/html");       return res.send(decoded.html); }
+    if (decoded.kind === "pdf")  { res.setHeader("Content-Type", "application/pdf"); return res.send(decoded.buffer); }
+    res.status(500).send("Unsupported format");
+  } catch { res.status(500).send("Server error"); }
 });
 
 /* ================================================================
@@ -753,6 +884,7 @@ function makeAdminToken() {
   const sig     = crypto.createHmac("sha256", APP_SECRET).update(payload).digest("base64url");
   return Buffer.from(payload).toString("base64url") + "." + sig;
 }
+
 function verifyAdminToken(token) {
   if (!token) return false;
   const [p64, sig] = token.split(".");
@@ -766,16 +898,15 @@ function verifyAdminToken(token) {
   } catch { return false; }
   return true;
 }
+
 function requireAdmin(req, res, next) {
   if (verifyAdminToken(req.cookies?.admin_session || "")) return next();
   return res.status(401).json({ error: "unauthorized" });
 }
 
-// FIX #9: use timing-safe comparison to prevent timing attacks on admin password
 app.post("/api/admin/login", (req, res) => {
   const provided = req.body?.password || "";
   const expected = ADMIN_PASSWORD;
-  // Pad to same length to allow timingSafeEqual comparison
   const a = Buffer.alloc(64); const b = Buffer.alloc(64);
   Buffer.from(provided).copy(a); Buffer.from(expected).copy(b);
   const match = crypto.timingSafeEqual(a, b) && provided === expected;
@@ -787,7 +918,7 @@ app.post("/api/admin/login", (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/admin/history", requireAdmin, async (req, res) => {
+app.get("/api/admin/history", requireAdmin, async (_req, res) => {
   try {
     const { data } = await supabaseService
       .from("vin_queries")
@@ -798,7 +929,7 @@ app.get("/api/admin/history", requireAdmin, async (req, res) => {
   } catch { res.status(500).json({ ok: false }); }
 });
 
-app.get("/admin", (req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
+app.get("/admin", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
 
 /* ================================================================
    Static Files & Boot

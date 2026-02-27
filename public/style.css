@@ -10,10 +10,15 @@
   --tableHead:  #eef2f7;
   --brand:      #2563eb;
   --brand-dark: #1d4ed8;
-  --panel:      #ffffff;   /* promo card bg — light mode */
-  --fg:         #0f172a;   /* promo card text — light mode */
+  --panel:      #ffffff;
+  --fg:         #0f172a;
   --toast-err:  #dc2626;
   --toast-ok:   #16a34a;
+
+  /* FIX: consistent elevation scale instead of scattered magic values */
+  --shadow-sm:  0 4px 10px rgba(0, 0, 0, .07);
+  --shadow-md:  0 6px 16px rgba(0, 0, 0, .10);
+  --shadow-lg:  0 12px 30px rgba(0, 0, 0, .13);
 }
 
 .dark {
@@ -23,8 +28,8 @@
   --card:      #1f2937;
   --border:    #374151;
   --tableHead: #111827;
-  --panel:     #0b1220;   /* promo card bg — dark mode */
-  --fg:        #e5e7eb;   /* promo card text — dark mode */
+  --panel:     #0b1220;
+  --fg:        #e5e7eb;
 }
 
 /* ================================
@@ -34,7 +39,8 @@ html, body { height: 100%; }
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, Arial, sans-serif;
+  /* FIX: removed redundant Arial — system-ui already covers it */
+  font-family: system-ui, sans-serif;
 }
 
 /* ================================
@@ -67,7 +73,8 @@ body {
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 24px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .06);
+  /* FIX: uses elevation token */
+  box-shadow: var(--shadow-lg);
   position: relative;
 }
 
@@ -82,7 +89,7 @@ body {
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--text);
-  font-family: inherit;   /* prevent browser default font fallback */
+  font-family: inherit;
   outline: none;
   transition: border-color .2s, box-shadow .2s;
 }
@@ -94,6 +101,9 @@ body {
 
 /* ================================
    Buttons  (single source of truth)
+   FIX: removed duplicated border-radius and padding
+        from .btn-primary and .btn-outline — .btn owns those.
+        Modifier classes only set color/border overrides.
 ================================ */
 .btn {
   display: inline-flex;
@@ -104,7 +114,8 @@ body {
   border-radius: 12px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, .10);
+  /* FIX: uses elevation token */
+  box-shadow: var(--shadow-md);
   transition: transform .05s, background .2s, filter .2s;
 }
 .btn:active { transform: scale(.99); }
@@ -113,8 +124,6 @@ body {
   background: var(--brand);
   color: #fff;
   border: none;
-  border-radius: 10px;
-  padding: 10px 14px;
 }
 .btn-primary:hover { background: var(--brand-dark); }
 
@@ -122,8 +131,6 @@ body {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 10px;
-  padding: 10px 14px;
 }
 .btn-outline:hover { filter: brightness(1.03); }
 
@@ -143,6 +150,9 @@ body {
 
 /* ================================
    Loading overlay
+   FIX: fallback rgba comes FIRST, modern color-mix overrides it.
+        Dark mode now uses var(--card) via color-mix instead of
+        a hardcoded rgba so it tracks theme changes automatically.
 ================================ */
 .loading {
   position: absolute;
@@ -150,14 +160,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--card) 70%, transparent);
-  /* Fallback for older browsers */
-  background: rgba(255, 255, 255, 0.70);
-  backdrop-filter: blur(2px);
   border-radius: 16px;
+  backdrop-filter: blur(2px);
+  /* fallback first, then modern override */
+  background: rgba(255, 255, 255, 0.70);
+  background: color-mix(in srgb, var(--card) 70%, transparent);
 }
 .dark .loading {
+  /* fallback first, then modern override */
   background: rgba(31, 41, 55, 0.70);
+  background: color-mix(in srgb, var(--card) 70%, transparent);
 }
 
 /* ================================
@@ -183,7 +195,6 @@ tbody tr + tr {
   border-top: 1px solid var(--border);
 }
 
-/* Consistent column alignment */
 .table-wrap th,
 .table-wrap td {
   padding: .75rem 1rem;
@@ -191,24 +202,23 @@ tbody tr + tr {
   vertical-align: middle;
 }
 
-/* VIN column: truncate cleanly */
-.table-wrap td:first-child {
+/* FIX: replaced fragile :first-child positional selector with
+        an explicit class so column reordering can't silently break it */
+.table-wrap td.vin-cell {
   font-family: monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Actions column: right-align */
 .table-wrap td:last-child {
   text-align: right;
 }
 
-/* Row hover — works in both light and dark */
+/* FIX: fallback before color-mix */
 .table-wrap tbody tr:hover {
-  background-color: color-mix(in srgb, var(--brand) 5%, transparent);
-  /* Fallback */
   background-color: rgba(37, 99, 235, 0.05);
+  background-color: color-mix(in srgb, var(--brand) 5%, transparent);
 }
 
 /* ================================
@@ -224,7 +234,8 @@ tbody tr + tr {
   padding: .75rem 1rem;
   border-radius: .75rem;
   color: #fff;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+  /* FIX: uses elevation token */
+  box-shadow: var(--shadow-lg);
 }
 .toast.error { background: var(--toast-err); }
 .toast.ok    { background: var(--toast-ok); }
@@ -256,7 +267,8 @@ tbody tr + tr {
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 16px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, .12);
+  /* FIX: uses elevation token */
+  box-shadow: var(--shadow-md);
   position: sticky;
   top: 16px;
 }
