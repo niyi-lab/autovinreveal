@@ -27,7 +27,6 @@
     <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32" />
     <meta name="theme-color" content="#1e3a8a" />
 
-    <!-- FIX: JSON-LD moved before render-blocking scripts -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org/",
@@ -63,7 +62,6 @@
       fbq("init", window.FB_PIXEL_ID);
       fbq("track", "PageView");
     </script>
-    <!-- FIX: noscript fallback for FB pixel -->
     <noscript>
       <img height="1" width="1" style="display:none"
         src="https://www.facebook.com/tr?id=1059594989434590&ev=PageView&noscript=1"
@@ -85,20 +83,15 @@
       .loader { border: 3px solid #f3f3f3; border-radius: 50%; border-top: 3px solid #2563eb; width: 20px; height: 20px; animation: spin 1s linear infinite; }
       @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-      /* ── Pricing card shimmer on hover ── */
       .plan-card { transition: transform 0.2s, box-shadow 0.2s; }
       .plan-card:hover { transform: translateY(-4px); box-shadow: 0 20px 40px -12px rgba(37,99,235,0.18); }
       .plan-card.featured { transform: translateY(-6px); box-shadow: 0 24px 48px -12px rgba(37,99,235,0.25); }
       .plan-card.featured:hover { transform: translateY(-10px); }
 
-      /* ── Modal scroll fix ── */
       .modal-body { max-height: calc(100dvh - 80px); overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
-      /* FIX: userChip needs display:flex when .hidden is removed —
-         removing Tailwind's .hidden restores block, not flex */
       #userChip:not(.hidden) { display: flex; align-items: center; gap: 0.75rem; }
 
-      /* ── Mobile pricing: horizontal scroll if needed ── */
       @media (max-width: 639px) {
         .pricing-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x mandatory; }
         .pricing-row::-webkit-scrollbar { height: 4px; }
@@ -109,12 +102,15 @@
         .pricing-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
         .pricing-col { min-width: 0; }
       }
+
+      /* PayPal button containers — ensure proper sizing in all contexts */
+      .pp-container { min-height: 44px; }
+      .pp-container iframe { min-height: 44px !important; }
     </style>
   </head>
 
   <body class="text-slate-800 antialiased flex flex-col min-h-screen pb-20 sm:pb-0">
 
-    <!-- ═══════════════ NAV ═══════════════ -->
     <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         <a href="/" class="flex items-center gap-2">
@@ -126,7 +122,6 @@
             <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
             <span id="balanceText">0 credits</span>
           </div>
-          <!-- FIX: items-center gap-3 removed from class — handled by CSS rule above -->
           <div id="userChip" class="hidden">
             <span id="userEmail" class="text-sm font-medium text-gray-600 hidden sm:block"></span>
             <button id="logoutBtn" class="text-xs text-red-500 hover:text-red-700 font-medium">Sign out</button>
@@ -141,7 +136,6 @@
       </div>
     </nav>
 
-    <!-- ═══════════════ HERO ═══════════════ -->
     <header class="relative hero-bg pt-12 pb-32 lg:pt-20 lg:pb-48 px-3 sm:px-4 overflow-hidden">
       <div class="absolute top-0 left-0 w-full h-full overflow-hidden opacity-10 pointer-events-none">
         <div class="absolute top-10 left-10 w-64 h-64 bg-white rounded-full mix-blend-overlay filter blur-3xl"></div>
@@ -163,46 +157,30 @@
       </div>
     </header>
 
-    <!-- ═══════════════ MAIN ═══════════════ -->
     <main class="flex-grow -mt-24 px-2 sm:px-4 relative z-20 pb-16">
       <div class="max-w-5xl mx-auto">
 
-        <!-- Search Card -->
         <div class="glass-card bg-white rounded-2xl shadow-2xl shadow-blue-900/20 overflow-hidden ring-1 ring-black/5">
-          <!-- Pricing strip -->
           <div class="border-b border-gray-100 bg-white px-3 sm:px-6 py-2">
             <div class="flex items-center justify-between gap-2">
-
-              <!-- Tier pills -->
               <div class="flex items-center gap-1.5 sm:gap-3 flex-nowrap">
-
-                <!-- Single -->
                 <div class="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-gray-50 border border-gray-200">
                   <span class="text-[10px] sm:text-[11px] font-semibold text-gray-500">1 Report</span>
                   <span class="font-black text-slate-900 text-sm sm:text-base leading-none">$6</span>
                 </div>
-
                 <svg class="w-3 h-3 text-gray-300 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-
-                <!-- 5-pack -->
                 <div class="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-blue-50 border border-blue-200">
                   <span class="text-[10px] sm:text-[11px] font-semibold text-blue-500">5-Pack</span>
                   <span class="font-black text-blue-700 text-sm sm:text-base leading-none">$25</span>
                   <span class="text-[10px] font-bold text-blue-400 bg-blue-100 px-1.5 py-0.5 rounded-full hidden sm:inline">$5 each</span>
                 </div>
-
                 <svg class="w-3 h-3 text-gray-300 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-
-                <!-- 10-pack -->
                 <div class="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-green-50 border border-green-200">
                   <span class="text-[10px] sm:text-[11px] font-semibold text-green-600">10-Pack</span>
                   <span class="font-black text-green-700 text-sm sm:text-base leading-none">$40</span>
                   <span class="text-[10px] font-bold text-green-500 bg-green-100 px-1.5 py-0.5 rounded-full hidden sm:inline">$4 each</span>
                 </div>
-
               </div>
-
-              <!-- Trust signals -->
               <div class="flex items-center gap-3 text-[11px] text-gray-400 font-medium flex-shrink-0">
                 <span class="flex items-center gap-1">
                   <svg class="w-3.5 h-3.5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
@@ -213,7 +191,6 @@
                   Credits never expire
                 </span>
               </div>
-
             </div>
           </div>
 
@@ -272,7 +249,7 @@
                 </button>
                 <div class="mt-4 flex items-center justify-center gap-4 opacity-60 grayscale hover:grayscale-0 transition-all">
                   <img src="https://upload.wikimedia.org/wikipedia/commons/b/b5/PayPal.svg" alt="PayPal" class="h-5" />
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" alt="Visa" class="h-4" />
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Visa_Inc._logo.svg/500px-Visa_Inc._logo.svg.png" alt="Visa" class="h-4" />
                   <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" alt="Mastercard" class="h-6" />
                   <div class="flex items-center gap-1 text-[10px] uppercase font-bold text-gray-400 border border-gray-200 rounded px-1">
                     <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
@@ -294,7 +271,6 @@
           </div>
         </div>
 
-        <!-- How It Works -->
         <section class="mt-16 text-center">
           <h2 class="text-2xl font-bold text-slate-900 mb-8">How it works</h2>
           <div class="grid sm:grid-cols-3 gap-8">
@@ -316,17 +292,12 @@
           </div>
         </section>
 
-        <!-- ═══ FULL 3-TIER PRICING SECTION ═══ -->
         <section id="pricing" class="mt-20">
           <div class="text-center mb-10">
             <h2 class="text-3xl font-bold text-slate-900">Simple, Honest Pricing</h2>
             <p class="text-gray-500 mt-2">No subscriptions. No hidden fees. Credits never expire.</p>
           </div>
-
-          <!-- Mobile: horizontal scroll · Desktop: 3-col grid -->
           <div class="pricing-row">
-
-            <!-- Tier 1 -->
             <div class="pricing-col">
               <div class="plan-card bg-white rounded-2xl border border-gray-200 p-6 flex flex-col h-full">
                 <div class="mb-5">
@@ -348,15 +319,11 @@
                 </button>
               </div>
             </div>
-
-            <!-- Tier 2 (Featured) -->
             <div class="pricing-col">
               <div class="plan-card featured bg-blue-600 rounded-2xl p-6 flex flex-col h-full text-white relative overflow-hidden">
                 <div class="absolute -right-6 -top-6 w-24 h-24 bg-white rounded-full opacity-10"></div>
                 <div class="absolute -left-4 -bottom-4 w-20 h-20 bg-blue-400 rounded-full opacity-20"></div>
-                <div class="absolute top-4 right-4 bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Most Popular
-                </div>
+                <div class="absolute top-4 right-4 bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">Most Popular</div>
                 <div class="mb-5 relative z-10">
                   <div class="text-xs font-bold text-blue-200 uppercase tracking-widest mb-2">5-Pack Bundle</div>
                   <div class="flex items-end gap-1 mb-1">
@@ -376,13 +343,9 @@
                 </button>
               </div>
             </div>
-
-            <!-- Tier 3 -->
             <div class="pricing-col">
               <div class="plan-card bg-slate-900 rounded-2xl border border-slate-700 p-6 flex flex-col h-full text-white relative overflow-hidden">
-                <div class="absolute top-4 right-4 bg-green-400 text-green-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Best Value
-                </div>
+                <div class="absolute top-4 right-4 bg-green-400 text-green-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">Best Value</div>
                 <div class="absolute -right-8 -bottom-8 w-32 h-32 bg-green-500 rounded-full opacity-10"></div>
                 <div class="mb-5 relative z-10">
                   <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">10-Pack Bundle</div>
@@ -403,17 +366,12 @@
                 </button>
               </div>
             </div>
-
           </div>
-
-          <!-- Mobile scroll hint -->
           <p class="sm:hidden text-center text-xs text-gray-400 mt-3">← Swipe to see all plans →</p>
         </section>
 
-        <!-- Content + Sidebar -->
         <div class="grid lg:grid-cols-[2fr_1fr] gap-8 mt-16">
           <div class="space-y-8">
-            <!-- History Table -->
             <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
               <div class="px-4 sm:px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                 <h3 class="font-bold text-gray-800">Your Recent Reports</h3>
@@ -421,8 +379,6 @@
               </div>
               <div id="historyBody" class="divide-y divide-gray-100"></div>
             </div>
-
-            <!-- Included features -->
             <div class="bg-blue-50 rounded-xl p-8 border border-blue-100">
               <h3 class="text-xl font-bold text-blue-900 mb-4">What's included in the report?</h3>
               <p class="text-sm text-blue-800/80 mb-6">Our reports come directly from the CARFAX database, providing critical data to protect your purchase.</p>
@@ -442,10 +398,7 @@
               </div>
             </div>
           </div>
-
-          <!-- Sidebar -->
           <div class="space-y-6">
-            <!-- Quick pricing CTA -->
             <div class="bg-slate-900 rounded-xl p-6 text-white shadow-xl relative overflow-hidden">
               <div class="absolute -right-6 -top-6 w-24 h-24 bg-yellow-500 rounded-full opacity-20"></div>
               <div class="relative z-10 space-y-3">
@@ -465,8 +418,6 @@
                 <p class="text-xs text-gray-500 text-center pt-1">Credits never expire</p>
               </div>
             </div>
-
-            <!-- Sample Report -->
             <div class="bg-white p-3 rounded-xl shadow-sm border border-gray-200">
               <div class="flex items-center justify-between mb-2.5">
                 <h4 class="font-bold text-sm text-gray-700">Sample Report</h4>
@@ -499,16 +450,13 @@
           </div>
         </div>
 
-        <!-- ═══ SMART BUYER SUGGESTIONS ═══ -->
         <section class="mt-16">
           <div class="flex items-center gap-3 mb-6">
             <div class="flex-1 h-px bg-gray-200"></div>
             <h2 class="text-xl font-bold text-slate-900 whitespace-nowrap">💡 Before You Buy — Smart Suggestions</h2>
             <div class="flex-1 h-px bg-gray-200"></div>
           </div>
-
           <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-
             <div class="bg-amber-50 border border-amber-100 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">🔍</div>
               <div>
@@ -516,7 +464,6 @@
                 <p class="text-xs text-amber-700 leading-relaxed">Run the VIN before you visit. If the history is bad, you save the trip entirely — and the awkward negotiation.</p>
               </div>
             </div>
-
             <div class="bg-red-50 border border-red-100 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">⚠️</div>
               <div>
@@ -524,7 +471,6 @@
                 <p class="text-xs text-red-700 leading-relaxed">1 in 10 used cars has a rolled-back odometer. A $6 report can save you from buying a high-mileage car sold as low-mileage.</p>
               </div>
             </div>
-
             <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">📋</div>
               <div>
@@ -532,7 +478,6 @@
                 <p class="text-xs text-blue-700 leading-relaxed">More owners can mean more wear, deferred maintenance, or deeper problems. One-owner cars are typically worth more.</p>
               </div>
             </div>
-
             <div class="bg-green-50 border border-green-100 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">🏛️</div>
               <div>
@@ -540,7 +485,6 @@
                 <p class="text-xs text-green-700 leading-relaxed">Salvage, rebuilt, or junk titles can mean a car is uninsurable or worth 30–50% less. Never skip this check.</p>
               </div>
             </div>
-
             <div class="bg-purple-50 border border-purple-100 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">🔔</div>
               <div>
@@ -548,7 +492,6 @@
                 <p class="text-xs text-purple-700 leading-relaxed">Some recalls are safety-critical. A CARFAX report shows open recalls so you know what still needs to be fixed — for free at the dealer.</p>
               </div>
             </div>
-
             <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 flex gap-3">
               <div class="text-2xl shrink-0 mt-0.5">🤝</div>
               <div>
@@ -556,10 +499,7 @@
                 <p class="text-xs text-slate-600 leading-relaxed">If the report shows accidents or issues, use that as leverage to negotiate a lower price — or walk away with confidence.</p>
               </div>
             </div>
-
           </div>
-
-          <!-- Red flags callout -->
           <div class="mt-4 bg-gradient-to-r from-red-600 to-rose-600 rounded-xl p-5 text-white flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div class="text-3xl shrink-0">🚩</div>
             <div class="flex-1">
@@ -579,7 +519,6 @@
           </div>
         </section>
 
-        <!-- Reviews -->
         <section class="mt-20 border-t border-gray-200 pt-12">
           <div class="text-center mb-10">
             <h2 class="text-3xl font-bold text-slate-900">Trusted by Smart Buyers</h2>
@@ -637,7 +576,6 @@
           </div>
         </section>
 
-        <!-- FAQ -->
         <section class="mt-20 max-w-3xl mx-auto">
           <h2 class="text-2xl font-bold text-center mb-8">Frequently Asked Questions</h2>
           <div class="space-y-4">
@@ -675,7 +613,6 @@
       </div>
     </main>
 
-    <!-- ═══════════════ FOOTER ═══════════════ -->
     <footer class="bg-white border-t border-gray-200 mt-auto py-12">
       <div class="max-w-6xl mx-auto px-4">
         <div class="grid md:grid-cols-4 gap-8 mb-8">
@@ -708,25 +645,20 @@
       </div>
     </footer>
 
-    <!-- ═══════════════ MODAL: BUY CREDITS ═══════════════ -->
-    <!-- FIX: role, aria-modal, aria-labelledby added -->
     <div id="buyCreditsModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4"
       role="dialog" aria-modal="true" aria-labelledby="buyCreditsModalTitle">
       <div class="bg-white w-full sm:max-w-lg md:max-w-2xl lg:max-w-3xl sm:rounded-2xl rounded-t-2xl shadow-2xl relative animate-[fadeIn_0.2s_ease-out] flex flex-col modal-body">
 
-        <!-- Header -->
         <div class="bg-blue-600 px-6 py-5 text-white text-center sm:rounded-t-2xl rounded-t-2xl flex-shrink-0">
           <button id="closeModalBtn" class="absolute top-4 right-4 text-white/70 hover:text-white text-2xl font-bold leading-none" aria-label="Close">✕</button>
           <h3 id="buyCreditsModalTitle" class="font-bold text-xl">Choose Your Package</h3>
           <p class="text-blue-100 text-sm mt-0.5">No subscriptions · Credits never expire · Instant delivery</p>
         </div>
 
-        <!-- 3-tier grid -->
         <div class="p-4 sm:p-6 overflow-y-auto">
           <div class="flex flex-col sm:grid sm:grid-cols-3 gap-3 sm:gap-4">
 
-            <!-- ── Plan 1: Single — Stripe + PayPal ── -->
-            <div class="flex sm:flex-col gap-4 sm:gap-0 border border-gray-200 rounded-xl p-4 sm:p-5 hover:border-blue-300 transition-colors bg-white">
+            <div class="flex flex-col gap-4 sm:gap-0 border border-gray-200 rounded-xl p-4 sm:p-5 hover:border-blue-300 transition-colors bg-white">
               <div class="flex-1 sm:mb-3">
                 <div class="flex sm:flex-col items-baseline sm:items-start gap-2">
                   <span class="text-2xl sm:text-3xl font-black text-slate-900">$6</span>
@@ -734,23 +666,22 @@
                 </div>
                 <p class="hidden sm:block text-xs text-gray-500 mt-1">One-time check. No account needed.</p>
               </div>
-              <div class="sm:space-y-2 shrink-0 sm:shrink sm:w-full">
+              <div class="w-full sm:space-y-2 space-y-2">
                 <button id="buy1Btn"
-                  class="whitespace-nowrap sm:w-full flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-700 text-white font-bold py-2 px-4 sm:py-2.5 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                  class="w-full flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
                   Pay with Card
                 </button>
-                <div class="hidden sm:flex items-center gap-2 my-1">
+                <div class="flex items-center gap-2 my-1">
                   <div class="flex-1 h-px bg-gray-100"></div>
                   <span class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">or</span>
                   <div class="flex-1 h-px bg-gray-100"></div>
                 </div>
-                <div id="paypalContainer" class="hidden sm:block min-h-[40px] relative z-0"></div>
+                <div id="paypalContainer" class="pp-container w-full"></div>
               </div>
             </div>
 
-            <!-- ── Plan 2: 5-Pack — Stripe only ── -->
-            <div class="flex sm:flex-col gap-4 sm:gap-0 border-2 border-blue-500 rounded-xl p-4 sm:p-5 bg-blue-50/50 shadow-lg shadow-blue-500/10 relative">
+            <div class="flex flex-col gap-4 sm:gap-0 border-2 border-blue-500 rounded-xl p-4 sm:p-5 bg-blue-50/50 shadow-lg shadow-blue-500/10 relative">
               <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-500 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
                 Most Popular
               </div>
@@ -760,22 +691,28 @@
                   <span class="text-xs text-blue-600 font-medium">5 Reports · $5 each</span>
                 </div>
                 <p class="hidden sm:block text-xs text-gray-500 mt-1">Car shopping? This is for you.</p>
+                <p class="sm:hidden text-[10px] text-blue-500 mt-1">Account required for bundles</p>
               </div>
-              <div class="shrink-0 sm:shrink sm:w-full sm:space-y-2">
+              <div class="w-full sm:space-y-2 space-y-2">
                 <button id="buy5Btn"
-                  class="whitespace-nowrap sm:w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 sm:py-2.5 rounded-lg shadow-md transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                  class="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-lg shadow-md transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
                   Pay with Card
                 </button>
-                <p class="hidden sm:flex items-center justify-center gap-1 text-[10px] text-gray-400 pt-0.5">
+                <div class="flex items-center gap-2 my-1">
+                  <div class="flex-1 h-px bg-blue-200"></div>
+                  <span class="text-[10px] text-blue-400 font-semibold uppercase tracking-wider">or</span>
+                  <div class="flex-1 h-px bg-blue-200"></div>
+                </div>
+                <div id="paypalContainer5" class="pp-container w-full"></div>
+                <p class="flex items-center justify-center gap-1 text-[10px] text-gray-400 pt-0.5">
                   <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
-                  Secured by Stripe
+                  Account required for bundles
                 </p>
               </div>
             </div>
 
-            <!-- ── Plan 3: 10-Pack — Stripe only ── -->
-            <div class="flex sm:flex-col gap-4 sm:gap-0 border border-gray-200 rounded-xl p-4 sm:p-5 hover:border-green-400 transition-colors bg-white relative">
+            <div class="flex flex-col gap-4 sm:gap-0 border border-gray-200 rounded-xl p-4 sm:p-5 hover:border-green-400 transition-colors bg-white relative">
               <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-green-500 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
                 Best Value
               </div>
@@ -785,32 +722,38 @@
                   <span class="text-xs text-green-600 font-medium">10 Reports · $4 each</span>
                 </div>
                 <p class="hidden sm:block text-xs text-gray-500 mt-1">For flippers &amp; dealers.</p>
+                <p class="sm:hidden text-[10px] text-green-600 mt-1">Account required for bundles</p>
               </div>
-              <div class="shrink-0 sm:shrink sm:w-full sm:space-y-2">
+              <div class="w-full sm:space-y-2 space-y-2">
                 <button id="buy10Btn"
-                  class="whitespace-nowrap sm:w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 sm:py-2.5 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                  class="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
                   Pay with Card
                 </button>
-                <p class="hidden sm:flex items-center justify-center gap-1 text-[10px] text-gray-400 pt-0.5">
+                <div class="flex items-center gap-2 my-1">
+                  <div class="flex-1 h-px bg-gray-200"></div>
+                  <span class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">or</span>
+                  <div class="flex-1 h-px bg-gray-200"></div>
+                </div>
+                <div id="paypalContainer10" class="pp-container w-full"></div>
+                <p class="flex items-center justify-center gap-1 text-[10px] text-gray-400 pt-0.5">
                   <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
-                  Secured by Stripe
+                  Account required for bundles
                 </p>
               </div>
             </div>
 
           </div>
 
-          <!-- Legend row -->
           <div class="mt-5 flex flex-wrap items-center justify-center gap-4 text-[11px] text-gray-400">
             <span class="flex items-center gap-1.5">
               <img src="https://upload.wikimedia.org/wikipedia/commons/b/b5/PayPal.svg" class="h-3.5" alt="PayPal" />
-              PayPal available for single report
+              PayPal available for all packages
             </span>
             <span class="text-gray-200">|</span>
             <span class="flex items-center gap-1.5">
               <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
-              Bundles via Stripe — account required
+              Bundles require sign-in
             </span>
             <span class="text-gray-200">|</span>
             <span>Credits never expire</span>
@@ -819,8 +762,6 @@
       </div>
     </div>
 
-    <!-- ═══════════════ MODAL: LOGIN ═══════════════ -->
-    <!-- FIX: role, aria-modal, aria-labelledby added; autofocus on email input -->
     <div id="loginModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
       role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 relative">
@@ -860,7 +801,6 @@
       </div>
     </div>
 
-    <!-- Mobile sticky bar -->
     <div class="fixed bottom-0 left-0 right-0 sm:hidden bg-white border-t border-gray-200 px-4 py-3 flex items-center justify-between z-30 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
       <div>
         <p class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">From</p>
@@ -876,8 +816,6 @@
       </div>
     </div>
 
-    <!-- ═══════════════ MODAL: FORGOT PASSWORD ═══════════════ -->
-    <!-- FIX: role, aria-modal, aria-labelledby added; autofocus on email input -->
     <div id="forgotModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
       role="dialog" aria-modal="true" aria-labelledby="forgotModalTitle">
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
@@ -891,11 +829,10 @@
       </div>
     </div>
 
-    <!-- ═══════════════ MODAL: UPDATE PASSWORD ═══════════════ -->
-    <!-- FIX: role, aria-modal, aria-labelledby added; autofocus on password input -->
     <div id="updatePasswordModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
       role="dialog" aria-modal="true" aria-labelledby="updatePasswordModalTitle">
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
+        <button id="closeUpdatePasswordModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600" aria-label="Close">✕</button>
         <h3 id="updatePasswordModalTitle" class="text-xl font-bold text-gray-900 mb-2">Set New Password</h3>
         <p class="text-sm text-gray-500 mb-4">Enter your new secure password below.</p>
         <label for="newPasswordInput" class="sr-only">New password</label>
@@ -905,8 +842,6 @@
       </div>
     </div>
 
-    <!-- ═══════════════ MODAL: EMAIL REPORT ═══════════════ -->
-    <!-- FIX: role, aria-modal, aria-labelledby added; autofocus on email input -->
     <div id="emailModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
       role="dialog" aria-modal="true" aria-labelledby="emailModalTitle">
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
@@ -930,27 +865,6 @@
     <script>
       window.VITE_SUPABASE_URL = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
       window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
-
-      // Mobile "Plans" button opens modal
-      document.getElementById('mobileViewPlans').addEventListener('click', function() {
-        document.getElementById('buyCreditsModal').classList.remove('hidden');
-      });
-
-      // Pricing section buttons open modal
-      ['pricingBuy1Btn','pricingBuy5Btn','pricingBuy10Btn'].forEach(function(id) {
-        var el = document.getElementById(id);
-        if (el) el.addEventListener('click', function() {
-          document.getElementById('buyCreditsModal').classList.remove('hidden');
-        });
-      });
-
-      // Sidebar buttons open modal
-      ['buy1Sidebar','buy5Sidebar','buy10Sidebar'].forEach(function(id) {
-        var el = document.getElementById(id);
-        if (el) el.addEventListener('click', function() {
-          document.getElementById('buyCreditsModal').classList.remove('hidden');
-        });
-      });
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script type="module" src="/app.js"></script>

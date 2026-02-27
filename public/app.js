@@ -7,6 +7,8 @@
 //   #14 — reflectAuthUI uses style.display instead of classList (userChip HTML uses style="display:none")
 //   #15 — All API.report fetches wrapped in apiFetch() with 30 s timeout
 //   #16 — Fixed double-tab race condition by removing redundant success check in Init and upgrading tryLoadPending()
+//   #17 — PayPal now available for all 3 tiers (single $6, 5-pack $25, 10-pack $40)
+//   #18 — PayPal container visible on mobile (was hidden sm:block)
 
 /* ================================
    Config & Utilities
@@ -64,18 +66,6 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-// FIX 13: openBlank() has been REMOVED.
-// Old pattern in PayPal onApprove:
-//   1. openBlank()            → placeholder tab A opens
-//   2. async work...
-//   3. reportWindow.close()   → FAILS silently (browser security blocks closing
-//                               a window that has navigated away)
-//   4. openReport(html)       → blob URL tab B opens
-//   Result: both tabs open simultaneously
-//
-// New pattern: just call openReport(html) directly after the async work.
-// One call → one tab (or one inline overlay if popups are blocked). Never two.
-
 function setBtnLoading(btn, loadingText = 'Processing…') {
   if (!btn) return () => {};
   const orig = btn.innerHTML;
@@ -107,13 +97,9 @@ async function apiFetch(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
 }
 
 /* ================================
-   FIX 4: Safe report renderer
-================================ */
-/* ================================
    FIX 4: Safe report renderer (Overlay Only)
 ================================ */
 function openReport(html) {
-  // Always render inline with the close button. No new tabs, no blob URLs.
   showReportOverlay(html);
 }
 
@@ -144,26 +130,21 @@ function showReportOverlay(html) {
   overlay.appendChild(iframe);
   document.body.appendChild(overlay);
 
-  // --- NEW: History API Logic ---
-  // Push a "fake" state into the browser history so the Back button has something to pop
   window.history.pushState({ reportOverlayOpen: true }, "");
 
-  // Make the "✕ Close" button trigger a physical "Back" action to keep history clean
   overlay.querySelector('#closeReportOverlay')
     .addEventListener('click', () => {
-      window.history.back(); 
+      window.history.back();
     });
 }
 
-// --- NEW: Global Back Button Listener ---
-// When the user clicks the physical Back button (or the ✕ Close button), this catches it
 window.addEventListener('popstate', (e) => {
   const overlay = document.getElementById('reportOverlay');
-  // If the overlay exists but the current history state doesn't say it should be open, remove it
   if (overlay && !e.state?.reportOverlayOpen) {
     overlay.remove();
   }
 });
+
 /* ================================
    VIN Validation (ISO 3779)
 ================================ */
@@ -282,21 +263,18 @@ const ppSuccess       = p.get('pp') === 'success';
 const intentParam     = p.get('intent') || null;
 const vinParam        = (p.get('vin') || '').toUpperCase();
 
-// FIX 16: Check local AND session storage to ensure we don't drop data
 function tryLoadPending() {
   try {
     const local = localStorage.getItem(PENDING_KEY);
     if (local) return JSON.parse(local);
-    
     const session = sessionStorage.getItem(PENDING_KEY);
     if (session) return JSON.parse(session);
-    
     return null;
   } catch {
     return null;
   }
 }
-function clearPending()   { localStorage.removeItem(PENDING_KEY); sessionStorage.removeItem(PENDING_KEY); }
+function clearPending() { localStorage.removeItem(PENDING_KEY); sessionStorage.removeItem(PENDING_KEY); }
 
 async function resumePendingPurchase() {
   const pending = tryLoadPending();
@@ -393,7 +371,6 @@ $id('closeLoginModal')?.addEventListener('click', closeLogin);
 $id('logoutBtn')?.addEventListener('click', doLogout);
 $id('loginBtn')?.addEventListener('click', openLogin);
 
-// FIX 14: wire up the close button added to updatePasswordModal in index.html
 $id('closeUpdatePasswordModal')?.addEventListener('click', () => {
   $id('updatePasswordModal')?.classList.add('hidden');
 });
@@ -454,19 +431,14 @@ $id('googleLogin')?.addEventListener('click', async () => {
 
 let currentSession = null;
 
-// FIX 14: userChip uses style.display, NOT classList.
-// The HTML element has style="display:none" — Tailwind's 'hidden' class is
-// additive (display:none via CSS), but classList.remove('hidden') only removes
-// the class; since there's no 'flex' class left, the element stays invisible.
-// Using style.display directly overrides inline style correctly.
 function reflectAuthUI(session) {
   currentSession = session;
   if (session?.user) {
     if (userEmailEl) userEmailEl.textContent = session.user.email || '';
-    if (userChip)    userChip.style.display = 'flex';   // FIX 14
+    if (userChip)    userChip.style.display = 'flex';
     $id('loginBtn')?.classList.add('hidden');
   } else {
-    if (userChip)    userChip.style.display = 'none';   // FIX 14
+    if (userChip)    userChip.style.display = 'none';
     const lb = $id('loginBtn');
     if (lb) { lb.classList.remove('hidden'); lb.textContent = 'Log in'; }
   }
@@ -487,6 +459,10 @@ function reflectAuthUI(session) {
   supabase.auth.onAuthStateChange((_event, session) => {
     reflectAuthUI(session);
     refreshBalancePill();
+    // Re-render PayPal buttons if modal is open (user just logged in/out)
+    if (buyModal && !buyModal.classList.contains('hidden')) {
+      renderPaypalButtons();
+    }
   });
 })();
 
@@ -696,7 +672,7 @@ let currentBuyModalPendingData = null;
 function openBuyModal(pendingData = null) {
   currentBuyModalPendingData = pendingData;
   buyModal?.classList.remove('hidden');
-  renderPaypalButton();
+  renderPaypalButtons();
 }
 
 function closeBuyModal() {
@@ -706,95 +682,135 @@ function closeBuyModal() {
 
 $id('closeModalBtn')?.addEventListener('click', closeBuyModal);
 
-/* ─── PayPal ─── */
-let paypalRenderedForUserId = '__not_rendered__';
+/* ─── PayPal ───
+   FIX 17: Render PayPal buttons for all 3 tiers (single $6, 5-pack $25, 10-pack $40)
+   FIX 18: PayPal containers are visible on mobile (removed hidden sm:block from HTML)
+*/
 
-async function renderPaypalButton() {
-  const container = $id('paypalContainer');
-  if (!container || !window.paypal) return;
+// Package config — single source of truth
+const PAYPAL_PACKAGES = [
+  { containerId: 'paypalContainer',   pkg: 'single',  amount: '6.00',  credits: 1,  label: '1 report'  },
+  { containerId: 'paypalContainer5',  pkg: '5pack',   amount: '25.00', credits: 5,  label: '5 reports' },
+  { containerId: 'paypalContainer10', pkg: '10pack',  amount: '40.00', credits: 10, label: '10 reports' },
+];
+
+async function renderPaypalButtons() {
+  if (!window.paypal) return;
 
   const { user } = await getSession();
   const userId   = user?.id || null;
 
-  if (paypalRenderedForUserId === userId && container.children.length > 0) return;
+  for (const cfg of PAYPAL_PACKAGES) {
+    const container = document.getElementById(cfg.containerId);
+    if (!container) continue;
 
-  container.innerHTML = '';
-  paypalRenderedForUserId = userId;
+    // Skip re-render if already rendered for the same user session
+    if (container.dataset.renderedFor === String(userId) && container.children.length > 0) continue;
 
-  window.paypal.Buttons({
-    createOrder: async () => {
-      const r = await apiFetch(
-        '/api/paypal/create-order',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: userId }) },
-        15_000
-      );
-      if (!r.ok) throw new Error(await r.text() || 'PayPal create failed');
-      return (await r.json()).orderID;
-    },
+    container.innerHTML = '';
+    container.dataset.renderedFor = String(userId);
 
-    onApprove: async (data) => {
-      const pending = currentBuyModalPendingData;
-      currentBuyModalPendingData = null;
+    const { pkg, credits } = cfg;
 
-      // FIX 13: No openBlank() here. Show a toast while processing instead.
-      // The old placeholder tab frequently failed to close (browser security),
-      // leaving it open alongside the blob URL tab = two tabs simultaneously.
-      showToast('Processing payment…', 'ok');
+    window.paypal.Buttons({
+      style: { layout: 'horizontal', color: 'gold', shape: 'rect', label: 'pay', height: 40, tagline: false },
 
-      try {
-        const r = await apiFetch(
-          '/api/paypal/capture-order',
-          { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ orderID: data.orderID, user_id: userId }) },
-          15_000
-        );
-        if (!r.ok) throw new Error(await r.text() || 'PayPal capture failed');
-        const result = await r.json();
-
-        if (!pending || (!pending.vin && !(pending.state && pending.plate))) {
-          showToast('Payment completed! 1 credit added.', 'ok');
-          await refreshBalancePill();
+      // FIX: validate BEFORE the popup opens so it never opens blank
+      onClick: function(_data, actions) {
+        if (pkg !== 'single' && !userId) {
+          showToast('Please sign in to buy a bundle — credits need an account.', 'error');
           closeBuyModal();
-          return;
+          openLogin();
+          return actions.reject();   // blocks the popup entirely
         }
+        return actions.resolve();
+      },
 
-        const body = { ...pending, as: 'html', allowLive: true };
-        if (!userId && result?.captureId) body.oneTimeSession = 'pp_' + result.captureId;
-
-        await ensureBackendReady();
-        const headers = { 'Content-Type': 'application/json' };
-        const { token } = await getSession();
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-
-        const resp = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(body) });
-        if (!resp.ok) throw new Error(await resp.text() || ('HTTP ' + resp.status));
-
-        const html = await resp.text();
-        addToHistory({
-          vin:   pending.vin || '(from plate)',
-          type:  pending.type || 'carfax',
-          ts:    Date.now(),
-          state: pending.state || '',
-          plate: pending.plate || '',
+      // FIX: native .then() chains keep the popup synchronously attached to
+      //      the click event. async/await detaches it, causing about:blank.
+      createOrder: function(_data, _actions) {
+        return fetch('/api/paypal/create-order', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ user_id: userId, package: pkg }),
+        })
+        .then(function(res) {
+          if (!res.ok) throw new Error('PayPal order creation failed — please try again.');
+          return res.json();
+        })
+        .then(function(orderData) {
+          const id = orderData.orderID || orderData.id;
+          if (!id) throw new Error('No order ID returned from server.');
+          return id;
         });
-        renderHistory();
+      },
 
-        // FIX 13: one call → one tab (or one overlay). Never two.
-        openReport(html);
+      // onApprove can safely use async/await — popup is already confirmed open
+      onApprove: async function(data) {
+        const pending = pkg === 'single' ? currentBuyModalPendingData : null;
+        if (pkg === 'single') currentBuyModalPendingData = null;
 
-        trackPurchase(6.00);
-        showToast('Report fetched successfully!', 'ok');
-        await refreshBalancePill();
-        clearPending();
-        closeBuyModal();
-      } catch (e) {
-        showToast(e.message || 'PayPal capture failed', 'error');
-      }
-    },
+        showToast('Processing payment…', 'ok');
 
-    onError: (err) => { console.error(err); showToast('PayPal error', 'error'); }
-  }).render('#paypalContainer');
+        try {
+          const r = await apiFetch(
+            '/api/paypal/capture-order',
+            {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body:    JSON.stringify({ orderID: data.orderID, user_id: userId, package: pkg }),
+            },
+            15_000
+          );
+          if (!r.ok) throw new Error(await r.text() || 'PayPal capture failed');
+          const result = await r.json();
+
+          // Bundle, or single with no pending VIN — just add credits
+          if (pkg !== 'single' || !pending || (!pending.vin && !(pending.state && pending.plate))) {
+            showToast(`Payment completed! ${credits} credit${credits > 1 ? 's' : ''} added.`, 'ok');
+            await refreshBalancePill();
+            closeBuyModal();
+            return;
+          }
+
+          // Single report with a pending VIN — fetch the report now
+          const body = { ...pending, as: 'html', allowLive: true };
+          if (!userId && result?.captureId) body.oneTimeSession = 'pp_' + result.captureId;
+
+          await ensureBackendReady();
+          const headers = { 'Content-Type': 'application/json' };
+          const { token } = await getSession();
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+
+          const resp = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(body) });
+          if (!resp.ok) throw new Error(await resp.text() || ('HTTP ' + resp.status));
+
+          const html = await resp.text();
+          addToHistory({
+            vin:   pending.vin || '(from plate)',
+            type:  pending.type || 'carfax',
+            ts:    Date.now(),
+            state: pending.state || '',
+            plate: pending.plate || '',
+          });
+          renderHistory();
+          openReport(html);
+          trackPurchase(6.00);
+          showToast('Report fetched successfully!', 'ok');
+          await refreshBalancePill();
+          clearPending();
+          closeBuyModal();
+        } catch (e) {
+          showToast(e.message || 'PayPal capture failed', 'error');
+        }
+      },
+
+      onError: function(err) {
+        console.error('PayPal error:', err);
+        showToast('PayPal error — please try again.', 'error');
+      },
+    }).render(`#${cfg.containerId}`);
+  }
 }
 
 /* ─── Stripe purchase helper ─── */
@@ -1044,6 +1060,5 @@ $id('saveNewPasswordBtn')?.addEventListener('click', async () => {
 (async () => {
   await refreshBalancePill();
   renderHistory();
-  // FIX 16: Removed the duplicate intent/session success logic here that was racing handleSuccessIfNeeded()
   reflectVinGate();
 })();

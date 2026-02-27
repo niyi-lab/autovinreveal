@@ -7,6 +7,7 @@
  *   #5  — webhook & PayPal credit updates use atomic add_credits RPC
  *   #6  — justCharged boolean replaced with DB-backed pending_charges
  *   #7  — server throws on startup if APP_SECRET is default value
+ *   #17 — PayPal create-order/capture-order support single/5pack/10pack packages
  ********************************************************************/
 
 import dotenv from "dotenv";
@@ -52,7 +53,7 @@ const APP_SECRET   = process.env.APP_SECRET   || "change_me_in_env_file";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 const ADMIN_SESSION_TTL_SECONDS = Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 12);
 
-// ── FIX 7: Hard-fail on startup instead of silently using a known-weak secret ──
+// FIX 7: Hard-fail on startup instead of silently using a known-weak secret
 if (!APP_SECRET || APP_SECRET === "change_me_in_env_file") {
   throw new Error(
     "FATAL: APP_SECRET must be set to a strong random secret in your environment variables. " +
@@ -111,6 +112,19 @@ function stripeForId(id) {
     return new Stripe(STRIPE_TEST_SECRET_KEY, { apiVersion: "2024-06-20" });
   }
   return stripeLive;
+}
+
+/* ================================================================
+   FIX 17: PayPal package config (single source of truth)
+================================================================ */
+const PAYPAL_PACKAGE_CONFIG = {
+  single:  { amount: "6.00",  credits: 1  },
+  "5pack": { amount: "25.00", credits: 5  },
+  "10pack":{ amount: "40.00", credits: 10 },
+};
+
+function resolvePaypalPackage(pkg) {
+  return PAYPAL_PACKAGE_CONFIG[pkg] || PAYPAL_PACKAGE_CONFIG["single"];
 }
 
 /* ================================================================
@@ -246,8 +260,7 @@ function decodeReportBase64(rawB64) {
 }
 
 /* ================================================================
-   FIX 1: Consumed Sessions — DB-backed (was .consumed_sessions.json)
-   Requires: CREATE TABLE consumed_sessions (session_id TEXT PRIMARY KEY, ...)
+   FIX 1: Consumed Sessions — DB-backed
 ================================================================ */
 async function isSessionConsumed(sessionId) {
   try {
@@ -274,8 +287,7 @@ async function unmarkSessionConsumed(sessionId) {
 }
 
 /* ================================================================
-   FIX 2: Share Tokens — DB-backed (was .share_tokens.json)
-   Requires: CREATE TABLE share_tokens (token TEXT PRIMARY KEY, ...)
+   FIX 2: Share Tokens — DB-backed
 ================================================================ */
 async function createShareToken(vin, type) {
   const token     = Buffer.from(crypto.randomUUID()).toString("base64url").replace(/=/g, "");
@@ -302,8 +314,6 @@ async function getShareToken(token) {
 
 /* ================================================================
    FIX 5: Atomic Credit Updates
-   Uses add_credits(p_user, p_delta) SQL function — no race condition.
-   Requires: CREATE OR REPLACE FUNCTION add_credits(p_user UUID, p_delta INT)
 ================================================================ */
 async function addCreditsAtomic(userId, delta) {
   const { error } = await supabaseService.rpc("add_credits", {
@@ -315,9 +325,6 @@ async function addCreditsAtomic(userId, delta) {
 
 /* ================================================================
    FIX 6: Pending Charges — DB-backed crash-safe refunds
-   A row is written BEFORE charging and deleted on success.
-   On restart, reconcileStalePendingCharges() refunds orphaned rows.
-   Requires: CREATE TABLE pending_charges (id UUID PRIMARY KEY, ...)
 ================================================================ */
 async function createPendingCharge({ userId = null, sessionId = null, vin }) {
   const { data, error } = await supabaseService
@@ -340,12 +347,9 @@ async function refundAndResolve(chargeId, userId, sessionId) {
   } catch (e) {
     console.error(`[Refund] Failed to refund charge ${chargeId}:`, e.message);
   }
-  // Always delete the pending record, even if the refund itself errored
   await supabaseService.from("pending_charges").delete().eq("id", chargeId);
 }
 
-// Run at startup — any charge row older than 5 min means the server died
-// mid-transaction. Refund those users automatically.
 async function reconcileStalePendingCharges() {
   try {
     const threshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -439,7 +443,6 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
         );
       }
 
-      // FIX 5: Atomic upsert — no race condition from concurrent webhooks
       if (userId && creditsToAdd > 0) {
         await addCreditsAtomic(userId, creditsToAdd);
       }
@@ -551,13 +554,22 @@ async function verifyPaypalCapture(captureId) {
   return res?.result;
 }
 
-app.post("/api/paypal/create-order", async (_req, res) => {
+/* FIX 17: create-order now accepts `package` — resolves to correct amount */
+app.post("/api/paypal/create-order", async (req, res) => {
   try {
+    const { package: pkg = "single" } = req.body || {};
+    const { amount } = resolvePaypalPackage(pkg);
+
     const request = new paypalSdk.orders.OrdersCreateRequest();
     request.prefer("return=representation");
     request.requestBody({
       intent: "CAPTURE",
-      purchase_units: [{ amount: { currency_code: "USD", value: "6.00" } }],
+      purchase_units: [{
+        amount: { currency_code: "USD", value: amount },
+        description: pkg === "single" ? "1 CARFAX Report" :
+                     pkg === "5pack"  ? "5-Pack CARFAX Reports" :
+                                        "10-Pack CARFAX Reports",
+      }],
       application_context: {
         brand_name: "AutoVINReveal",
         shipping_preference: "NO_SHIPPING",
@@ -566,13 +578,24 @@ app.post("/api/paypal/create-order", async (_req, res) => {
     });
     const order = await ppClient.execute(request);
     res.json({ orderID: order.result.id });
-  } catch { res.status(500).json({ error: "PayPal create-order failed" }); }
+  } catch (err) {
+    console.error("PayPal create-order error:", err);
+    res.status(500).json({ error: "PayPal create-order failed" });
+  }
 });
 
+/* FIX 17: capture-order now accepts `package` — adds correct credit count */
 app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => {
   try {
-    const { orderID, user_id } = req.body || {};
+    const { orderID, user_id, package: pkg = "single" } = req.body || {};
     if (!orderID) return res.status(400).json({ error: "orderID required" });
+
+    const { credits } = resolvePaypalPackage(pkg);
+
+    // Bundles require a logged-in user so credits have somewhere to live
+    if (pkg !== "single" && !user_id) {
+      return res.status(400).json({ error: "user_id required for bundle purchases" });
+    }
 
     const capReq = new paypalSdk.orders.OrdersCaptureRequest(orderID);
     capReq.requestBody({});
@@ -587,10 +610,12 @@ app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => 
     if (!verified || verified.status !== "COMPLETED")
       return res.status(400).json({ error: "Capture verification failed" });
 
-    // FIX 5: Atomic credit add — no race condition
-    if (user_id) await addCreditsAtomic(user_id, 1);
+    // FIX 5 + 17: Atomic credit add with package-aware amount
+    if (user_id) await addCreditsAtomic(user_id, credits);
 
-    res.json({ ok: true, captureId });
+    console.log(`[PayPal] Captured ${pkg} (${credits} credit${credits > 1 ? "s" : ""}) for user ${user_id || "guest"}`);
+
+    res.json({ ok: true, captureId, credits });
   } catch (err) {
     console.error("PayPal capture error:", err);
     res.status(500).json({ error: "PayPal capture failed" });
@@ -607,9 +632,6 @@ app.post("/api/report", async (req, res) => {
   let oneTimeSession = null;
   let alreadyOwned   = false;
 
-  // FIX 6: DB-backed charge ID replaces the in-memory `justCharged` boolean.
-  //        If the server crashes after this is set, reconcileStalePendingCharges()
-  //        will issue the refund automatically on next startup.
   let pendingChargeId = null;
 
   try {
@@ -644,7 +666,7 @@ app.post("/api/report", async (req, res) => {
     // 3. Check cache
     let raw = await getReportData(targetVin, type);
 
-    // 4. Check ownership (skip for one-time sessions — they bypass credits)
+    // 4. Check ownership
     if (!oneTimeSession) {
       const { user } = await getUser(req);
       currentUser = user;
@@ -663,7 +685,6 @@ app.post("/api/report", async (req, res) => {
     // 5. Live fetch
     if (!raw && allowLive) {
 
-      // ── Charge logged-in user ──
       if (!alreadyOwned && !oneTimeSession) {
         if (currentUser) {
           const { error: rpcErr } = await supabaseForToken(
@@ -672,7 +693,6 @@ app.post("/api/report", async (req, res) => {
 
           if (rpcErr) return res.status(402).json({ error: "insufficient_credits" });
 
-          // FIX 6: Record the deduction in DB before making the external call
           pendingChargeId = await createPendingCharge({
             userId: currentUser.id,
             vin:    targetVin,
@@ -682,7 +702,6 @@ app.post("/api/report", async (req, res) => {
         }
       }
 
-      // ── Verify one-time session (Stripe / PayPal) ──
       if (oneTimeSession && !alreadyOwned) {
         try {
           if (!oneTimeSession.startsWith("pp_")) {
@@ -690,11 +709,9 @@ app.post("/api/report", async (req, res) => {
             const s       = await sStripe.checkout.sessions.retrieve(oneTimeSession);
             if (s.payment_status !== "paid") throw new Error("unpaid");
           }
-          // FIX 1: DB-backed idempotency check
           const alreadyConsumed = await isSessionConsumed(oneTimeSession);
           if (!alreadyConsumed) {
             await markSessionConsumed(oneTimeSession);
-            // FIX 6: Record pending charge for session-based purchases
             pendingChargeId = await createPendingCharge({
               sessionId: oneTimeSession,
               vin:       targetVin,
@@ -703,7 +720,6 @@ app.post("/api/report", async (req, res) => {
         } catch { return res.status(400).json({ error: "receipt_invalid" }); }
       }
 
-      // ── Fetch from CarSimulcast ──
       try {
         const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
         if (!live || live.length < 50)         throw new Error("CS_EMPTY_RESPONSE");
@@ -722,7 +738,6 @@ app.post("/api/report", async (req, res) => {
           }, { onConflict: "user_id,vin" });
         }
 
-        // FIX 6: Report delivered — mark charge as resolved
         if (pendingChargeId) await resolvePendingCharge(pendingChargeId);
 
       } catch (e) {
@@ -730,7 +745,6 @@ app.post("/api/report", async (req, res) => {
           `[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`
         );
 
-        // FIX 6: Refund using DB record (survives process crashes)
         if (pendingChargeId) {
           await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
           pendingChargeId = null;
@@ -786,7 +800,6 @@ app.post("/api/report", async (req, res) => {
       return res.send(decoded.html);
     }
 
-    // Unsupported format — refund if we charged for this
     if (pendingChargeId) {
       console.error(`[Delivery Failed] User: ${currentUser?.id || "guest"} | Bad format. Refunding.`);
       await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
@@ -800,7 +813,6 @@ app.post("/api/report", async (req, res) => {
     return res.status(500).json({ error: "unsupported_content" });
 
   } catch (err) {
-    // FIX 6: Last-resort refund — catches any unexpected crash in the outer try block
     if (pendingChargeId) {
       try {
         await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
