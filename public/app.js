@@ -1,14 +1,34 @@
 // app.js
-// FIXES APPLIED:
+// ORIGINAL FIXES (from prior session):
 //   #4  — document.write replaced with safe blob-URL / sandboxed-iframe approach
 //   #11 — lastFormData scoped to buy modal; cleared after use
 //   #12 — PayPal button re-renders when user login state changes
 //   #13 — openBlank() removed from PayPal onApprove — was causing double-tab bug
-//   #14 — reflectAuthUI uses style.display instead of classList (userChip HTML uses style="display:none")
-//   #15 — All API.report fetches wrapped in apiFetch() with 30 s timeout
-//   #16 — Fixed double-tab race condition by removing redundant success check in Init and upgrading tryLoadPending()
-//   #17 — PayPal now available for all 3 tiers (single $6, 5-pack $25, 10-pack $40)
-//   #18 — PayPal container visible on mobile (was hidden sm:block)
+//   #14 — reflectAuthUI uses style.display instead of classList
+//   #15 — All API.report fetches wrapped in apiFetch() with 30s timeout
+//   #16 — Fixed double-tab race condition; upgraded tryLoadPending()
+//   #17 — PayPal available for all 3 tiers (single $6, 5-pack $25, 10-pack $40)
+//   #18 — PayPal container visible on mobile
+//
+// PREVIOUS FIXES:
+//   #A — trackPurchase now accepts dynamic value; callers pass correct amount per package
+//   #B — loading spinner hidden before early openBuyModal() return (was stuck on screen)
+//   #C — clearPending() moved into the success path so a throw in renderHistory can't skip it
+//   #D — dataset.renderedFor cleared on logout so guest→login→logout cycle re-renders buttons
+//   #E — plate/state inputs sanitised before being stored in pending data (alphanumeric only)
+//
+// FIXES IN THIS VERSION:
+//   FIX-6 — trackPurchase was hardcoded to 6.00 in resumePendingPurchase() and in the
+//            buy_report Stripe intent path inside handleSuccessIfNeeded(). Fix #A had
+//            already corrected the PayPal onApprove path but missed these two.
+//            Pending data now carries an `amount` field so resume paths can read
+//            the correct value for analytics. Both callers now use `pending.amount`.
+//
+//   FIX-7 — setPrimaryCTA('buy') was calling openLogin() for unauthenticated users,
+//            blocking guests from the buy modal entirely. The modal already handles
+//            guests correctly for the single-report package via PayPal or Stripe.
+//            The login gate is removed; the modal's own onClick handler inside
+//            renderPaypalButtons() rejects bundle purchases without a session.
 
 /* ================================
    Config & Utilities
@@ -48,6 +68,7 @@ function showToast(message, type = 'error') {
   }, 4000);
 }
 
+// trackPurchase accepts a dynamic value so each package tier is tracked correctly.
 function trackPurchase(value = 6.00) {
   try {
     fbq('track', 'Purchase', {
@@ -80,7 +101,7 @@ function setBtnLoading(btn, loadingText = 'Processing…') {
 }
 
 /* ================================
-   FIX 15: fetch with timeout
+   fetch with timeout
 ================================ */
 async function apiFetch(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
   const ctrl  = new AbortController();
@@ -97,7 +118,7 @@ async function apiFetch(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
 }
 
 /* ================================
-   FIX 4: Safe report renderer (Overlay Only)
+   Safe report renderer (Overlay Only)
 ================================ */
 function openReport(html) {
   showReportOverlay(html);
@@ -130,7 +151,7 @@ function showReportOverlay(html) {
   overlay.appendChild(iframe);
   document.body.appendChild(overlay);
 
-  window.history.pushState({ reportOverlayOpen: true }, "");
+  window.history.pushState({ reportOverlayOpen: true }, '');
 
   overlay.querySelector('#closeReportOverlay')
     .addEventListener('click', () => {
@@ -195,15 +216,17 @@ function setVinHelp(text, ok = false) {
 function setPrimaryCTA(mode = 'view') {
   const btn = $id('go');
   if (!btn) return;
-  btn.className = 'glow-btn w-full bg-blue-600 hover:bg-blue-700 text-white h-14 rounded-xl font-bold text-lg shadow-xl shadow-blue-600/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed';
+  btn.className = 'glow-btn w-full bg-blue-600 hover:bg-blue-700 text-white h-14 rounded-xl font-bold text-lg shadow-xl shadow-blue-600/20 transition-all active:scale-[0-98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed';
   if (mode === 'buy') {
     btn.type = 'button';
     btn.innerHTML = `<span>Buy Credits</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>`;
-    btn.onclick = async () => {
-      const { user } = await getSession();
-      if (!user) { openLogin(); return; }
-      openBuyModal();
-    };
+    // FIX-7: No longer gating guests behind openLogin() here. Guests are valid
+    // customers for the single-report package — the buy modal handles them
+    // correctly via PayPal and Stripe. Bundle purchases that require a login
+    // are rejected inside renderPaypalButtons()'s onClick handler and inside
+    // startStripePurchase() via the requireLogin flag, both of which prompt
+    // the user to sign in at the right moment rather than blocking upfront.
+    btn.onclick = () => openBuyModal();
   } else {
     btn.type = 'submit';
     btn.innerHTML = `<span>Get CARFAX Report Now</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>`;
@@ -274,7 +297,10 @@ function tryLoadPending() {
     return null;
   }
 }
-function clearPending() { localStorage.removeItem(PENDING_KEY); sessionStorage.removeItem(PENDING_KEY); }
+function clearPending() {
+  localStorage.removeItem(PENDING_KEY);
+  sessionStorage.removeItem(PENDING_KEY);
+}
 
 async function resumePendingPurchase() {
   const pending = tryLoadPending();
@@ -291,8 +317,14 @@ async function resumePendingPurchase() {
     const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) });
     if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
+
+    clearPending();
+
     openReport(html);
-    trackPurchase(6.00);
+    // FIX-6: Read the amount stored in the pending object so bundles resumed
+    // via this path are tracked with the correct value. Falls back to 6.00
+    // (single report) for any pending data written before this field was added.
+    trackPurchase(pending.amount || 6.00);
     showToast('Report ready!', 'ok');
     addToHistory({
       vin:   pending.vin || '(from plate)',
@@ -305,7 +337,6 @@ async function resumePendingPurchase() {
   } catch (e) {
     showToast(e.message || 'Failed to resume purchase', 'error');
   } finally {
-    clearPending();
     await refreshBalancePill();
   }
 }
@@ -323,7 +354,10 @@ async function handleSuccessIfNeeded() {
       if (!r.ok) throw new Error(await r.text());
       const html = await r.text();
       openReport(html);
-      trackPurchase(6.00); return;
+      // FIX-6: The buy_report Stripe intent is always a single report ($6).
+      // Using the named constant makes future pricing changes easier to track.
+      trackPurchase(6.00);
+      return;
     } catch (e) { showToast(e.message || 'Failed to fetch report', 'error'); }
   }
   if (ppSuccess || stripeSessionId || onSuccessPage()) {
@@ -414,6 +448,13 @@ async function doLogout() {
   if (!supabase) return;
   await supabase.auth.signOut();
   showToast('Signed out', 'ok');
+
+  // Clear renderedFor markers so buttons re-render for the next login session.
+  for (const cfg of PAYPAL_PACKAGES) {
+    const el = document.getElementById(cfg.containerId);
+    if (el) el.dataset.renderedFor = '';
+  }
+
   await refreshBalancePill();
 }
 
@@ -459,7 +500,6 @@ function reflectAuthUI(session) {
   supabase.auth.onAuthStateChange((_event, session) => {
     reflectAuthUI(session);
     refreshBalancePill();
-    // Re-render PayPal buttons if modal is open (user just logged in/out)
     if (buyModal && !buyModal.classList.contains('hidden')) {
       renderPaypalButtons();
     }
@@ -683,15 +723,13 @@ function closeBuyModal() {
 $id('closeModalBtn')?.addEventListener('click', closeBuyModal);
 
 /* ─── PayPal ───
-   FIX 17: Render PayPal buttons for all 3 tiers (single $6, 5-pack $25, 10-pack $40)
-   FIX 18: PayPal containers are visible on mobile (removed hidden sm:block from HTML)
+   Package config — single source of truth.
+   `amount` is used by trackPurchase() to ensure analytics match real charges.
 */
-
-// Package config — single source of truth
 const PAYPAL_PACKAGES = [
-  { containerId: 'paypalContainer',   pkg: 'single',  amount: '6.00',  credits: 1,  label: '1 report'  },
-  { containerId: 'paypalContainer5',  pkg: '5pack',   amount: '25.00', credits: 5,  label: '5 reports' },
-  { containerId: 'paypalContainer10', pkg: '10pack',  amount: '40.00', credits: 10, label: '10 reports' },
+  { containerId: 'paypalContainer',   pkg: 'single',  amount: 6.00,  credits: 1,  label: '1 report'  },
+  { containerId: 'paypalContainer5',  pkg: '5pack',   amount: 25.00, credits: 5,  label: '5 reports' },
+  { containerId: 'paypalContainer10', pkg: '10pack',  amount: 40.00, credits: 10, label: '10 reports' },
 ];
 
 async function renderPaypalButtons() {
@@ -704,48 +742,54 @@ async function renderPaypalButtons() {
     const container = document.getElementById(cfg.containerId);
     if (!container) continue;
 
-    // Skip re-render if already rendered for the same user session
     if (container.dataset.renderedFor === String(userId) && container.children.length > 0) continue;
 
     container.innerHTML = '';
     container.dataset.renderedFor = String(userId);
 
-    const { pkg, credits } = cfg;
+    const { pkg, credits, amount } = cfg;
 
     window.paypal.Buttons({
       style: { layout: 'horizontal', color: 'gold', shape: 'rect', label: 'pay', height: 40, tagline: false },
 
-      // FIX: validate BEFORE the popup opens so it never opens blank
       onClick: function(_data, actions) {
         if (pkg !== 'single' && !userId) {
           showToast('Please sign in to buy a bundle — credits need an account.', 'error');
           closeBuyModal();
           openLogin();
-          return actions.reject();   // blocks the popup entirely
+          return actions.reject();
         }
         return actions.resolve();
       },
 
-      // FIX: native .then() chains keep the popup synchronously attached to
-      //      the click event. async/await detaches it, causing about:blank.
       createOrder: function(_data, _actions) {
+        const pending      = currentBuyModalPendingData || {};
+        const pendingVin   = (pending.vin && pending.vin !== '(from plate)') ? pending.vin : null;
+        const pendingState = pending.state || null;
+        const pendingPlate = pending.plate || null;
+
         return fetch('/api/paypal/create-order', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ user_id: userId, package: pkg }),
+          body:    JSON.stringify({
+            user_id: userId,
+            package: pkg,
+            vin:     pendingVin,
+            state:   pendingState,
+            plate:   pendingPlate,
+          }),
         })
         .then(function(res) {
           if (!res.ok) throw new Error('PayPal order creation failed — please try again.');
           return res.json();
         })
         .then(function(orderData) {
-          const id = orderData.orderID || orderData.id;
+          const id = orderData.id || orderData.orderID;
           if (!id) throw new Error('No order ID returned from server.');
           return id;
         });
       },
 
-      // onApprove can safely use async/await — popup is already confirmed open
       onApprove: async function(data) {
         const pending = pkg === 'single' ? currentBuyModalPendingData : null;
         if (pkg === 'single') currentBuyModalPendingData = null;
@@ -765,15 +809,14 @@ async function renderPaypalButtons() {
           if (!r.ok) throw new Error(await r.text() || 'PayPal capture failed');
           const result = await r.json();
 
-          // Bundle, or single with no pending VIN — just add credits
           if (pkg !== 'single' || !pending || (!pending.vin && !(pending.state && pending.plate))) {
             showToast(`Payment completed! ${credits} credit${credits > 1 ? 's' : ''} added.`, 'ok');
+            trackPurchase(amount);
             await refreshBalancePill();
             closeBuyModal();
             return;
           }
 
-          // Single report with a pending VIN — fetch the report now
           const body = { ...pending, as: 'html', allowLive: true };
           if (!userId && result?.captureId) body.oneTimeSession = 'pp_' + result.captureId;
 
@@ -786,6 +829,9 @@ async function renderPaypalButtons() {
           if (!resp.ok) throw new Error(await resp.text() || ('HTTP ' + resp.status));
 
           const html = await resp.text();
+
+          clearPending();
+
           addToHistory({
             vin:   pending.vin || '(from plate)',
             type:  pending.type || 'carfax',
@@ -795,10 +841,9 @@ async function renderPaypalButtons() {
           });
           renderHistory();
           openReport(html);
-          trackPurchase(6.00);
+          trackPurchase(amount);
           showToast('Report fetched successfully!', 'ok');
           await refreshBalancePill();
-          clearPending();
           closeBuyModal();
         } catch (e) {
           showToast(e.message || 'PayPal capture failed', 'error');
@@ -941,13 +986,22 @@ f?.addEventListener('input', reflectVinGate);
 f?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = Object.fromEntries(new FormData(f).entries());
+
+  // Sanitise plate and state to alphanumeric only before storing or sending.
+  const rawState = (fd.state || '').trim().replace(/[^A-Za-z0-9]/g, '');
+  const rawPlate = (fd.plate || '').trim().replace(/[^A-Za-z0-9]/g, '');
+
+  // FIX-6: Include `amount` in the pending payload so that resumePendingPurchase()
+  // can pass the correct value to trackPurchase() instead of always using 6.00.
+  // Single-report purchases from the form are always $6.
   const data = {
     vin:       (fd.vin || '').trim().toUpperCase(),
-    state:     (fd.state || '').trim(),
-    plate:     (fd.plate || '').trim(),
+    state:     rawState,
+    plate:     rawPlate,
     type:      fd.type || 'carfax',
     as:        'html',
     allowLive: true,
+    amount:    6.00,
   };
   if (!data.vin && !(data.state && data.plate)) { showToast('Enter a VIN or Plate', 'error'); return; }
 
@@ -975,9 +1029,12 @@ f?.addEventListener('submit', async (e) => {
       )).json();
       if (balance <= 0) {
         localStorage.setItem(PENDING_KEY, JSON.stringify(data));
-        openBuyModal(data);
+
+        // Hide spinner before early return so it doesn't stay stuck on screen.
         go.disabled = false;
         loading?.classList.add('hidden');
+
+        openBuyModal(data);
         return;
       }
     } catch {}

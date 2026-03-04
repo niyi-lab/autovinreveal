@@ -1,13 +1,48 @@
 /********************************************************************
  * AutoVINReveal Server
- * FIXES APPLIED:
+ * ORIGINAL FIXES (from prior session):
  *   #1  — consumed_sessions moved from disk to Supabase DB
  *   #2  — share_tokens moved from disk to Supabase DB
  *   #3  — /api/credits/:user_id now requires auth + ownership check
  *   #5  — webhook & PayPal credit updates use atomic add_credits RPC
- *   #6  — justCharged boolean replaced with DB-backed pending_charges
+ *   #6  — justCharged replaced with DB-backed pending_charges
  *   #7  — server throws on startup if APP_SECRET is default value
- *   #17 — PayPal create-order/capture-order support single/5pack/10pack packages
+ *   #17 — PayPal create-order/capture-order support single/5pack/10pack
+ *
+ * PREVIOUS FIXES:
+ *   #F  — paypalClient renamed to ppClient everywhere (ReferenceError crash fix)
+ *   #G  — create-order destructures `package` not `package_type` (key mismatch fix)
+ *   #H  — plate/state sanitised to alphanumeric before upstream URL interpolation
+ *   #I  — reconcileStalePendingCharges threshold raised from 5 min → 15 min
+ *   #J  — PayPal order tracking: invoice_id, custom_id, items, sku, description
+ *   #K  — Added amount.breakdown.item_total to PayPal order body.
+ *   #L  — invoice_id middle segment capped at 60 chars.
+ *
+ * FIXES IN THIS VERSION:
+ *   FIX-1 — Admin timingSafeEqual no longer short-circuited by plain === comparison.
+ *            The redundant `&& provided === expected` was leaking timing information
+ *            and defeating the entire purpose of timingSafeEqual.
+ *
+ *   FIX-2 — markSessionConsumed now throws SESSION_ALREADY_CONSUMED on a duplicate-key
+ *            error from the DB, making the isConsumed check + mark atomic via the
+ *            unique constraint rather than a racy read-then-write sequence.
+ *            The report route catches this error and returns 400 receipt_already_used.
+ *
+ *   FIX-3 — createPendingCharge is now called BEFORE use_credit_for_vin so that a
+ *            crash between the two operations leaves a recoverable pending record.
+ *            Previously a crash after the RPC deducted the credit but before the
+ *            pending row was inserted would silently lose the user's credit.
+ *            If use_credit_for_vin fails (insufficient credits) the pending row is
+ *            immediately cleaned up and a 402 is returned as before.
+ *
+ *   FIX-4 — getReportData now filters by report type in the DB query so a CARFAX
+ *            lookup never returns a cached AutoCheck report for the same VIN.
+ *            The upsert in the report route stores the type column and uses
+ *            (user_id, vin, type) as the conflict target.
+ *
+ *   FIX-5 — paypalCaptureLimiter now also applied to /api/paypal/create-order.
+ *            Previously create-order was unprotected, allowing unlimited PayPal
+ *            API calls against the server's credentials.
  ********************************************************************/
 
 import dotenv from "dotenv";
@@ -45,15 +80,14 @@ const HOST = "0.0.0.0";
 /* ================================================================
    Config (env)
 ================================================================ */
-const SITE_URL     = process.env.SITE_URL     || `http://localhost:${PORT}`;
+const SITE_URL       = process.env.SITE_URL     || `http://localhost:${PORT}`;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || SITE_URL;
-const FORCE_WWW    = process.env.FORCE_WWW === "1";
+const FORCE_WWW      = process.env.FORCE_WWW === "1";
 
-const APP_SECRET   = process.env.APP_SECRET   || "change_me_in_env_file";
+const APP_SECRET     = process.env.APP_SECRET   || "change_me_in_env_file";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 const ADMIN_SESSION_TTL_SECONDS = Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 12);
 
-// FIX 7: Hard-fail on startup instead of silently using a known-weak secret
 if (!APP_SECRET || APP_SECRET === "change_me_in_env_file") {
   throw new Error(
     "FATAL: APP_SECRET must be set to a strong random secret in your environment variables. " +
@@ -115,12 +149,12 @@ function stripeForId(id) {
 }
 
 /* ================================================================
-   FIX 17: PayPal package config (single source of truth)
+   PayPal package config (single source of truth)
 ================================================================ */
 const PAYPAL_PACKAGE_CONFIG = {
-  single:  { amount: "6.00",  credits: 1  },
-  "5pack": { amount: "25.00", credits: 5  },
-  "10pack":{ amount: "40.00", credits: 10 },
+  single:   { amount: "6.00",  credits: 1  },
+  "5pack":  { amount: "25.00", credits: 5  },
+  "10pack": { amount: "40.00", credits: 10 },
 };
 
 function resolvePaypalPackage(pkg) {
@@ -134,8 +168,8 @@ const SUPABASE_URL      = process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY  = process.env.SERVICE_ROLE_KEY;
 
-const supabaseAnon    = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const supabaseService = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+const supabaseAnon     = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseService  = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const supabaseForToken = (token) =>
   createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: `Bearer ${token}` } },
@@ -208,6 +242,8 @@ const writeCache = (vin, type, data) => fs.writeFileSync(ck(vin, type), data, "u
 const REPORT_TTL_DAYS = 30;
 const MAX_AGE_MS      = REPORT_TTL_DAYS * 24 * 60 * 60 * 1000;
 
+// FIX-4: DB query now filters by `type` so a CARFAX lookup never returns
+// a cached AutoCheck report (or vice versa) for the same VIN.
 async function getReportData(vin, type) {
   const v = (vin  || "").toUpperCase();
   const t = (type || "").toLowerCase();
@@ -229,6 +265,7 @@ async function getReportData(vin, type) {
       .from("vin_queries")
       .select("report_data, created_at")
       .eq("vin", v)
+      .eq("type", t)                               // FIX-4: filter by type
       .not("report_data", "is", null)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -273,10 +310,23 @@ async function isSessionConsumed(sessionId) {
   } catch { return false; }
 }
 
+// FIX-2: Insert relies on the unique constraint on session_id.
+// If a duplicate-key error comes back we throw SESSION_ALREADY_CONSUMED so
+// the caller can distinguish a race from any other DB failure.
+// This collapses the read-then-write race: both concurrent requests hit the
+// DB insert simultaneously; exactly one succeeds and the other gets the error.
 async function markSessionConsumed(sessionId) {
-  await supabaseService
+  const { error } = await supabaseService
     .from("consumed_sessions")
     .insert({ session_id: sessionId });
+
+  if (error) {
+    // Postgres unique-violation code is 23505; Supabase surfaces it in error.code
+    if (error.code === "23505" || /unique|duplicate/i.test(error.message)) {
+      throw new Error("SESSION_ALREADY_CONSUMED");
+    }
+    throw new Error(`Failed to mark session consumed: ${error.message}`);
+  }
 }
 
 async function unmarkSessionConsumed(sessionId) {
@@ -342,17 +392,50 @@ async function resolvePendingCharge(chargeId) {
 
 async function refundAndResolve(chargeId, userId, sessionId) {
   try {
-    if (userId)    await addCreditsAtomic(userId, 1);
-    else if (sessionId) await unmarkSessionConsumed(sessionId);
+    if (userId) {
+      await addCreditsAtomic(userId, 1);
+      console.log(`[Refund] Refunded 1 credit to user ${userId} for charge ${chargeId}`);
+    } else if (sessionId) {
+      if (sessionId.startsWith("pp_")) {
+        const captureId = sessionId.replace("pp_", "");
+        try {
+          const refundReq = new paypalSdk.payments.CapturesRefundRequest(captureId);
+          refundReq.requestBody({
+            reason: "AutoVINReveal: VIN not found or report generation failed.",
+          });
+          await ppClient.execute(refundReq);
+          console.log(`[Refund] Successfully issued real PayPal refund for capture ${captureId}`);
+        } catch (ppErr) {
+          console.error(`[Refund] FATAL: PayPal API refund failed for ${captureId}:`, ppErr.message);
+        }
+      } else if (sessionId.startsWith("cs_")) {
+        try {
+          const sStripe = stripeForId(sessionId);
+          const session = await sStripe.checkout.sessions.retrieve(sessionId);
+          if (session.payment_intent) {
+            await sStripe.refunds.create({
+              payment_intent: session.payment_intent,
+              reason: "requested_by_customer",
+            });
+            console.log(`[Refund] Successfully issued real Stripe refund for session ${sessionId}`);
+          }
+        } catch (stripeErr) {
+          console.error(`[Refund] FATAL: Stripe API refund failed for ${sessionId}:`, stripeErr.message);
+        }
+      }
+      await unmarkSessionConsumed(sessionId);
+    }
   } catch (e) {
-    console.error(`[Refund] Failed to refund charge ${chargeId}:`, e.message);
+    console.error(`[Refund] Failed to resolve charge ${chargeId}:`, e.message);
   }
   await supabaseService.from("pending_charges").delete().eq("id", chargeId);
 }
 
+const STALE_CHARGE_THRESHOLD_MS = 15 * 60 * 1000;
+
 async function reconcileStalePendingCharges() {
   try {
-    const threshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const threshold = new Date(Date.now() - STALE_CHARGE_THRESHOLD_MS).toISOString();
     const { data } = await supabaseService
       .from("pending_charges")
       .select("*")
@@ -369,7 +452,6 @@ async function reconcileStalePendingCharges() {
     console.error("[Reconcile] Startup reconciliation failed:", e.message);
   }
 }
-reconcileStalePendingCharges();
 
 /* ================================================================
    VIN Validation
@@ -464,11 +546,33 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
+// FIX-5: Applied to both create-order and capture-order. Previously only
+// capture-order was rate-limited, leaving create-order as an unmetered
+// vector for burning through PayPal API credentials.
 const paypalCaptureLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
   message: "Too many PayPal requests",
 });
+
+/* ================================================================
+   PayPal client
+================================================================ */
+const PAYPAL_ENV = (process.env.PAYPAL_ENV || "sandbox").toLowerCase();
+const ppEnv = PAYPAL_ENV === "live"
+  ? new paypalSdk.core.LiveEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET)
+  : new paypalSdk.core.SandboxEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET);
+const ppClient = new paypalSdk.core.PayPalHttpClient(ppEnv);
+
+async function verifyPaypalCapture(captureId) {
+  const req = new paypalSdk.payments.CapturesGetRequest(captureId);
+  const res = await ppClient.execute(req);
+  return res?.result;
+}
+
+// FIX-5 & ordering: reconcileStalePendingCharges runs after ppClient is defined
+// so that any PayPal refunds issued during reconciliation have a live client.
+reconcileStalePendingCharges();
 
 /* ================================================================
    Endpoints
@@ -520,13 +624,12 @@ app.post("/api/create-checkout-session", async (req, res) => {
   }
 });
 
-// FIX 3: Credits endpoint — requires auth, user can only read their own balance
+// Credits endpoint — requires auth, user can only read their own balance
 app.get("/api/credits/:user_id", async (req, res) => {
   try {
     const { user } = await getUser(req);
-    if (!user)                    return res.status(401).json({ error: "unauthorized" });
-    if (user.id !== req.params.user_id)
-                                  return res.status(403).json({ error: "forbidden" });
+    if (!user)                          return res.status(401).json({ error: "unauthorized" });
+    if (user.id !== req.params.user_id) return res.status(403).json({ error: "forbidden" });
 
     const { data, error } = await supabaseService
       .from("credits")
@@ -540,51 +643,78 @@ app.get("/api/credits/:user_id", async (req, res) => {
 });
 
 /* ================================================================
-   PayPal
+   PayPal — Create Order
+   FIX-5: paypalCaptureLimiter now applied here as well.
 ================================================================ */
-const PAYPAL_ENV = (process.env.PAYPAL_ENV || "sandbox").toLowerCase();
-const ppEnv = PAYPAL_ENV === "live"
-  ? new paypalSdk.core.LiveEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET)
-  : new paypalSdk.core.SandboxEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET);
-const ppClient = new paypalSdk.core.PayPalHttpClient(ppEnv);
-
-async function verifyPaypalCapture(captureId) {
-  const req = new paypalSdk.payments.CapturesGetRequest(captureId);
-  const res = await ppClient.execute(req);
-  return res?.result;
-}
-
-/* FIX 17: create-order now accepts `package` — resolves to correct amount */
-app.post("/api/paypal/create-order", async (req, res) => {
+app.post("/api/paypal/create-order", paypalCaptureLimiter, async (req, res) => {
   try {
-    const { package: pkg = "single" } = req.body || {};
-    const { amount } = resolvePaypalPackage(pkg);
+    const { package: pkgKey, vin, state, plate, user_id } = req.body;
+
+    let customIdentifier = "";
+    let description      = "";
+
+    if (vin) {
+      const v = validateVin(vin);
+      if (!v.ok) return res.status(422).json({ error: "invalid_vin", reason: v.code, message: v.msg });
+      customIdentifier = v.vin;
+      description      = `Vehicle History Report (VIN: ${customIdentifier})`;
+    } else if (state && plate) {
+      const safeState  = state.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      const safePlate  = plate.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      customIdentifier = `PLATE:${safePlate}:${safeState}`;
+      description      = `Vehicle History Report (Plate: ${safePlate}, ${safeState})`;
+    } else {
+      if (!user_id && pkgKey === "single") {
+        return res.status(400).json({ error: "missing_vehicle", message: "A VIN or License Plate is required." });
+      }
+      customIdentifier = user_id ? `USER:${user_id}` : "GUEST_BUNDLE";
+      description      = "AutoVINReveal Credits";
+    }
+
+    const pkg = resolvePaypalPackage(pkgKey);
+
+    const invoiceId = [
+      pkgKey || "single",
+      customIdentifier.replace(/[^A-Za-z0-9]/g, "-").slice(0, 60),
+      Date.now(),
+    ].join("_");
 
     const request = new paypalSdk.orders.OrdersCreateRequest();
     request.prefer("return=representation");
     request.requestBody({
       intent: "CAPTURE",
       purchase_units: [{
-        amount: { currency_code: "USD", value: amount },
-        description: pkg === "single" ? "1 CARFAX Report" :
-                     pkg === "5pack"  ? "5-Pack CARFAX Reports" :
-                                        "10-Pack CARFAX Reports",
+        amount: {
+          currency_code: "USD",
+          value:         pkg.amount,
+          breakdown: {
+            item_total: { currency_code: "USD", value: pkg.amount },
+          },
+        },
+        custom_id:  customIdentifier,
+        invoice_id: invoiceId,
+        description,
+        items: [{
+          name:        description,
+          unit_amount: { currency_code: "USD", value: pkg.amount },
+          quantity:    "1",
+          description: user_id ? `User: ${user_id}` : "Guest purchase",
+          sku:         pkgKey || "single",
+        }],
       }],
-      application_context: {
-        brand_name: "AutoVINReveal",
-        shipping_preference: "NO_SHIPPING",
-        user_action: "PAY_NOW",
-      },
     });
+
     const order = await ppClient.execute(request);
-    res.json({ orderID: order.result.id });
+    res.json({ id: order.result.id });
   } catch (err) {
-    console.error("PayPal create-order error:", err);
-    res.status(500).json({ error: "PayPal create-order failed" });
+    console.error("PayPal Create Error:", err);
+    res.status(500).json({ error: "Failed to create PayPal order" });
   }
 });
 
-/* FIX 17: capture-order now accepts `package` — adds correct credit count */
+/* ================================================================
+   PayPal — Capture Order
+================================================================ */
 app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => {
   try {
     const { orderID, user_id, package: pkg = "single" } = req.body || {};
@@ -592,7 +722,6 @@ app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => 
 
     const { credits } = resolvePaypalPackage(pkg);
 
-    // Bundles require a logged-in user so credits have somewhere to live
     if (pkg !== "single" && !user_id) {
       return res.status(400).json({ error: "user_id required for bundle purchases" });
     }
@@ -610,7 +739,6 @@ app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => 
     if (!verified || verified.status !== "COMPLETED")
       return res.status(400).json({ error: "Capture verification failed" });
 
-    // FIX 5 + 17: Atomic credit add with package-aware amount
     if (user_id) await addCreditsAtomic(user_id, credits);
 
     console.log(`[PayPal] Captured ${pkg} (${credits} credit${credits > 1 ? "s" : ""}) for user ${user_id || "guest"}`);
@@ -626,12 +754,11 @@ app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => 
    Main Report Logic
 ================================================================ */
 app.post("/api/report", async (req, res) => {
-  let targetVin      = "";
-  let type           = "carfax";
-  let currentUser    = null;
-  let oneTimeSession = null;
-  let alreadyOwned   = false;
-
+  let targetVin       = "";
+  let type            = "carfax";
+  let currentUser     = null;
+  let oneTimeSession  = null;
+  let alreadyOwned    = false;
   let pendingChargeId = null;
 
   try {
@@ -650,8 +777,10 @@ app.post("/api/report", async (req, res) => {
     // 1. Resolve VIN
     targetVin = (vin || "").trim().toUpperCase();
     if (!targetVin && state && plate) {
+      const safeState = state.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      const safePlate = plate.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
       try {
-        const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
+        const txt = await csGet(`${CS}/checkplate/${safeState}/${safePlate}`);
         const m   = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
         if (m) targetVin = m[0];
       } catch { return res.status(400).json({ error: "plate_lookup_failed" }); }
@@ -676,6 +805,7 @@ app.post("/api/report", async (req, res) => {
           .select("id")
           .eq("user_id", currentUser.id)
           .eq("vin", targetVin)
+          .eq("type", type)                        // FIX-4: match on type too
           .eq("success", true)
           .maybeSingle();
         if (past) alreadyOwned = true;
@@ -687,16 +817,24 @@ app.post("/api/report", async (req, res) => {
 
       if (!alreadyOwned && !oneTimeSession) {
         if (currentUser) {
-          const { error: rpcErr } = await supabaseForToken(
-            req.headers.authorization?.split(" ")[1]
-          ).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
-
-          if (rpcErr) return res.status(402).json({ error: "insufficient_credits" });
-
+          // FIX-3: Create the pending charge row FIRST so a crash between this
+          // point and the RPC call is recoverable via reconcileStalePendingCharges.
+          // If use_credit_for_vin returns an error (e.g. insufficient credits)
+          // the pending row is deleted immediately before returning 402.
           pendingChargeId = await createPendingCharge({
             userId: currentUser.id,
             vin:    targetVin,
           });
+
+          const { error: rpcErr } = await supabaseForToken(
+            req.headers.authorization?.split(" ")[1]
+          ).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
+
+          if (rpcErr) {
+            await resolvePendingCharge(pendingChargeId);
+            pendingChargeId = null;
+            return res.status(402).json({ error: "insufficient_credits" });
+          }
         } else {
           return res.status(401).json({ error: "purchase_required" });
         }
@@ -709,33 +847,42 @@ app.post("/api/report", async (req, res) => {
             const s       = await sStripe.checkout.sessions.retrieve(oneTimeSession);
             if (s.payment_status !== "paid") throw new Error("unpaid");
           }
-          const alreadyConsumed = await isSessionConsumed(oneTimeSession);
-          if (!alreadyConsumed) {
-            await markSessionConsumed(oneTimeSession);
-            pendingChargeId = await createPendingCharge({
-              sessionId: oneTimeSession,
-              vin:       targetVin,
-            });
+
+          // FIX-2: markSessionConsumed now throws SESSION_ALREADY_CONSUMED if the
+          // unique constraint fires, preventing a concurrent request from consuming
+          // the same session token. No pre-check needed — the insert IS the check.
+          await markSessionConsumed(oneTimeSession);
+          pendingChargeId = await createPendingCharge({
+            sessionId: oneTimeSession,
+            vin:       targetVin,
+          });
+        } catch (e) {
+          if (e.message === "SESSION_ALREADY_CONSUMED") {
+            return res.status(400).json({ error: "receipt_already_used" });
           }
-        } catch { return res.status(400).json({ error: "receipt_invalid" }); }
+          return res.status(400).json({ error: "receipt_invalid" });
+        }
       }
 
       try {
         const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
-        if (!live || live.length < 50)         throw new Error("CS_EMPTY_RESPONSE");
+        if (!live || live.length < 50)      throw new Error("CS_EMPTY_RESPONSE");
         const checkDecode = decodeReportBase64(live);
-        if (checkDecode.kind === "unknown")    throw new Error("CS_INVALID_FORMAT");
+        if (checkDecode.kind === "unknown") throw new Error("CS_INVALID_FORMAT");
 
         raw = live;
         writeCache(targetVin, type, raw);
 
         if (currentUser) {
+          // FIX-4: store type in the upsert and use (user_id, vin, type) as the
+          // conflict target so CARFAX and AutoCheck results are stored separately.
           await supabaseService.from("vin_queries").upsert({
             user_id:     currentUser.id,
             vin:         targetVin,
+            type:        type,
             report_data: raw,
             success:     true,
-          }, { onConflict: "user_id,vin" });
+          }, { onConflict: "user_id,vin,type" });
         }
 
         if (pendingChargeId) await resolvePendingCharge(pendingChargeId);
@@ -836,7 +983,9 @@ app.post("/api/email-report", async (req, res) => {
 
     let targetVin = (vin || "").trim().toUpperCase();
     if (!targetVin && state && plate) {
-      const txt = await csGet(`${CS}/checkplate/${state}/${plate}`);
+      const safeState = state.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      const safePlate = plate.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      const txt = await csGet(`${CS}/checkplate/${safeState}/${safePlate}`);
       const m   = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
       if (m) targetVin = m[0];
     }
@@ -861,7 +1010,7 @@ app.post("/api/email-report", async (req, res) => {
 });
 
 /* ================================================================
-   FIX 2: Share Tokens — DB-backed endpoints
+   Share Tokens — DB-backed endpoints
 ================================================================ */
 app.post("/api/share", async (req, res) => {
   try {
@@ -919,9 +1068,14 @@ function requireAdmin(req, res, next) {
 app.post("/api/admin/login", (req, res) => {
   const provided = req.body?.password || "";
   const expected = ADMIN_PASSWORD;
+
+  // FIX-1: timingSafeEqual is the only comparison used. The previous code also
+  // performed `&& provided === expected` which is a plain string comparison that
+  // leaks timing information and defeats the constant-time guarantee entirely.
   const a = Buffer.alloc(64); const b = Buffer.alloc(64);
   Buffer.from(provided).copy(a); Buffer.from(expected).copy(b);
-  const match = crypto.timingSafeEqual(a, b) && provided === expected;
+  const match = crypto.timingSafeEqual(a, b);
+
   if (!match) return res.status(401).json({ error: "bad_password" });
   res.cookie("admin_session", makeAdminToken(), {
     httpOnly: true, secure: true, sameSite: "strict",
