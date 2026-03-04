@@ -497,12 +497,17 @@ function reflectAuthUI(session) {
   const { data } = await supabase.auth.getSession();
   reflectAuthUI(data.session);
   await refreshBalancePill();
+  // Pre-render PayPal buttons now so they are fully attached to the DOM
+  // before the buy modal is ever opened. Rendering them at modal-open time
+  // causes an async gap (getSession await) during which PayPal opens the
+  // popup — landing on about:blank because the button isn't ready yet.
+  renderPaypalButtons();
   supabase.auth.onAuthStateChange((_event, session) => {
     reflectAuthUI(session);
     refreshBalancePill();
-    if (buyModal && !buyModal.classList.contains('hidden')) {
-      renderPaypalButtons();
-    }
+    // Always re-render on auth change so userId in the button closures
+    // stays current — regardless of whether the modal is open.
+    renderPaypalButtons();
   });
 })();
 
@@ -711,8 +716,9 @@ let currentBuyModalPendingData = null;
 
 function openBuyModal(pendingData = null) {
   currentBuyModalPendingData = pendingData;
+  // Buttons are pre-rendered at page load (and on every auth change) so we
+  // just show the modal. No async work at click time = no about:blank popup.
   buyModal?.classList.remove('hidden');
-  renderPaypalButtons();
 }
 
 function closeBuyModal() {
@@ -1116,6 +1122,7 @@ $id('saveNewPasswordBtn')?.addEventListener('click', async () => {
 ================================ */
 (async () => {
   await refreshBalancePill();
+  renderPaypalButtons();
   renderHistory();
   reflectVinGate();
 })();
