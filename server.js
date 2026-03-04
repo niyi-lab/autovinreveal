@@ -683,6 +683,10 @@ app.post("/api/paypal/create-order", paypalCaptureLimiter, async (req, res) => {
     request.prefer("return=representation");
     request.requestBody({
       intent: "CAPTURE",
+      application_context: {
+        shipping_preference: "NO_SHIPPING",
+        brand_name: "AutoVINReveal",
+      },
       purchase_units: [{
         amount: {
           currency_code: "USD",
