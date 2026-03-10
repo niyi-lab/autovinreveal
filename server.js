@@ -606,6 +606,16 @@ app.post("/api/create-checkout-session", async (req, res) => {
       mode: "payment",
       payment_method_types: ["card"],
       line_items: [{ price: priceLive, quantity: 1 }],
+      payment_intent_data: {
+        description: vin
+          ? `AutoVINReveal – VIN: ${vin}`
+          : isTenPack ? "AutoVINReveal – 10 Report Bundle"
+          : isFivePack ? "AutoVINReveal – 5 Report Bundle"
+          : "AutoVINReveal – 1 Report Credit",
+        metadata: {
+          ...(vin ? { vin } : {}),
+        },
+      },
       success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ""}`,
       cancel_url:  `${SITE_URL}/?checkout=cancel`,
       ...(userId ? { client_reference_id: userId } : {}),
