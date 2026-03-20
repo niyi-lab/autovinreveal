@@ -46,7 +46,6 @@
     </script>
 
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet" />
-    <script src="https://www.paypal.com/sdk/js?client-id=Aclv8-_pnwQ7RC6rFmyLTxPfEqSNC2yS67N3dFeTwGH2i8-K2LVwwPEMmcfuw-DOxcuDWsPpoaSs7HOU&components=buttons&currency=USD"></script>
 
     <script>
       window.FB_PIXEL_ID = "1059594989434590";
@@ -102,10 +101,6 @@
         .pricing-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
         .pricing-col { min-width: 0; }
       }
-
-      /* PayPal button containers — ensure proper sizing in all contexts */
-      .pp-container { min-height: 44px; }
-      .pp-container iframe { min-height: 44px !important; }
     </style>
   </head>
 
@@ -248,9 +243,18 @@
                   </svg>
                 </button>
                 <div class="mt-4 flex items-center justify-center gap-4 opacity-60 grayscale hover:grayscale-0 transition-all">
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/b/b5/PayPal.svg" alt="PayPal" class="h-5" />
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Visa_Inc._logo.svg/500px-Visa_Inc._logo.svg.png" alt="Visa" class="h-4" />
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" alt="Mastercard" class="h-6" />
+                  <!-- Visa wordmark SVG -->
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 750 471" class="h-5" aria-label="Visa" role="img">
+                    <rect width="750" height="471" rx="40" fill="#1a1f71"/>
+                    <path d="M278 340l45-269h72L350 340h-72zm249-263c-14-5-37-11-65-11-71 0-121 38-122 91-1 40 35 62 62 75 28 14 37 22 37 34-1 18-22 26-43 26-29 0-44-4-68-14l-9-5-10 62c17 8 49 15 82 15 77 0 126-38 127-97 0-32-19-57-62-77-26-13-42-22-42-35 0-12 14-24 43-24 24 0 42 5 56 11l7 3 10-59zm190-6h-55c-17 0-30 5-37 23l-106 253h75l15-41h91l9 41h66L717 71zm-88 170l28-77 7-18 4 17 13 78h-52zm-410-170l-71 183-8-39c-13-44-55-92-101-116l64 237h76l113-265h-73z" fill="#fff"/>
+                    <path d="M166 71H50l-1 6c90 23 149 78 173 144L197 94c-4-18-16-22-31-23z" fill="#f9a533"/>
+                  </svg>
+                  <!-- Mastercard circles SVG -->
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152 95" class="h-6" aria-label="Mastercard" role="img">
+                    <circle cx="57" cy="47.5" r="47.5" fill="#eb001b"/>
+                    <circle cx="95" cy="47.5" r="47.5" fill="#f79e1b"/>
+                    <path d="M76 17.4a47.4 47.4 0 0 1 0 60.2A47.4 47.4 0 0 1 76 17.4z" fill="#ff5f00"/>
+                  </svg>
                   <div class="flex items-center gap-1 text-[10px] uppercase font-bold text-gray-400 border border-gray-200 rounded px-1">
                     <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path>
@@ -282,7 +286,7 @@
             <div class="p-6 bg-white rounded-xl shadow-sm border border-gray-100 hover:-translate-y-1 transition-transform">
               <div class="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-xl font-bold">2</div>
               <h3 class="font-bold text-lg mb-2">Pay Securely ($6)</h3>
-              <p class="text-sm text-gray-500">Checkout via PayPal or Credit Card. No account required. No recurring fees.</p>
+              <p class="text-sm text-gray-500">Checkout via Credit Card. No account required. No recurring fees.</p>
             </div>
             <div class="p-6 bg-white rounded-xl shadow-sm border border-gray-100 hover:-translate-y-1 transition-transform">
               <div class="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-xl font-bold">3</div>
@@ -607,6 +611,17 @@
               </summary>
               <div class="text-gray-600 text-sm mt-3">Never. Your credits are stored in your account and are available whenever you need them — no expiry date.</div>
             </details>
+            <details class="group bg-white rounded-lg border border-gray-200 p-4 cursor-pointer">
+              <summary class="flex justify-between items-center font-medium list-none">
+                <span>What happens if I don't receive my report after paying?</span>
+                <span class="transition group-open:rotate-180"><svg fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg></span>
+              </summary>
+              <div class="text-gray-600 text-sm mt-3">
+                If your payment went through but the report didn't load, don't worry — your purchase is safe. First, try refreshing the page or clearing your browser cache. If the report still doesn't appear, please contact our support team at
+                <a href="mailto:autovinreveal@gmail.com" class="text-blue-600 font-semibold hover:underline">autovinreveal@gmail.com</a>
+                with your VIN (or license plate) and the email address used at checkout. We'll resolve it for you promptly.
+              </div>
+            </details>
           </div>
         </section>
 
@@ -659,33 +674,25 @@
           <div class="flex flex-col sm:grid sm:grid-cols-3 gap-3 sm:gap-4">
 
             <div class="flex flex-col gap-4 sm:gap-0 border border-gray-200 rounded-xl p-4 sm:p-5 hover:border-blue-300 transition-colors bg-white">
-              <div class="flex-1 sm:mb-3">
+              <div class="flex-1 sm:mb-4">
                 <div class="flex sm:flex-col items-baseline sm:items-start gap-2">
                   <span class="text-2xl sm:text-3xl font-black text-slate-900">$6</span>
                   <span class="text-xs text-gray-400 font-medium">1 Report · $6 each</span>
                 </div>
                 <p class="hidden sm:block text-xs text-gray-500 mt-1">One-time check. No account needed.</p>
               </div>
-              <div class="w-full sm:space-y-2 space-y-2">
-                <button id="buy1Btn"
-                  class="w-full flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
-                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
-                  Pay with Card
-                </button>
-                <div class="flex items-center gap-2 my-1">
-                  <div class="flex-1 h-px bg-gray-100"></div>
-                  <span class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">or</span>
-                  <div class="flex-1 h-px bg-gray-100"></div>
-                </div>
-                <div id="paypalContainer" class="pp-container w-full"></div>
-              </div>
+              <button id="buy1Btn"
+                class="w-full flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
+                Pay with Card
+              </button>
             </div>
 
             <div class="flex flex-col gap-4 sm:gap-0 border-2 border-blue-500 rounded-xl p-4 sm:p-5 bg-blue-50/50 shadow-lg shadow-blue-500/10 relative">
               <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-500 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
                 Most Popular
               </div>
-              <div class="flex-1 sm:mb-3 pt-1 sm:pt-0">
+              <div class="flex-1 sm:mb-4 pt-1 sm:pt-0">
                 <div class="flex sm:flex-col items-baseline sm:items-start gap-2">
                   <span class="text-2xl sm:text-3xl font-black text-slate-900">$25</span>
                   <span class="text-xs text-blue-600 font-medium">5 Reports · $5 each</span>
@@ -693,18 +700,12 @@
                 <p class="hidden sm:block text-xs text-gray-500 mt-1">Car shopping? This is for you.</p>
                 <p class="sm:hidden text-[10px] text-blue-500 mt-1">Account required for bundles</p>
               </div>
-              <div class="w-full sm:space-y-2 space-y-2">
+              <div class="w-full space-y-2">
                 <button id="buy5Btn"
                   class="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-lg shadow-md transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
                   Pay with Card
                 </button>
-                <div class="flex items-center gap-2 my-1">
-                  <div class="flex-1 h-px bg-blue-200"></div>
-                  <span class="text-[10px] text-blue-400 font-semibold uppercase tracking-wider">or</span>
-                  <div class="flex-1 h-px bg-blue-200"></div>
-                </div>
-                <div id="paypalContainer5" class="pp-container w-full"></div>
                 <p class="flex items-center justify-center gap-1 text-[10px] text-gray-400 pt-0.5">
                   <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
                   Account required for bundles
@@ -716,7 +717,7 @@
               <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-green-500 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
                 Best Value
               </div>
-              <div class="flex-1 sm:mb-3 pt-1 sm:pt-0">
+              <div class="flex-1 sm:mb-4 pt-1 sm:pt-0">
                 <div class="flex sm:flex-col items-baseline sm:items-start gap-2">
                   <span class="text-2xl sm:text-3xl font-black text-slate-900">$40</span>
                   <span class="text-xs text-green-600 font-medium">10 Reports · $4 each</span>
@@ -724,18 +725,12 @@
                 <p class="hidden sm:block text-xs text-gray-500 mt-1">For flippers &amp; dealers.</p>
                 <p class="sm:hidden text-[10px] text-green-600 mt-1">Account required for bundles</p>
               </div>
-              <div class="w-full sm:space-y-2 space-y-2">
+              <div class="w-full space-y-2">
                 <button id="buy10Btn"
                   class="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
                   Pay with Card
                 </button>
-                <div class="flex items-center gap-2 my-1">
-                  <div class="flex-1 h-px bg-gray-200"></div>
-                  <span class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">or</span>
-                  <div class="flex-1 h-px bg-gray-200"></div>
-                </div>
-                <div id="paypalContainer10" class="pp-container w-full"></div>
                 <p class="flex items-center justify-center gap-1 text-[10px] text-gray-400 pt-0.5">
                   <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
                   Account required for bundles
@@ -746,11 +741,6 @@
           </div>
 
           <div class="mt-5 flex flex-wrap items-center justify-center gap-4 text-[11px] text-gray-400">
-            <span class="flex items-center gap-1.5">
-              <img src="https://upload.wikimedia.org/wikipedia/commons/b/b5/PayPal.svg" class="h-3.5" alt="PayPal" />
-              PayPal available for all packages
-            </span>
-            <span class="text-gray-200">|</span>
             <span class="flex items-center gap-1.5">
               <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
               Bundles require sign-in
