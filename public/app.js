@@ -16,21 +16,28 @@
 //   #C — clearPending() moved into the success path so a throw in renderHistory can't skip it
 //   #D — dataset.renderedFor cleared on logout so guest→login→logout cycle re-renders buttons
 //   #E — plate/state inputs sanitised before being stored in pending data (alphanumeric only)
+//   FIX-6 — trackPurchase hardcoded 6.00 fixed in resumePendingPurchase() and handleSuccessIfNeeded()
+//   FIX-7 — setPrimaryCTA('buy') no longer gates guests behind openLogin()
+//   FIX-PP — PayPal fully removed. Stripe is the sole payment processor.
 //
 // FIXES IN THIS VERSION:
-//   FIX-6 — trackPurchase was hardcoded to 6.00 in resumePendingPurchase() and in the
-//            buy_report Stripe intent path inside handleSuccessIfNeeded(). Fix #A had
-//            already corrected the PayPal onApprove path but missed these two.
-//            Pending data now carries an `amount` field so resume paths can read
-//            the correct value for analytics. Both callers now use `pending.amount`.
+//   FIX-S1 — iframe in showReportOverlay was unsandboxed. A CARFAX report script
+//             could call window.top.location and navigate the entire app away.
+//             sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+//             added to prevent top-level navigation while keeping the report functional.
 //
-//   FIX-7 — setPrimaryCTA('buy') was calling openLogin() for unauthenticated users,
-//            blocking guests from the buy modal entirely. The modal already handles
-//            guests correctly for the single-report package via Stripe.
-//            The login gate is removed; the modal's own startStripePurchase() rejects
-//            bundle purchases without a session and prompts sign-in at the right moment.
+//   FIX-S2 — Form submit: 401/402 early-return path never reset go.disabled or hid
+//             the loading spinner before calling openBuyModal(). Spinner stayed visible
+//             behind the modal. resetFormUI() now called before all early returns.
 //
-//   FIX-PP — PayPal payment option fully removed. Stripe is the sole payment processor.
+//   FIX-S3 — openEmailModal was passed a raw plate string in the vin field when the
+//             history item was a plate lookup. The server's /api/email-report validates
+//             vin and rejects non-VIN strings. openEmailModal now accepts the full
+//             history item and passes vin/state/plate as separate fields so the server
+//             can do the plate→VIN lookup itself.
+//
+//   FIX-S4 — Tailwind typo: active:scale-[0-98] is an invalid value (does nothing).
+//             Fixed to active:scale-[.98] in setPrimaryCTA.
 
 /* ================================
    Config & Utilities
@@ -70,7 +77,6 @@ function showToast(message, type = 'error') {
   }, 4000);
 }
 
-// trackPurchase accepts a dynamic value so each package tier is tracked correctly.
 function trackPurchase(value = 6.00) {
   try {
     fbq('track', 'Purchase', {
@@ -121,6 +127,13 @@ async function apiFetch(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
 
 /* ================================
    Safe report renderer (Overlay Only)
+   FIX-S1: iframe now has sandbox attribute so report scripts cannot
+   call window.top.location and navigate the parent app away.
+     allow-scripts     — needed for the React SPA to run
+     allow-same-origin — needed for webpack chunk loading
+     allow-popups      — needed for "open in new tab" report links
+     allow-forms       — needed for any forms inside the report
+   Top-level navigation is NOT in the list — the report cannot escape.
 ================================ */
 function openReport(html) {
   showReportOverlay(html);
@@ -147,25 +160,38 @@ function showReportOverlay(html) {
 
   const iframe = document.createElement('iframe');
   iframe.style.cssText = 'flex:1;border:none;width:100%;';
+  // FIX-S1: sandbox prevents top-level navigation while keeping the report functional
+  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
   iframe.srcdoc = html;
 
   overlay.appendChild(bar);
   overlay.appendChild(iframe);
   document.body.appendChild(overlay);
 
-  window.history.pushState({ reportOverlayOpen: true }, '');
+  // Push history state so Android back-button also closes the overlay
+  try { window.history.pushState({ reportOverlayOpen: true }, ''); } catch (_) {}
 
+  function closeOverlay() {
+    const el = document.getElementById('reportOverlay');
+    if (!el) return;
+    el.remove();
+    // Clean up the history entry we pushed, but only if still on it
+    try {
+      if (window.history.state?.reportOverlayOpen) window.history.back();
+    } catch (_) {}
+  }
+
+  // Primary: direct DOM removal — always works regardless of history state
   overlay.querySelector('#closeReportOverlay')
-    .addEventListener('click', () => {
-      window.history.back();
-    });
+    .addEventListener('click', closeOverlay);
+
+  // Secondary: hardware/browser back button
+  window._closeReportOverlay = closeOverlay;
 }
 
-window.addEventListener('popstate', (e) => {
+window.addEventListener('popstate', () => {
   const overlay = document.getElementById('reportOverlay');
-  if (overlay && !e.state?.reportOverlayOpen) {
-    overlay.remove();
-  }
+  if (overlay) overlay.remove();
 });
 
 /* ================================
@@ -214,17 +240,15 @@ function setVinHelp(text, ok = false) {
 
 /* ================================
    Primary CTA switcher
+   FIX-S4: active:scale-[0-98] was invalid — fixed to active:scale-[.98]
 ================================ */
 function setPrimaryCTA(mode = 'view') {
   const btn = $id('go');
   if (!btn) return;
-  btn.className = 'glow-btn w-full bg-blue-600 hover:bg-blue-700 text-white h-14 rounded-xl font-bold text-lg shadow-xl shadow-blue-600/20 transition-all active:scale-[0-98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed';
+  btn.className = 'glow-btn w-full bg-blue-600 hover:bg-blue-700 text-white h-14 rounded-xl font-bold text-lg shadow-xl shadow-blue-600/20 transition-all active:scale-[.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed';
   if (mode === 'buy') {
     btn.type = 'button';
     btn.innerHTML = `<span>Buy Credits</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>`;
-    // FIX-7: No longer gating guests behind openLogin() here. The buy modal's
-    // startStripePurchase() rejects bundle purchases without a session and
-    // prompts sign-in at the right moment rather than blocking upfront.
     btn.onclick = () => openBuyModal();
   } else {
     btn.type = 'submit';
@@ -291,9 +315,7 @@ function tryLoadPending() {
     const session = sessionStorage.getItem(PENDING_KEY);
     if (session) return JSON.parse(session);
     return null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 function clearPending() {
   localStorage.removeItem(PENDING_KEY);
@@ -303,7 +325,6 @@ function clearPending() {
 async function resumePendingPurchase() {
   const pending = tryLoadPending();
   if (!pending) return;
-
   if (pending.vin === '(from plate)') pending.vin = '';
 
   await ensureBackendReady();
@@ -315,13 +336,8 @@ async function resumePendingPurchase() {
     const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) });
     if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
-
     clearPending();
-
     openReport(html);
-    // FIX-6: Read the amount stored in the pending object so bundles resumed
-    // via this path are tracked with the correct value. Falls back to 6.00
-    // (single report) for any pending data written before this field was added.
     trackPurchase(pending.amount || 6.00);
     showToast('Report ready!', 'ok');
     addToHistory({
@@ -352,7 +368,6 @@ async function handleSuccessIfNeeded() {
       if (!r.ok) throw new Error(await r.text());
       const html = await r.text();
       openReport(html);
-      // FIX-6: The buy_report Stripe intent is always a single report ($6).
       trackPurchase(6.00);
       return;
     } catch (e) { showToast(e.message || 'Failed to fetch report', 'error'); }
@@ -464,14 +479,17 @@ let currentSession = null;
 
 function reflectAuthUI(session) {
   currentSession = session;
+  const historyLink = $id('historyNavLink');
   if (session?.user) {
     if (userEmailEl) userEmailEl.textContent = session.user.email || '';
     if (userChip)    userChip.style.display = 'flex';
     $id('loginBtn')?.classList.add('hidden');
+    if (historyLink) historyLink.style.display = 'flex';
   } else {
     if (userChip)    userChip.style.display = 'none';
     const lb = $id('loginBtn');
     if (lb) { lb.classList.remove('hidden'); lb.textContent = 'Log in'; }
+    if (historyLink) historyLink.style.display = 'none';
   }
 }
 
@@ -611,31 +629,48 @@ async function copyShareLink(vin, type) {
   } catch (e) { showToast(e.message || 'Could not create share link', 'error'); }
 }
 
-/* Email report */
+/* ================================
+   Email report
+   FIX-S3: openEmailModal now accepts the full history item instead of
+   just a vin string. When the item is a plate lookup (vin === '(from plate)'),
+   state and plate are sent as separate fields so the server can do the
+   plate→VIN resolution itself via /api/email-report, instead of receiving
+   a raw plate string in the vin field which fails VIN validation.
+================================ */
 const emailModal    = $id('emailModal');
 const emailInput    = $id('emailTargetInput');
 const sendEmailBtn  = $id('sendEmailBtn');
-let emailTargetVin  = null, emailTargetType = null;
+let emailTargetItem = null; // FIX-S3: full history item, not just a vin string
 
-function openEmailModal(vin, type) {
-  emailTargetVin = vin; emailTargetType = type;
+function openEmailModal(item) {
+  emailTargetItem = item;
   if (currentSession?.user?.email) emailInput.value = currentSession.user.email;
   emailModal?.classList.remove('hidden');
   emailInput?.focus();
 }
-function closeEmailModal() { emailModal?.classList.add('hidden'); emailTargetVin = null; }
+function closeEmailModal() { emailModal?.classList.add('hidden'); emailTargetItem = null; }
 $id('closeEmailModal')?.addEventListener('click', closeEmailModal);
 
 sendEmailBtn?.addEventListener('click', async () => {
   const to = emailInput.value.trim();
   if (!to || !to.includes('@')) return showToast('Invalid email', 'error');
-  if (!emailTargetVin) return;
+  if (!emailTargetItem) return;
+
+  // FIX-S3: pass vin/state/plate separately so the server handles plate lookups
+  const isPlate = emailTargetItem.vin === '(from plate)';
+  const body = {
+    to,
+    type:  emailTargetItem.type || 'carfax',
+    vin:   isPlate ? ''                           : emailTargetItem.vin,
+    state: isPlate ? (emailTargetItem.state || '') : '',
+    plate: isPlate ? (emailTargetItem.plate || '') : '',
+  };
+
   const restore = setBtnLoading(sendEmailBtn, 'Sending…');
   try {
     const r = await apiFetch(
       '/api/email-report',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to, vin: emailTargetVin, type: emailTargetType || 'carfax' }) },
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
       15_000
     );
     if (!r.ok) throw new Error(await r.text());
@@ -682,7 +717,7 @@ function renderHistory() {
       const action = e.currentTarget.getAttribute('data-action');
       if (action === 'open')  openHistoryHTML(item);
       if (action === 'pdf')   downloadHistoryPDF(item, e.currentTarget);
-      if (action === 'email') openEmailModal(item.vin !== '(from plate)' ? item.vin : item.plate, item.type);
+      if (action === 'email') openEmailModal(item); // FIX-S3: pass full item
       if (action === 'share') copyShareLink(item.vin !== '(from plate)' ? item.vin : item.plate, item.type);
       if (action === 'del')   { const list = loadHistory(); list.splice(i, 1); saveHistory(list); renderHistory(); }
     });
@@ -700,15 +735,12 @@ function openBuyModal(pendingData = null) {
   currentBuyModalPendingData = pendingData;
   buyModal?.classList.remove('hidden');
 }
-
 function closeBuyModal() {
   buyModal?.classList.add('hidden');
   currentBuyModalPendingData = null;
 }
-
 $id('closeModalBtn')?.addEventListener('click', closeBuyModal);
 
-/* ─── Stripe purchase helper ─── */
 async function startStripePurchase({ user, price_id, pendingReport = null, requireLogin = false }) {
   if (requireLogin && !user) {
     closeBuyModal();
@@ -736,29 +768,21 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
 }
 
 $id('buy1Btn')?.addEventListener('click', async () => {
-  const btn     = $id('buy1Btn');
-  const restore = setBtnLoading(btn, 'Redirecting…');
-  const { user } = await getSession();
-  const pending = currentBuyModalPendingData;
+  const btn = $id('buy1Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
+  const { user } = await getSession(); const pending = currentBuyModalPendingData;
   closeBuyModal();
   await startStripePurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: pending });
   restore();
 });
-
 $id('buy5Btn')?.addEventListener('click', async () => {
-  const btn     = $id('buy5Btn');
-  const restore = setBtnLoading(btn, 'Redirecting…');
-  const { user } = await getSession();
-  closeBuyModal();
+  const btn = $id('buy5Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
+  const { user } = await getSession(); closeBuyModal();
   await startStripePurchase({ user, price_id: 'STRIPE_PRICE_5PACK', requireLogin: true });
   restore();
 });
-
 $id('buy10Btn')?.addEventListener('click', async () => {
-  const btn     = $id('buy10Btn');
-  const restore = setBtnLoading(btn, 'Redirecting…');
-  const { user } = await getSession();
-  closeBuyModal();
+  const btn = $id('buy10Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
+  const { user } = await getSession(); closeBuyModal();
   await startStripePurchase({ user, price_id: 'STRIPE_PRICE_10PACK', requireLogin: true });
   restore();
 });
@@ -772,7 +796,6 @@ $id('buy10Sidebar')?.addEventListener('click', async () => {
   const { user } = await getSession();
   await startStripePurchase({ user, price_id: 'STRIPE_PRICE_10PACK', requireLogin: true });
 });
-
 ['pricingBuy1Btn', 'pricingBuy5Btn', 'pricingBuy10Btn'].forEach(id => {
   $id(id)?.addEventListener('click', () => openBuyModal());
 });
@@ -802,21 +825,16 @@ function reflectVinGate() {
   if (!f || !go) return;
   const fd  = Object.fromEntries(new FormData(f).entries());
   const vin = (fd.vin || '').trim().toUpperCase();
-
   clearTimeout(vinDebounceTimer);
-
   if (!vin && !hasPlateCombo(fd)) {
     setVinHelp('Enter a 17-char VIN or Plate + State.');
-    go.disabled = true;
-    return;
+    go.disabled = true; return;
   }
   if (vin.length > 0) {
     if (!looksVinBasic(vin))   { setVinHelp('VIN must be 17 chars (no I, O, Q).'); go.disabled = true; return; }
     if (!vinCheckDigitOk(vin)) { setVinHelp('Invalid check digit — please verify VIN.'); go.disabled = true; return; }
-
     setVinHelp('Looking up vehicle…', true);
     go.disabled = false;
-
     vinDebounceTimer = setTimeout(() => {
       fetchCarDetails(vin).then(name => {
         const current = (document.querySelector('input[name="vin"]')?.value || '').trim().toUpperCase();
@@ -824,7 +842,6 @@ function reflectVinGate() {
         setVinHelp(name ? `✅ Verified: ${name}` : 'VIN valid (details not found).', true);
       });
     }, 400);
-
     return;
   }
   if (hasPlateCombo(fd)) { setVinHelp('Plate + State provided ✓', true); go.disabled = false; return; }
@@ -833,17 +850,24 @@ function reflectVinGate() {
 
 f?.addEventListener('input', reflectVinGate);
 
+/* ================================
+   Form submission
+   FIX-S2: resetFormUI() centralises go.disabled=false + loading hide.
+   All early-return paths (balance check, 401/402) now call it so the
+   spinner never gets stuck visible behind the buy modal.
+================================ */
+function resetFormUI() {
+  if (go) go.disabled = false;
+  loading?.classList.add('hidden');
+}
+
 f?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = Object.fromEntries(new FormData(f).entries());
 
-  // Sanitise plate and state to alphanumeric only before storing or sending.
   const rawState = (fd.state || '').trim().replace(/[^A-Za-z0-9]/g, '');
   const rawPlate = (fd.plate || '').trim().replace(/[^A-Za-z0-9]/g, '');
 
-  // FIX-6: Include `amount` in the pending payload so that resumePendingPurchase()
-  // can pass the correct value to trackPurchase() instead of always using 6.00.
-  // Single-report purchases from the form are always $6.
   const data = {
     vin:       (fd.vin || '').trim().toUpperCase(),
     state:     rawState,
@@ -879,11 +903,7 @@ f?.addEventListener('submit', async (e) => {
       )).json();
       if (balance <= 0) {
         localStorage.setItem(PENDING_KEY, JSON.stringify(data));
-
-        // Hide spinner before early return so it doesn't stay stuck on screen.
-        go.disabled = false;
-        loading?.classList.add('hidden');
-
+        resetFormUI(); // FIX-S2: reset before early return
         openBuyModal(data);
         return;
       }
@@ -897,6 +917,7 @@ f?.addEventListener('submit', async (e) => {
 
     if (r.status === 401 || r.status === 402) {
       localStorage.setItem(PENDING_KEY, JSON.stringify(data));
+      resetFormUI(); // FIX-S2: spinner was stuck behind modal without this
       openBuyModal(data);
       return;
     }
@@ -904,7 +925,6 @@ f?.addEventListener('submit', async (e) => {
 
     const html = await r.text();
     openReport(html);
-
     showToast('Report fetched successfully!', 'ok');
     addToHistory({ vin: data.vin || '(from plate)', type: data.type, ts: Date.now(), state: data.state, plate: data.plate });
     renderHistory();
@@ -912,8 +932,7 @@ f?.addEventListener('submit', async (e) => {
   } catch (err) {
     showToast(err.message || 'Request failed', 'error');
   } finally {
-    go.disabled = false;
-    loading?.classList.add('hidden');
+    resetFormUI();
   }
 });
 

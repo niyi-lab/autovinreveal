@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Report History | AutoVINReveal</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32" />
+    <meta name="theme-color" content="#1e3a8a" />
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { darkMode: 'class' };</script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet" />
+
+    <style>
+      html, body { overflow-x: hidden; max-width: 100%; }
+      body { font-family: "Inter", sans-serif; background-color: #f8fafc; }
+      h1, h2, h3, .brand-font { font-family: "Poppins", sans-serif; }
+      .loader { border: 3px solid #e2e8f0; border-radius: 50%; border-top: 3px solid #2563eb; width: 20px; height: 20px; animation: spin 1s linear infinite; }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      .row-enter { animation: rowIn 0.15s ease-out; }
+      @keyframes rowIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+  </head>
+
+  <body class="text-slate-800 antialiased min-h-screen pb-16">
+
+    <!-- Nav (mirrors index.html) -->
+    <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+        <a href="/" class="flex items-center gap-2">
+          <div class="w-9 h-9 bg-blue-700 rounded-lg flex items-center justify-center text-white font-extrabold text-xl shadow-lg shadow-blue-700/30">A</div>
+          <span class="text-xl font-bold text-slate-900 tracking-tight brand-font">AutoVIN<span class="text-blue-600">Reveal</span></span>
+        </a>
+        <div class="flex items-center gap-3">
+          <div id="balancePill" class="hidden px-3 py-1 bg-green-50 text-green-700 text-xs font-bold uppercase tracking-wider rounded-full border border-green-100 items-center gap-1">
+            <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+            <span id="balanceText">0 credits</span>
+          </div>
+          <div id="userChip" style="display:none" class="flex items-center gap-3">
+            <span id="userEmail" class="text-sm font-medium text-gray-600 hidden sm:block"></span>
+            <button id="logoutBtn" class="text-xs text-red-500 hover:text-red-700 font-medium">Sign out</button>
+          </div>
+          <button id="loginBtn" class="text-sm font-bold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors">Log in</button>
+          <a href="/" class="text-sm font-bold text-blue-600 hover:text-blue-700 px-3 py-2 transition-colors flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+            Check VIN
+          </a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="max-w-5xl mx-auto px-4 sm:px-6 py-10">
+
+      <!-- Page header -->
+      <div class="mb-8">
+        <h1 class="text-3xl font-bold text-slate-900">Report History</h1>
+        <p class="text-gray-500 mt-1 text-sm">All vehicle history reports you've run.</p>
+      </div>
+
+      <!-- Search + controls bar -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-6 flex flex-col sm:flex-row gap-3">
+
+        <!-- Search input -->
+        <div class="relative flex-1">
+          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+          </div>
+          <input id="searchInput" type="text" placeholder="Search by VIN or plate…"
+            class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 outline-none text-sm transition-all font-mono uppercase placeholder:normal-case placeholder:font-sans placeholder:capitalize" />
+        </div>
+
+        <!-- Type filter -->
+        <select id="typeFilter" class="h-10 rounded-xl border border-gray-200 bg-gray-50 focus:border-blue-400 outline-none px-3 text-sm font-medium text-gray-600 cursor-pointer">
+          <option value="">All types</option>
+          <option value="carfax">CARFAX</option>
+          <option value="autocheck">AutoCheck</option>
+        </select>
+
+        <!-- Sort -->
+        <select id="sortOrder" class="h-10 rounded-xl border border-gray-200 bg-gray-50 focus:border-blue-400 outline-none px-3 text-sm font-medium text-gray-600 cursor-pointer">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="vin">VIN A–Z</option>
+        </select>
+
+        <!-- Clear all -->
+        <button id="clearAllBtn" class="h-10 px-4 rounded-xl border border-red-200 bg-red-50 text-red-600 text-sm font-semibold hover:bg-red-100 transition-colors whitespace-nowrap">
+          Clear all
+        </button>
+      </div>
+
+      <!-- Status bar: result count + sync status -->
+      <div class="flex items-center justify-between mb-4 px-1">
+        <p id="resultCount" class="text-sm text-gray-500"></p>
+        <div id="syncStatus" class="hidden items-center gap-2 text-xs text-gray-400 font-medium">
+          <div class="loader w-3 h-3 border-2" style="width:12px;height:12px;border-width:2px;"></div>
+          <span>Syncing from server…</span>
+        </div>
+      </div>
+
+      <!-- Report list -->
+      <div id="historyList" class="space-y-3"></div>
+
+      <!-- Empty state -->
+      <div id="emptyState" class="hidden bg-white rounded-2xl border border-dashed border-gray-200 p-16 text-center">
+        <div class="text-5xl mb-4">📋</div>
+        <h3 class="font-bold text-gray-700 text-lg mb-1">No reports found</h3>
+        <p class="text-gray-400 text-sm mb-6" id="emptyMsg">You haven't run any reports yet.</p>
+        <a href="/" class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl transition-colors text-sm shadow-lg shadow-blue-600/20">
+          Check a VIN
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+        </a>
+      </div>
+
+    </main>
+
+    <!-- Email modal -->
+    <div id="emailModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+      role="dialog" aria-modal="true" aria-labelledby="emailModalTitle">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
+        <button id="closeEmailModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600" aria-label="Close">✕</button>
+        <h3 id="emailModalTitle" class="text-xl font-bold text-gray-900 mb-2">Email Report</h3>
+        <p class="text-sm text-gray-500 mb-4">We'll send the PDF to this address.</p>
+        <input id="emailTargetInput" type="email" placeholder="name@example.com" autofocus
+          class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+        <button id="sendEmailBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors">Send Now</button>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toastBox" class="fixed top-20 right-4 space-y-3 z-[60]"></div>
+
+    <!-- Supabase config (same as index.html) -->
+    <script>
+      window.VITE_SUPABASE_URL = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
+      window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script type="module">
+      /* ============================================================
+         Utilities
+      ============================================================ */
+      const $  = (sel) => document.querySelector(sel);
+      const $$ = (sel) => document.querySelectorAll(sel);
+      const $id = (id) => document.getElementById(id);
+
+      const PENDING_KEY  = 'pendingReport';
+      const HISTORY_KEY  = 'reportHistory';
+      const API_TIMEOUT  = 30_000;
+
+      function showToast(message, type = 'error') {
+        const box = $id('toastBox');
+        if (!box) return;
+        const el = document.createElement('div');
+        el.className = `transform transition-all duration-300 flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${
+          type === 'error'
+            ? 'bg-red-50 text-red-700 border border-red-100'
+            : 'bg-green-50 text-green-700 border border-green-100'
+        }`;
+        el.innerHTML = type === 'error'
+          ? `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>${message}</span>`
+          : `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span>${message}</span>`;
+        box.appendChild(el);
+        requestAnimationFrame(() => { el.style.transform = 'translateY(0)'; el.style.opacity = '1'; });
+        setTimeout(() => {
+          el.style.transition = 'all 0.5s ease'; el.style.opacity = '0'; el.style.transform = 'translateY(-10px)';
+          setTimeout(() => el.remove(), 500);
+        }, 4000);
+      }
+
+      function setBtnLoading(btn, text = 'Loading…') {
+        if (!btn) return () => {};
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<svg class="animate-spin w-4 h-4 inline mr-1" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>${text}`;
+        return () => { btn.disabled = false; btn.innerHTML = orig; };
+      }
+
+      function downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      async function apiFetch(url, opts = {}, timeout = API_TIMEOUT) {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), timeout);
+        try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
+        catch (e) {
+          if (e.name === 'AbortError') throw new Error('Request timed out.');
+          throw e;
+        } finally { clearTimeout(t); }
+      }
+
+      function formatTime(ts) { return new Date(ts).toLocaleString(); }
+
+      /* ============================================================
+         Supabase + Auth
+      ============================================================ */
+      const SB_URL  = window.VITE_SUPABASE_URL  || '';
+      const SB_ANON = window.VITE_SUPABASE_ANON_KEY || '';
+      let supabase = null;
+      if (window.supabase && SB_URL && SB_ANON) {
+        supabase = window.supabase.createClient(SB_URL, SB_ANON);
+      }
+
+      async function getSession() {
+        if (!supabase) return { user: null, token: null };
+        const { data } = await supabase.auth.getSession();
+        const session = data?.session || null;
+        return { user: session?.user || null, token: session?.access_token || null };
+      }
+
+      function reflectAuthNav(user) {
+        const chip  = $id('userChip');
+        const lb    = $id('loginBtn');
+        const email = $id('userEmail');
+        const pill  = $id('balancePill');
+        if (user) {
+          if (email) email.textContent = user.email || '';
+          if (chip)  chip.style.display = 'flex';
+          lb?.classList.add('hidden');
+        } else {
+          if (chip) chip.style.display = 'none';
+          lb?.classList.remove('hidden');
+        }
+      }
+
+      /* ============================================================
+         localStorage history
+      ============================================================ */
+      function loadLocalHistory() {
+        try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; }
+      }
+      function saveLocalHistory(list) {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+      }
+
+      /* ============================================================
+         Server history (logged-in users only)
+         Merges server records into the local list, deduplicating by VIN.
+         Server rows use (vin, type, created_at); we adapt them to match
+         the local history shape { vin, type, ts, state, plate }.
+      ============================================================ */
+      async function fetchServerHistory(token) {
+        try {
+          const r = await apiFetch('/api/history', {
+            headers: { Authorization: `Bearer ${token}` },
+          }, 10_000);
+          if (!r.ok) return [];
+          const { rows = [] } = await r.json();
+          return rows.map(row => ({
+            vin:      row.vin,
+            type:     row.type || 'carfax',
+            ts:       new Date(row.created_at).getTime(),
+            state:    '',
+            plate:    '',
+            source:   'server',
+          }));
+        } catch { return []; }
+      }
+
+      function mergeHistories(local, server) {
+        // Build a set of "vin|type" keys from local so we don't duplicate
+        const seen = new Set(local.map(i => `${i.vin}|${i.type}`));
+        const merged = [...local];
+        for (const row of server) {
+          const key = `${row.vin}|${row.type}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            merged.push(row);
+          }
+        }
+        return merged;
+      }
+
+      /* ============================================================
+         Report rendering
+      ============================================================ */
+      function openReport(html) {
+        // Open in overlay on the same page — identical to app.js approach
+        document.getElementById('reportOverlayPage')?.remove();
+        const overlay = document.createElement('div');
+        overlay.id = 'reportOverlayPage';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#fff;display:flex;flex-direction:column;';
+        const bar = document.createElement('div');
+        bar.style.cssText = 'flex-shrink:0;background:#1e3a8a;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;';
+        bar.innerHTML = `
+          <span style="color:white;font-weight:bold;font-size:14px;">Vehicle History Report</span>
+          <button id="closeHistoryOverlay" style="background:#ef4444;color:white;border:none;padding:6px 14px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px;">✕ Close</button>`;
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'flex:1;border:none;width:100%;';
+        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
+        iframe.srcdoc = html;
+        overlay.appendChild(bar);
+        overlay.appendChild(iframe);
+        document.body.appendChild(overlay);
+        window.history.pushState({ reportOverlayOpen: true }, '');
+        bar.querySelector('#closeHistoryOverlay').addEventListener('click', () => window.history.back());
+      }
+
+      window.addEventListener('popstate', () => {
+        document.getElementById('reportOverlayPage')?.remove();
+      });
+
+      /* ============================================================
+         Email modal
+      ============================================================ */
+      let emailTarget = null;
+
+      function openEmailModal(item) {
+        emailTarget = item;
+        const sess = getSession();
+        sess.then(({ user }) => {
+          if (user?.email) $id('emailTargetInput').value = user.email;
+        });
+        $id('emailModal')?.classList.remove('hidden');
+        $id('emailTargetInput')?.focus();
+      }
+
+      $id('closeEmailModal')?.addEventListener('click', () => {
+        $id('emailModal')?.classList.add('hidden');
+        emailTarget = null;
+      });
+
+      $id('sendEmailBtn')?.addEventListener('click', async () => {
+        const to = ($id('emailTargetInput')?.value || '').trim();
+        if (!to || !to.includes('@')) return showToast('Invalid email', 'error');
+        if (!emailTarget) return;
+
+        const isPlate = emailTarget.vin === '(from plate)';
+        const body = {
+          to,
+          type:  emailTarget.type || 'carfax',
+          vin:   isPlate ? ''                       : emailTarget.vin,
+          state: isPlate ? (emailTarget.state || '') : '',
+          plate: isPlate ? (emailTarget.plate || '') : '',
+        };
+
+        const restore = setBtnLoading($id('sendEmailBtn'), 'Sending…');
+        try {
+          const r = await apiFetch('/api/email-report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }, 15_000);
+          if (!r.ok) throw new Error(await r.text());
+          showToast(`Report sent to ${to}`, 'ok');
+          $id('emailModal')?.classList.add('hidden');
+          emailTarget = null;
+        } catch { showToast('Failed to send email', 'error'); }
+        finally { restore(); }
+      });
+
+      /* ============================================================
+         Row actions
+      ============================================================ */
+      async function viewReport(item) {
+        const data = {
+          vin:       item.vin !== '(from plate)' ? item.vin : '',
+          state:     item.state || '',
+          plate:     item.plate || '',
+          type:      item.type,
+          as:        'html',
+          allowLive: false,
+        };
+        const { token } = await getSession();
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        try {
+          const r = await apiFetch('/api/report', { method: 'POST', headers, body: JSON.stringify(data) });
+          if (!r.ok) { showToast(await r.text() || `HTTP ${r.status}`, 'error'); return; }
+          openReport(await r.text());
+        } catch (e) { showToast(e.message || 'Request failed', 'error'); }
+      }
+
+      async function downloadPDF(item, btn) {
+        const restore = setBtnLoading(btn, '…');
+        showToast('Generating PDF…', 'ok');
+        const data = {
+          vin:       item.vin !== '(from plate)' ? item.vin : '',
+          state:     item.state || '',
+          plate:     item.plate || '',
+          type:      item.type,
+          as:        'pdf',
+          allowLive: false,
+        };
+        const { token } = await getSession();
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        try {
+          const r = await apiFetch('/api/report', { method: 'POST', headers, body: JSON.stringify(data) }, 60_000);
+          if (!r.ok) { showToast(await r.text() || `HTTP ${r.status}`, 'error'); return; }
+          if ((r.headers.get('content-type') || '').includes('text/html')) {
+            showToast('PDF service busy — opening web report instead.', 'ok');
+            openReport(await r.text());
+            return;
+          }
+          downloadBlob(await r.blob(), `${(data.vin || item.plate || 'report').replace(/\W+/g, '_')}_${item.type}.pdf`);
+          showToast('Download started!', 'ok');
+        } catch (e) { showToast(e.message || 'Request failed', 'error'); }
+        finally { restore(); }
+      }
+
+      async function copyShareLink(item) {
+        const vin = item.vin !== '(from plate)' ? item.vin : item.plate;
+        try {
+          const r = await apiFetch('/api/share', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vin, type: item.type }),
+          }, 10_000);
+          if (!r.ok) throw new Error(await r.text());
+          const { url } = await r.json();
+          await navigator.clipboard.writeText(url);
+          showToast('Share link copied!', 'ok');
+        } catch (e) { showToast(e.message || 'Could not create share link', 'error'); }
+      }
+
+      /* ============================================================
+         Render
+      ============================================================ */
+      let allItems = [];   // full merged list from local + server
+      let filteredItems = []; // after search/filter/sort
+
+      function applyFilters() {
+        const q     = ($id('searchInput')?.value  || '').trim().toUpperCase();
+        const type  = $id('typeFilter')?.value   || '';
+        const order = $id('sortOrder')?.value    || 'newest';
+
+        filteredItems = allItems.filter(item => {
+          if (q && !item.vin.toUpperCase().includes(q) &&
+              !(item.plate || '').toUpperCase().includes(q)) return false;
+          if (type && item.type !== type) return false;
+          return true;
+        });
+
+        filteredItems.sort((a, b) => {
+          if (order === 'oldest') return a.ts - b.ts;
+          if (order === 'vin')    return a.vin.localeCompare(b.vin);
+          return b.ts - a.ts; // newest
+        });
+
+        renderList();
+      }
+
+      function renderList() {
+        const container = $id('historyList');
+        const empty     = $id('emptyState');
+        const count     = $id('resultCount');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        if (!filteredItems.length) {
+          container.classList.add('hidden');
+          empty?.classList.remove('hidden');
+          const q = ($id('searchInput')?.value || '').trim();
+          if ($id('emptyMsg')) {
+            $id('emptyMsg').textContent = q
+              ? `No reports match "${q}".`
+              : 'You haven\'t run any reports yet.';
+          }
+          if (count) count.textContent = '';
+          return;
+        }
+
+        container.classList.remove('hidden');
+        empty?.classList.add('hidden');
+        if (count) count.textContent = `${filteredItems.length} report${filteredItems.length === 1 ? '' : 's'}`;
+
+        filteredItems.forEach((item, idx) => {
+          const isPlate = item.vin === '(from plate)';
+          const label   = isPlate
+            ? `<span class="font-mono font-bold">${item.plate || '—'}</span><span class="ml-1.5 text-xs text-gray-400 font-normal">(plate lookup)</span>`
+            : `<span class="font-mono font-bold">${item.vin}</span>`;
+
+          const typeTag = item.type === 'autocheck'
+            ? `<span class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-purple-100 text-purple-700 rounded-full">AutoCheck</span>`
+            : `<span class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-blue-100 text-blue-700 rounded-full">CARFAX</span>`;
+
+          const srcTag = item.source === 'server'
+            ? `<span class="px-2 py-0.5 text-[10px] font-medium text-gray-400 bg-gray-100 rounded-full">cloud</span>`
+            : '';
+
+          const row = document.createElement('div');
+          row.className = 'row-enter bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-all p-4 sm:p-5';
+          row.dataset.idx = idx;
+          row.innerHTML = `
+            <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="flex flex-wrap items-center gap-2 mb-1">
+                  <span class="text-gray-900 text-sm">${label}</span>
+                  ${typeTag}
+                  ${srcTag}
+                </div>
+                <p class="text-xs text-gray-400">${formatTime(item.ts)}</p>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                <button data-action="view"
+                  class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-2 px-3 rounded-lg transition-colors">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                  View
+                </button>
+                <button data-action="pdf"
+                  class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-2 px-3 rounded-lg transition-colors">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                  PDF
+                </button>
+                <button data-action="email"
+                  class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-gray-50 hover:bg-gray-100 text-gray-600 text-xs font-bold py-2 px-3 rounded-lg transition-colors">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                  Email
+                </button>
+                <button data-action="share"
+                  class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-gray-50 hover:bg-gray-100 text-gray-600 text-xs font-bold py-2 px-3 rounded-lg transition-colors">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+                  Link
+                </button>
+                <button data-action="del"
+                  class="flex items-center justify-center text-red-300 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+              </div>
+            </div>`;
+
+          row.querySelectorAll('button[data-action]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              const action = btn.dataset.action;
+              if (action === 'view')  await viewReport(item);
+              if (action === 'pdf')   await downloadPDF(item, btn);
+              if (action === 'email') openEmailModal(item);
+              if (action === 'share') await copyShareLink(item);
+              if (action === 'del') {
+                // Remove from local storage only (server records stay)
+                const local = loadLocalHistory();
+                const newLocal = local.filter(l => !(l.vin === item.vin && l.type === item.type));
+                saveLocalHistory(newLocal);
+                allItems = allItems.filter((_, i) => i !== idx);
+                applyFilters();
+                showToast('Removed from local history', 'ok');
+              }
+            });
+          });
+
+          container.appendChild(row);
+        });
+      }
+
+      /* ============================================================
+         Init
+      ============================================================ */
+      async function init() {
+        // Auth
+        if (!supabase) return;
+        const { data } = await supabase.auth.getSession();
+        const session = data?.session || null;
+        reflectAuthNav(session?.user || null);
+
+        supabase.auth.onAuthStateChange((_e, s) => reflectAuthNav(s?.user || null));
+
+        // Load local history first so page is instant
+        allItems = loadLocalHistory();
+        applyFilters();
+
+        // If logged in, fetch server history and merge
+        if (session?.user && session?.access_token) {
+          const syncEl = $id('syncStatus');
+          syncEl?.classList.remove('hidden');
+          syncEl?.style.setProperty('display', 'flex');
+
+          const serverRows = await fetchServerHistory(session.access_token);
+          allItems = mergeHistories(allItems, serverRows);
+          applyFilters();
+
+          syncEl?.classList.add('hidden');
+          syncEl?.style.setProperty('display', 'none');
+        }
+      }
+
+      /* ============================================================
+         Event listeners
+      ============================================================ */
+      $id('searchInput')?.addEventListener('input',  applyFilters);
+      $id('typeFilter')?.addEventListener('change',  applyFilters);
+      $id('sortOrder')?.addEventListener('change',   applyFilters);
+
+      $id('clearAllBtn')?.addEventListener('click', () => {
+        if (!confirm('Clear all local report history? Server-side records for your account will not be deleted.')) return;
+        localStorage.removeItem(HISTORY_KEY);
+        allItems = allItems.filter(i => i.source === 'server'); // keep server rows in view
+        applyFilters();
+        showToast('Local history cleared', 'ok');
+      });
+
+      $id('logoutBtn')?.addEventListener('click', async () => {
+        if (!supabase) return;
+        await supabase.auth.signOut();
+        showToast('Signed out', 'ok');
+        reflectAuthNav(null);
+        // Reload to drop server records from the merged list
+        window.location.reload();
+      });
+
+      init();
+    </script>
+  </body>
+</html>

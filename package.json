@@ -24,7 +24,7 @@
     "helmet": "7.1.0",
     "morgan": "1.10.0",
     "nodemailer": "^7.0.10",
-    "puppeteer": "^24.37.5",
+    "puppeteer": "^24.40.0",
     "stripe": "19.1.0"
   },
   "devDependencies": {

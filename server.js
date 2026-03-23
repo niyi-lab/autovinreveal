@@ -10,39 +10,33 @@
  *   #17 — PayPal create-order/capture-order support single/5pack/10pack
  *
  * PREVIOUS FIXES:
- *   #F  — paypalClient renamed to ppClient everywhere (ReferenceError crash fix)
- *   #G  — create-order destructures `package` not `package_type` (key mismatch fix)
- *   #H  — plate/state sanitised to alphanumeric before upstream URL interpolation
- *   #I  — reconcileStalePendingCharges threshold raised from 5 min → 15 min
- *   #J  — PayPal order tracking: invoice_id, custom_id, items, sku, description
- *   #K  — Added amount.breakdown.item_total to PayPal order body.
- *   #L  — invoice_id middle segment capped at 60 chars.
+ *   #F  — paypalClient renamed to ppClient everywhere
+ *   #G  — create-order destructures `package` not `package_type`
+ *   #H  — plate/state sanitised to alphanumeric before upstream URL
+ *   #I  — reconcileStalePendingCharges threshold raised to 15 min
+ *   #J  — PayPal order tracking: invoice_id, custom_id, items, sku
+ *   #K  — amount.breakdown.item_total added to PayPal order body
+ *   #L  — invoice_id middle segment capped at 60 chars
+ *   #M  — FIX-1: timingSafeEqual no longer short-circuited
+ *   #N  — FIX-2: markSessionConsumed atomic via unique constraint
+ *   #O  — FIX-3: createPendingCharge called before use_credit_for_vin
+ *   #P  — FIX-4: getReportData filters by report type in DB
+ *   #Q  — FIX-5: paypalCaptureLimiter on create-order too
  *
  * FIXES IN THIS VERSION:
- *   FIX-1 — Admin timingSafeEqual no longer short-circuited by plain === comparison.
- *            The redundant `&& provided === expected` was leaking timing information
- *            and defeating the entire purpose of timingSafeEqual.
+ *   BLANK-PAGE — injectReportChrome() strips Adobe DTM analytics
+ *                scripts before HTML delivery. DTM reads
+ *                document.currentScript.src at init time; when served
+ *                from a different origin this resolves to "undefined",
+ *                causing DTM to immediately navigate window.location to
+ *                "undefined" + "svg/social/Favicon.svg" — blanking the
+ *                report in the srcdoc iframe. Applied to both the main
+ *                report route and the shared link viewer.
  *
- *   FIX-2 — markSessionConsumed now throws SESSION_ALREADY_CONSUMED on a duplicate-key
- *            error from the DB, making the isConsumed check + mark atomic via the
- *            unique constraint rather than a racy read-then-write sequence.
- *            The report route catches this error and returns 400 receipt_already_used.
- *
- *   FIX-3 — createPendingCharge is now called BEFORE use_credit_for_vin so that a
- *            crash between the two operations leaves a recoverable pending record.
- *            Previously a crash after the RPC deducted the credit but before the
- *            pending row was inserted would silently lose the user's credit.
- *            If use_credit_for_vin fails (insufficient credits) the pending row is
- *            immediately cleaned up and a 402 is returned as before.
- *
- *   FIX-4 — getReportData now filters by report type in the DB query so a CARFAX
- *            lookup never returns a cached AutoCheck report for the same VIN.
- *            The upsert in the report route stores the type column and uses
- *            (user_id, vin, type) as the conflict target.
- *
- *   FIX-5 — paypalCaptureLimiter now also applied to /api/paypal/create-order.
- *            Previously create-order was unprotected, allowing unlimited PayPal
- *            API calls against the server's credentials.
+ *   EMAIL-PDF  — /api/email-report now generates a real PDF via the
+ *                CarSimulcast /pdf endpoint (same as the download
+ *                button) and attaches it. Falls back to a styled link
+ *                email if PDF generation fails.
  ********************************************************************/
 
 import dotenv from "dotenv";
@@ -80,11 +74,11 @@ const HOST = "0.0.0.0";
 /* ================================================================
    Config (env)
 ================================================================ */
-const SITE_URL       = process.env.SITE_URL     || `http://localhost:${PORT}`;
+const SITE_URL       = process.env.SITE_URL      || `http://localhost:${PORT}`;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || SITE_URL;
 const FORCE_WWW      = process.env.FORCE_WWW === "1";
 
-const APP_SECRET     = process.env.APP_SECRET   || "change_me_in_env_file";
+const APP_SECRET     = process.env.APP_SECRET    || "change_me_in_env_file";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 const ADMIN_SESSION_TTL_SECONDS = Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 12);
 
@@ -120,9 +114,6 @@ app.use((_req, res, next) => {
   next();
 });
 
-/* ================================================================
-   Health
-================================================================ */
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
 /* ================================================================
@@ -131,13 +122,13 @@ app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 const stripeLive = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 const STRIPE_TEST_SECRET_KEY = process.env.STRIPE_TEST_SECRET_KEY || null;
 
-const PRICE_SINGLE  = process.env.STRIPE_PRICE_SINGLE;
-const PRICE_5PACK   = process.env.STRIPE_PRICE_5PACK;
-const PRICE_10PACK  = process.env.STRIPE_PRICE_10PACK;
+const PRICE_SINGLE = process.env.STRIPE_PRICE_SINGLE;
+const PRICE_5PACK  = process.env.STRIPE_PRICE_5PACK;
+const PRICE_10PACK = process.env.STRIPE_PRICE_10PACK;
 
-const CREDITS_PER_SINGLE  = Number(process.env.CREDITS_PER_SINGLE  || "1");
-const CREDITS_PER_5PACK   = Number(process.env.CREDITS_PER_5PACK   || "5");
-const CREDITS_PER_10PACK  = Number(process.env.CREDITS_PER_10PACK  || "10");
+const CREDITS_PER_SINGLE = Number(process.env.CREDITS_PER_SINGLE || "1");
+const CREDITS_PER_5PACK  = Number(process.env.CREDITS_PER_5PACK  || "5");
+const CREDITS_PER_10PACK = Number(process.env.CREDITS_PER_10PACK || "10");
 
 function stripeForId(id) {
   const isTest = typeof id === "string" && id.startsWith("cs_test_");
@@ -149,14 +140,13 @@ function stripeForId(id) {
 }
 
 /* ================================================================
-   PayPal package config (single source of truth)
+   PayPal package config
 ================================================================ */
 const PAYPAL_PACKAGE_CONFIG = {
   single:   { amount: "6.00",  credits: 1  },
   "5pack":  { amount: "25.00", credits: 5  },
   "10pack": { amount: "40.00", credits: 10 },
 };
-
 function resolvePaypalPackage(pkg) {
   return PAYPAL_PACKAGE_CONFIG[pkg] || PAYPAL_PACKAGE_CONFIG["single"];
 }
@@ -200,7 +190,7 @@ if (SMTP_USER && SMTP_PASS) {
     auth: { user: SMTP_USER, pass: SMTP_PASS },
   });
   mailer.verify()
-    .then(()  => console.log("✅ SMTP mailer ready"))
+    .then(() => console.log("✅ SMTP mailer ready"))
     .catch(e  => console.error("❌ SMTP failed:", e));
 } else {
   console.warn("⚠️  SMTP not configured. Emails will fail.");
@@ -231,19 +221,16 @@ async function csGet(url) {
 }
 
 /* ================================================================
-   Cache / Helpers
+   Cache
 ================================================================ */
 const CACHE_DIR = path.join(__dirname, "cache");
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 const ck = (vin, type) => path.join(CACHE_DIR, `${vin}-${type}.b64`);
-
 const writeCache = (vin, type, data) => fs.writeFileSync(ck(vin, type), data, "utf8");
 
 const REPORT_TTL_DAYS = 30;
 const MAX_AGE_MS      = REPORT_TTL_DAYS * 24 * 60 * 60 * 1000;
 
-// FIX-4: DB query now filters by `type` so a CARFAX lookup never returns
-// a cached AutoCheck report (or vice versa) for the same VIN.
 async function getReportData(vin, type) {
   const v = (vin  || "").toUpperCase();
   const t = (type || "").toLowerCase();
@@ -265,7 +252,7 @@ async function getReportData(vin, type) {
       .from("vin_queries")
       .select("report_data, created_at")
       .eq("vin", v)
-      .eq("type", t)                               // FIX-4: filter by type
+      .eq("type", t)
       .not("report_data", "is", null)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -297,7 +284,92 @@ function decodeReportBase64(rawB64) {
 }
 
 /* ================================================================
-   FIX 1: Consumed Sessions — DB-backed
+   Report HTML Injection Helper — BLANK-PAGE FIX
+
+   The CARFAX report HTML embeds Adobe DTM analytics scripts from
+   assets.adobedtm.com. DTM reads document.currentScript.src at init
+   time to compute its asset base path. When the HTML is served from
+   a different origin (your server), currentScript.src resolves to
+   your domain, so DTM computes base = "undefined" and immediately
+   executes synchronously in <head>:
+       window.location.href = "undefined" + "svg/social/Favicon.svg"
+
+   In app.js the report renders in a sandboxed srcdoc iframe. This
+   navigation blanks the iframe. Any JS patch injected into the same
+   document runs AFTER DTM has already fired, so patching
+   Location.prototype alone is not sufficient as the primary fix.
+
+   SOLUTION:
+   1. Strip Adobe DTM <script> tags entirely — they are pure
+      analytics and removing them has zero effect on report content.
+   2. Also strip <base href="undefined"> and meta-refresh as
+      belt-and-suspenders.
+   3. Inject a lightweight nav guard that blocks any remaining
+      "undefined" navigations from other scripts.
+   4. Inject dealer-hide CSS.
+================================================================ */
+function injectReportChrome(html) {
+  if (!html || typeof html !== "string") return html;
+
+  let out = html;
+
+  // 1. Strip Adobe DTM scripts (root cause)
+  out = out.replace(/<script\b[^>]*adobedtm\.com[^>]*>[\s\S]*?<\/script>/gi, "");
+  out = out.replace(/<script\b[^>]*assets\.adobedtm[^>]*><\/script>/gi, "");
+  out = out.replace(/<script\b[^>]*adobedtm[^>]*\/?>/gi, "");
+
+  // 2. Strip <base href="undefined">
+  out = out.replace(/<base\b[^>]*href=["']?undefined["']?[^>]*>/gi, "");
+
+  // 3. Strip meta refresh
+  out = out.replace(/<meta\b[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, "");
+
+  // 4. Nav guard as first child of <head>
+  const guardLines = [
+    "<script>",
+    "(function(){",
+    "  try{",
+    "    var _lp=Object.getOwnPropertyDescriptor(Location.prototype,'href');",
+    "    if(_lp&&_lp.set){",
+    "      Object.defineProperty(Location.prototype,'href',{",
+    "        set:function(v){if(typeof v==='string'&&v.indexOf('undefined')!==-1)return;_lp.set.call(this,v);},",
+    "        get:function(){return _lp.get.call(this);},",
+    "        configurable:true",
+    "      });",
+    "    }",
+    "  }catch(e){}",
+    "  ['assign','replace'].forEach(function(m){",
+    "    var orig=window.location[m];",
+    "    try{window.location[m]=function(v){if(typeof v==='string'&&v.indexOf('undefined')!==-1)return;orig.call(window.location,v);};}catch(e){}",
+    "  });",
+    "})();",
+    "<\/script>",
+  ];
+  const guard = guardLines.join("\n");
+
+  if (/<head[\s>]/i.test(out)) {
+    out = out.replace(/(<head(?:\s[^>]*)?>)/i, "$1" + guard);
+  } else {
+    out = guard + out;
+  }
+
+  // 5. Dealer-hide CSS
+  const css = [
+    "<style>",
+    "  .dealer-info,.dealer-header,.co-brand-header,#dealer-wrapper,",
+    "  .cpo-header,.cobrand-header,.dealer-contact-info,",
+    "  div[class*='dealer'],div[id*='dealer'],div[class*='cobrand'],",
+    "  .switch-wrapper,.language-toggle-wrapper{display:none!important;}",
+    "</style>",
+    "</head>",
+  ].join("\n");
+  out = out.replace("</head>", css);
+
+  return out;
+}
+
+/* ================================================================
+   Consumed Sessions — DB-backed (FIX-2 atomic)
 ================================================================ */
 async function isSessionConsumed(sessionId) {
   try {
@@ -310,18 +382,11 @@ async function isSessionConsumed(sessionId) {
   } catch { return false; }
 }
 
-// FIX-2: Insert relies on the unique constraint on session_id.
-// If a duplicate-key error comes back we throw SESSION_ALREADY_CONSUMED so
-// the caller can distinguish a race from any other DB failure.
-// This collapses the read-then-write race: both concurrent requests hit the
-// DB insert simultaneously; exactly one succeeds and the other gets the error.
 async function markSessionConsumed(sessionId) {
   const { error } = await supabaseService
     .from("consumed_sessions")
     .insert({ session_id: sessionId });
-
   if (error) {
-    // Postgres unique-violation code is 23505; Supabase surfaces it in error.code
     if (error.code === "23505" || /unique|duplicate/i.test(error.message)) {
       throw new Error("SESSION_ALREADY_CONSUMED");
     }
@@ -330,14 +395,11 @@ async function markSessionConsumed(sessionId) {
 }
 
 async function unmarkSessionConsumed(sessionId) {
-  await supabaseService
-    .from("consumed_sessions")
-    .delete()
-    .eq("session_id", sessionId);
+  await supabaseService.from("consumed_sessions").delete().eq("session_id", sessionId);
 }
 
 /* ================================================================
-   FIX 2: Share Tokens — DB-backed
+   Share Tokens — DB-backed
 ================================================================ */
 async function createShareToken(vin, type) {
   const token     = Buffer.from(crypto.randomUUID()).toString("base64url").replace(/=/g, "");
@@ -363,7 +425,7 @@ async function getShareToken(token) {
 }
 
 /* ================================================================
-   FIX 5: Atomic Credit Updates
+   Atomic Credit Updates
 ================================================================ */
 async function addCreditsAtomic(userId, delta) {
   const { error } = await supabaseService.rpc("add_credits", {
@@ -374,7 +436,7 @@ async function addCreditsAtomic(userId, delta) {
 }
 
 /* ================================================================
-   FIX 6: Pending Charges — DB-backed crash-safe refunds
+   Pending Charges — DB-backed crash-safe refunds
 ================================================================ */
 async function createPendingCharge({ userId = null, sessionId = null, vin }) {
   const { data, error } = await supabaseService
@@ -394,33 +456,28 @@ async function refundAndResolve(chargeId, userId, sessionId) {
   try {
     if (userId) {
       await addCreditsAtomic(userId, 1);
-      console.log(`[Refund] Refunded 1 credit to user ${userId} for charge ${chargeId}`);
+      console.log(`[Refund] +1 credit to user ${userId} for charge ${chargeId}`);
     } else if (sessionId) {
       if (sessionId.startsWith("pp_")) {
         const captureId = sessionId.replace("pp_", "");
         try {
           const refundReq = new paypalSdk.payments.CapturesRefundRequest(captureId);
-          refundReq.requestBody({
-            reason: "AutoVINReveal: VIN not found or report generation failed.",
-          });
+          refundReq.requestBody({ reason: "AutoVINReveal: VIN not found or report generation failed." });
           await ppClient.execute(refundReq);
-          console.log(`[Refund] Successfully issued real PayPal refund for capture ${captureId}`);
+          console.log(`[Refund] PayPal refund issued for capture ${captureId}`);
         } catch (ppErr) {
-          console.error(`[Refund] FATAL: PayPal API refund failed for ${captureId}:`, ppErr.message);
+          console.error(`[Refund] FATAL: PayPal refund failed for ${captureId}:`, ppErr.message);
         }
       } else if (sessionId.startsWith("cs_")) {
         try {
           const sStripe = stripeForId(sessionId);
           const session = await sStripe.checkout.sessions.retrieve(sessionId);
           if (session.payment_intent) {
-            await sStripe.refunds.create({
-              payment_intent: session.payment_intent,
-              reason: "requested_by_customer",
-            });
-            console.log(`[Refund] Successfully issued real Stripe refund for session ${sessionId}`);
+            await sStripe.refunds.create({ payment_intent: session.payment_intent, reason: "requested_by_customer" });
+            console.log(`[Refund] Stripe refund issued for session ${sessionId}`);
           }
         } catch (stripeErr) {
-          console.error(`[Refund] FATAL: Stripe API refund failed for ${sessionId}:`, stripeErr.message);
+          console.error(`[Refund] FATAL: Stripe refund failed for ${sessionId}:`, stripeErr.message);
         }
       }
       await unmarkSessionConsumed(sessionId);
@@ -440,10 +497,8 @@ async function reconcileStalePendingCharges() {
       .from("pending_charges")
       .select("*")
       .lt("created_at", threshold);
-
     if (!data?.length) return;
     console.log(`[Reconcile] Found ${data.length} stale charge(s) — refunding...`);
-
     for (const charge of data) {
       console.log(`[Reconcile] Refunding charge ${charge.id} for VIN ${charge.vin}`);
       await refundAndResolve(charge.id, charge.user_id, charge.session_id);
@@ -518,13 +573,9 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
       }
 
       const userId = session.metadata?.user_id || session.client_reference_id || null;
-
       if (!userId && creditsToAdd > 0) {
-        console.warn(
-          `[Webhook] Guest purchase — no userId. Credits (${creditsToAdd}) not stored. Session: ${session.id}`
-        );
+        console.warn(`[Webhook] Guest purchase — no userId. Credits (${creditsToAdd}) not stored. Session: ${session.id}`);
       }
-
       if (userId && creditsToAdd > 0) {
         await addCreditsAtomic(userId, creditsToAdd);
       }
@@ -546,14 +597,7 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
-// FIX-5: Applied to both create-order and capture-order. Previously only
-// capture-order was rate-limited, leaving create-order as an unmetered
-// vector for burning through PayPal API credentials.
-const paypalCaptureLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: "Too many PayPal requests",
-});
+const paypalCaptureLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: "Too many PayPal requests" });
 
 /* ================================================================
    PayPal client
@@ -570,15 +614,12 @@ async function verifyPaypalCapture(captureId) {
   return res?.result;
 }
 
-// FIX-5 & ordering: reconcileStalePendingCharges runs after ppClient is defined
-// so that any PayPal refunds issued during reconciliation have a live client.
+// Must run after ppClient is defined so PayPal refunds have a live client
 reconcileStalePendingCharges();
 
 /* ================================================================
-   Endpoints
+   Stripe Checkout
 ================================================================ */
-
-// Stripe Checkout
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
     const { user_id: userIdFromBody, price_id, vin, report_type } = req.body || {};
@@ -609,20 +650,18 @@ app.post("/api/create-checkout-session", async (req, res) => {
       payment_intent_data: {
         description: vin
           ? `AutoVINReveal – VIN: ${vin}`
-          : isTenPack ? "AutoVINReveal – 10 Report Bundle"
+          : isTenPack  ? "AutoVINReveal – 10 Report Bundle"
           : isFivePack ? "AutoVINReveal – 5 Report Bundle"
           : "AutoVINReveal – 1 Report Credit",
-        metadata: {
-          ...(vin ? { vin } : {}),
-        },
+        metadata: { ...(vin ? { vin } : {}) },
       },
       success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ""}`,
       cancel_url:  `${SITE_URL}/?checkout=cancel`,
       ...(userId ? { client_reference_id: userId } : {}),
       metadata: {
-        ...(userId      ? { user_id: userId }    : {}),
-        ...(vin         ? { vin }                 : {}),
-        ...(report_type ? { report_type }         : {}),
+        ...(userId      ? { user_id: userId } : {}),
+        ...(vin         ? { vin }              : {}),
+        ...(report_type ? { report_type }      : {}),
         intent,
       },
     });
@@ -634,7 +673,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
   }
 });
 
-// Credits endpoint — requires auth, user can only read their own balance
+/* ================================================================
+   Credits endpoint
+================================================================ */
 app.get("/api/credits/:user_id", async (req, res) => {
   try {
     const { user } = await getUser(req);
@@ -654,7 +695,6 @@ app.get("/api/credits/:user_id", async (req, res) => {
 
 /* ================================================================
    PayPal — Create Order
-   FIX-5: paypalCaptureLimiter now applied here as well.
 ================================================================ */
 app.post("/api/paypal/create-order", paypalCaptureLimiter, async (req, res) => {
   try {
@@ -693,17 +733,12 @@ app.post("/api/paypal/create-order", paypalCaptureLimiter, async (req, res) => {
     request.prefer("return=representation");
     request.requestBody({
       intent: "CAPTURE",
-      application_context: {
-        shipping_preference: "NO_SHIPPING",
-        brand_name: "AutoVINReveal",
-      },
+      application_context: { shipping_preference: "NO_SHIPPING", brand_name: "AutoVINReveal" },
       purchase_units: [{
         amount: {
           currency_code: "USD",
-          value:         pkg.amount,
-          breakdown: {
-            item_total: { currency_code: "USD", value: pkg.amount },
-          },
+          value: pkg.amount,
+          breakdown: { item_total: { currency_code: "USD", value: pkg.amount } },
         },
         custom_id:  customIdentifier,
         invoice_id: invoiceId,
@@ -756,7 +791,6 @@ app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => 
     if (user_id) await addCreditsAtomic(user_id, credits);
 
     console.log(`[PayPal] Captured ${pkg} (${credits} credit${credits > 1 ? "s" : ""}) for user ${user_id || "guest"}`);
-
     res.json({ ok: true, captureId, credits });
   } catch (err) {
     console.error("PayPal capture error:", err);
@@ -779,7 +813,7 @@ app.post("/api/report", async (req, res) => {
     const {
       vin, state, plate,
       type:           reqType,
-      as:             as           = "html",
+      as:             as          = "html",
       allowLive:      allowLiveRaw,
       oneTimeSession: reqSession,
     } = req.body || {};
@@ -819,7 +853,7 @@ app.post("/api/report", async (req, res) => {
           .select("id")
           .eq("user_id", currentUser.id)
           .eq("vin", targetVin)
-          .eq("type", type)                        // FIX-4: match on type too
+          .eq("type", type)
           .eq("success", true)
           .maybeSingle();
         if (past) alreadyOwned = true;
@@ -831,14 +865,7 @@ app.post("/api/report", async (req, res) => {
 
       if (!alreadyOwned && !oneTimeSession) {
         if (currentUser) {
-          // FIX-3: Create the pending charge row FIRST so a crash between this
-          // point and the RPC call is recoverable via reconcileStalePendingCharges.
-          // If use_credit_for_vin returns an error (e.g. insufficient credits)
-          // the pending row is deleted immediately before returning 402.
-          pendingChargeId = await createPendingCharge({
-            userId: currentUser.id,
-            vin:    targetVin,
-          });
+          pendingChargeId = await createPendingCharge({ userId: currentUser.id, vin: targetVin });
 
           const { error: rpcErr } = await supabaseForToken(
             req.headers.authorization?.split(" ")[1]
@@ -861,15 +888,8 @@ app.post("/api/report", async (req, res) => {
             const s       = await sStripe.checkout.sessions.retrieve(oneTimeSession);
             if (s.payment_status !== "paid") throw new Error("unpaid");
           }
-
-          // FIX-2: markSessionConsumed now throws SESSION_ALREADY_CONSUMED if the
-          // unique constraint fires, preventing a concurrent request from consuming
-          // the same session token. No pre-check needed — the insert IS the check.
           await markSessionConsumed(oneTimeSession);
-          pendingChargeId = await createPendingCharge({
-            sessionId: oneTimeSession,
-            vin:       targetVin,
-          });
+          pendingChargeId = await createPendingCharge({ sessionId: oneTimeSession, vin: targetVin });
         } catch (e) {
           if (e.message === "SESSION_ALREADY_CONSUMED") {
             return res.status(400).json({ error: "receipt_already_used" });
@@ -888,8 +908,6 @@ app.post("/api/report", async (req, res) => {
         writeCache(targetVin, type, raw);
 
         if (currentUser) {
-          // FIX-4: store type in the upsert and use (user_id, vin, type) as the
-          // conflict target so CARFAX and AutoCheck results are stored separately.
           await supabaseService.from("vin_queries").upsert({
             user_id:     currentUser.id,
             vin:         targetVin,
@@ -902,9 +920,7 @@ app.post("/api/report", async (req, res) => {
         if (pendingChargeId) await resolvePendingCharge(pendingChargeId);
 
       } catch (e) {
-        console.error(
-          `[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`
-        );
+        console.error(`[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`);
 
         if (pendingChargeId) {
           await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
@@ -958,28 +974,28 @@ app.post("/api/report", async (req, res) => {
 
     if (decoded.kind === "html") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.send(decoded.html);
+      // BLANK-PAGE FIX: strip Adobe DTM and inject nav guard before delivery
+      return res.send(injectReportChrome(decoded.html));
+    }
+
+    if (decoded.kind === "pdf") {
+      res.setHeader("Content-Type", "application/pdf");
+      return res.send(decoded.buffer);
     }
 
     if (pendingChargeId) {
       console.error(`[Delivery Failed] User: ${currentUser?.id || "guest"} | Bad format. Refunding.`);
       await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
       pendingChargeId = null;
-      return res.status(422).json({
-        error: "provider_error",
-        message: "Report format error. You have been refunded.",
-      });
+      return res.status(422).json({ error: "provider_error", message: "Report format error. You have been refunded." });
     }
 
     return res.status(500).json({ error: "unsupported_content" });
 
   } catch (err) {
     if (pendingChargeId) {
-      try {
-        await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
-      } catch (refundErr) {
-        console.error("[Critical] Outer-catch refund failed:", refundErr.message);
-      }
+      try { await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession); }
+      catch (refundErr) { console.error("[Critical] Outer-catch refund failed:", refundErr.message); }
     }
     console.error("Critical server error:", err);
     return res.status(500).json({ error: "server_error" });
@@ -987,7 +1003,10 @@ app.post("/api/report", async (req, res) => {
 });
 
 /* ================================================================
-   Email
+   Email Report — EMAIL-PDF FIX
+   Uses the CarSimulcast /pdf endpoint (same as the download button)
+   to generate a real PDF attachment. Falls back to a styled link
+   email if PDF generation fails.
 ================================================================ */
 app.post("/api/email-report", async (req, res) => {
   try {
@@ -1008,23 +1027,78 @@ app.post("/api/email-report", async (req, res) => {
     const raw = await getReportData(targetVin, type);
     if (!raw) return res.status(404).json({ error: "not_cached" });
 
-    const decoded     = decodeReportBase64(raw);
-    const subject     = `${type.toUpperCase()} report for ${targetVin}`;
-    const attachments = [];
-    if (decoded.kind === "pdf")  attachments.push({ filename: `${targetVin}.pdf`,  content: decoded.buffer });
-    if (decoded.kind === "html") attachments.push({ filename: `${targetVin}.html`, content: decoded.html });
+    const decoded = decodeReportBase64(raw);
+    const subject = `Your ${type.toUpperCase()} Vehicle History Report — ${targetVin}`;
 
+    // Attempt real PDF generation via CarSimulcast (same as download button)
+    let pdfBuffer = null;
+
+    if (decoded.kind === "pdf") {
+      pdfBuffer = decoded.buffer;
+    } else if (decoded.kind === "html") {
+      try {
+        const form = new FormData();
+        form.append("base64_content", Buffer.from(decoded.html, "utf8").toString("base64"));
+        form.append("vin",         targetVin);
+        form.append("report_type", type);
+        const pdfRes = await axios.post(`${CS}/pdf`, form, {
+          headers: { ...H, ...form.getHeaders() },
+          responseType: "arraybuffer",
+          timeout: 60000,
+        });
+        pdfBuffer = Buffer.from(pdfRes.data);
+      } catch (pdfErr) {
+        console.error("[email-report] PDF generation failed:", pdfErr.message);
+      }
+    }
+
+    if (pdfBuffer) {
+      await mailer.sendMail({
+        from: SMTP_FROM, to, subject,
+        text: `Your vehicle history report for VIN ${targetVin} is attached as a PDF.`,
+        attachments: [{
+          filename:    `${targetVin}-${type}-report.pdf`,
+          content:     pdfBuffer,
+          contentType: "application/pdf",
+        }],
+      });
+      return res.json({ ok: true, format: "pdf" });
+    }
+
+    // Fallback: send a styled link email
+    const reportUrl = `${SITE_URL}/view-report/${targetVin}?type=${type}`;
     await mailer.sendMail({
       from: SMTP_FROM, to, subject,
-      text: `Attached is your report for VIN ${targetVin}.`,
-      attachments,
+      text: [
+        `Your vehicle history report for VIN ${targetVin} is ready.`,
+        ``,
+        `View your report here: ${reportUrl}`,
+        ``,
+        `To save as PDF: open the link then press Ctrl+P (Windows) or Cmd+P (Mac) and choose Save as PDF.`,
+      ].join("\n"),
+      html: `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:sans-serif;max-width:600px;margin:40px auto;color:#1e293b;">
+  <div style="background:#1d4ed8;padding:24px 32px;border-radius:8px 8px 0 0;">
+    <h1 style="color:white;margin:0;font-size:20px;">Vehicle History Report Ready</h1>
+  </div>
+  <div style="border:1px solid #e2e8f0;border-top:none;padding:32px;border-radius:0 0 8px 8px;">
+    <p>Your CARFAX report for <strong>${targetVin}</strong> is ready to view.</p>
+    <p style="margin:24px 0;">
+      <a href="${reportUrl}" style="background:#1d4ed8;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block;">View Report</a>
+    </p>
+    <p style="color:#64748b;font-size:13px;">
+      To save as PDF: open the report then press <strong>Ctrl+P</strong> / <strong>Cmd+P</strong> and choose <strong>Save as PDF</strong>.
+    </p>
+  </div>
+</body></html>`,
     });
-    return res.json({ ok: true });
+    return res.json({ ok: true, format: "link_fallback" });
   } catch { return res.status(500).json({ error: "email_failed" }); }
 });
 
 /* ================================================================
-   Share Tokens — DB-backed endpoints
+   Share Tokens
 ================================================================ */
 app.post("/api/share", async (req, res) => {
   try {
@@ -1044,8 +1118,15 @@ app.get("/view/:token", async (req, res) => {
     const raw = await getReportData(meta.vin, meta.type);
     if (!raw)  return res.status(404).send("Report not found");
     const decoded = decodeReportBase64(raw);
-    if (decoded.kind === "html") { res.setHeader("Content-Type", "text/html");       return res.send(decoded.html); }
-    if (decoded.kind === "pdf")  { res.setHeader("Content-Type", "application/pdf"); return res.send(decoded.buffer); }
+    if (decoded.kind === "html") {
+      res.setHeader("Content-Type", "text/html");
+      // BLANK-PAGE FIX: same injection as main report route
+      return res.send(injectReportChrome(decoded.html));
+    }
+    if (decoded.kind === "pdf") {
+      res.setHeader("Content-Type", "application/pdf");
+      return res.send(decoded.buffer);
+    }
     res.status(500).send("Unsupported format");
   } catch { res.status(500).send("Server error"); }
 });
@@ -1082,15 +1163,10 @@ function requireAdmin(req, res, next) {
 app.post("/api/admin/login", (req, res) => {
   const provided = req.body?.password || "";
   const expected = ADMIN_PASSWORD;
-
-  // FIX-1: timingSafeEqual is the only comparison used. The previous code also
-  // performed `&& provided === expected` which is a plain string comparison that
-  // leaks timing information and defeats the constant-time guarantee entirely.
+  // FIX-1: timingSafeEqual only — no plain === short-circuit
   const a = Buffer.alloc(64); const b = Buffer.alloc(64);
   Buffer.from(provided).copy(a); Buffer.from(expected).copy(b);
-  const match = crypto.timingSafeEqual(a, b);
-
-  if (!match) return res.status(401).json({ error: "bad_password" });
+  if (!crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: "bad_password" });
   res.cookie("admin_session", makeAdminToken(), {
     httpOnly: true, secure: true, sameSite: "strict",
     maxAge: ADMIN_SESSION_TTL_SECONDS * 1000, path: "/",
