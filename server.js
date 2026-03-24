@@ -133,6 +133,17 @@ const PRICE_SINGLE = (!IS_PROD && process.env.STRIPE_TEST_PRICE_SINGLE) ? proces
 const PRICE_5PACK  = (!IS_PROD && process.env.STRIPE_TEST_PRICE_5PACK)  ? process.env.STRIPE_TEST_PRICE_5PACK  : process.env.STRIPE_PRICE_5PACK;
 const PRICE_20PACK = (!IS_PROD && process.env.STRIPE_TEST_PRICE_20PACK) ? process.env.STRIPE_TEST_PRICE_20PACK : process.env.STRIPE_PRICE_20PACK;
 
+// Subscription price IDs
+const SUB_STARTER  = process.env.STRIPE_PRICE_SUB_STARTER;  // $30/mo  20 reports
+const SUB_PRO      = process.env.STRIPE_PRICE_SUB_PRO;      // $98/mo 100 reports
+const SUB_PREMIUM  = process.env.STRIPE_PRICE_SUB_PREMIUM;  // $160/mo 200 reports
+
+const SUB_CREDITS = {
+  [SUB_STARTER]:  Number(process.env.SUB_CREDITS_STARTER  || 20),
+  [SUB_PRO]:      Number(process.env.SUB_CREDITS_PRO      || 100),
+  [SUB_PREMIUM]:  Number(process.env.SUB_CREDITS_PREMIUM  || 200),
+};
+
 const CREDITS_PER_SINGLE = Number(process.env.CREDITS_PER_SINGLE || "1");
 const CREDITS_PER_5PACK  = Number(process.env.CREDITS_PER_5PACK  || "5");
 const CREDITS_PER_20PACK = Number(process.env.CREDITS_PER_20PACK || "20");
@@ -566,8 +577,28 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
   }
 
   try {
+    // ── One-time purchases ──
     if (event.type === "checkout.session.completed") {
-      const session   = event.data.object;
+      const session = event.data.object;
+
+      // Subscription checkout — store customer↔user mapping then grant first month credits
+      if (session.mode === "subscription") {
+        const userId     = session.metadata?.user_id || session.client_reference_id || null;
+        const customerId = session.customer;
+        const subId      = session.subscription;
+
+        if (userId && customerId) {
+          // Store Stripe customer ID on the credits row for future renewals
+          await supabaseService.from("credits")
+            .update({ stripe_customer_id: customerId, stripe_subscription_id: subId })
+            .eq("user_id", userId);
+          console.log(`[Sub] New subscription ${subId} for user ${userId}`);
+        }
+        // Credits for first period are granted by invoice.paid below
+        return res.status(200).json({ ok: true });
+      }
+
+      // One-time purchase
       const sStripe   = stripeForId(session.id);
       const lineItems = await sStripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
 
@@ -588,6 +619,44 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
         await addCreditsAtomic(userId, creditsToAdd);
       }
     }
+
+    // ── Subscription renewal — grant credits each billing period ──
+    if (event.type === "invoice.paid") {
+      const invoice = event.data.object;
+      // Only act on subscription invoices, not one-time charges
+      if (!invoice.subscription) return res.status(200).json({ ok: true });
+
+      const customerId = invoice.customer;
+      const priceId    = invoice.lines?.data?.[0]?.price?.id;
+      const credits    = SUB_CREDITS[priceId] || 0;
+
+      if (credits > 0 && customerId) {
+        // Look up user by stripe_customer_id
+        const { data: row } = await supabaseService
+          .from("credits")
+          .select("user_id")
+          .eq("stripe_customer_id", customerId)
+          .maybeSingle();
+
+        if (row?.user_id) {
+          await addCreditsAtomic(row.user_id, credits);
+          console.log(`[Sub] Renewed ${credits} credits for user ${row.user_id} (price ${priceId})`);
+        } else {
+          console.warn(`[Sub] invoice.paid — no user found for customer ${customerId}`);
+        }
+      }
+    }
+
+    // ── Subscription cancelled ──
+    if (event.type === "customer.subscription.deleted") {
+      const sub        = event.data.object;
+      const customerId = sub.customer;
+      await supabaseService.from("credits")
+        .update({ stripe_subscription_id: null })
+        .eq("stripe_customer_id", customerId);
+      console.log(`[Sub] Cancelled subscription for customer ${customerId}`);
+    }
+
     return res.status(200).json({ ok: true });
   } catch (e) {
     console.error("Webhook handler error:", e);
@@ -654,6 +723,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
     const session = await stripeDefault.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
+      currency: "usd",
       line_items: [{ price: priceLive, quantity: 1 }],
       payment_intent_data: {
         description: vin
@@ -678,6 +748,68 @@ app.post("/api/create-checkout-session", async (req, res) => {
   } catch (err) {
     console.error("Stripe checkout error:", err);
     res.status(500).json({ error: "Stripe error" });
+  }
+});
+
+/* ================================================================
+   Subscription Checkout
+================================================================ */
+app.post("/api/create-subscription-session", async (req, res) => {
+  try {
+    const { price_id } = req.body || {};
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "Login required to subscribe" });
+
+    const validPrices = [SUB_STARTER, SUB_PRO, SUB_PREMIUM].filter(Boolean);
+    if (!validPrices.includes(price_id)) {
+      return res.status(400).json({ error: "Invalid subscription price" });
+    }
+
+    const session = await stripeDefault.checkout.sessions.create({
+      mode: "subscription",
+      payment_method_types: ["card"],
+      line_items: [{ price: price_id, quantity: 1 }],
+      success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=subscription`,
+      cancel_url:  `${SITE_URL}/?checkout=cancel`,
+      client_reference_id: user.id,
+      metadata: { user_id: user.id, price_id },
+      subscription_data: { metadata: { user_id: user.id } },
+    });
+
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error("Subscription checkout error:", err);
+    res.status(500).json({ error: "Subscription error" });
+  }
+});
+
+/* ================================================================
+   Cancel Subscription
+================================================================ */
+app.post("/api/cancel-subscription", async (req, res) => {
+  try {
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "unauthorized" });
+
+    const { data } = await supabaseService
+      .from("credits")
+      .select("stripe_subscription_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!data?.stripe_subscription_id) {
+      return res.status(404).json({ error: "No active subscription" });
+    }
+
+    await stripeDefault.subscriptions.cancel(data.stripe_subscription_id);
+    await supabaseService.from("credits")
+      .update({ stripe_subscription_id: null })
+      .eq("user_id", user.id);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Cancel subscription error:", err);
+    res.status(500).json({ error: "Cancellation failed" });
   }
 });
 
@@ -916,15 +1048,16 @@ app.post("/api/report", async (req, res) => {
         writeCache(targetVin, type, raw);
 
         if (currentUser) {
-          await supabaseService.from("vin_queries").upsert({
+          const upsertResult = await supabaseService.from("vin_queries").upsert({
             user_id:     currentUser.id,
             vin:         targetVin,
             type:        type,
             report_data: raw,
             success:     true,
-            ...(req.body?.plate ? { plate: req.body.plate.replace(/[^A-Za-z0-9]/g,'').toUpperCase() } : {}),
-            ...(req.body?.state ? { state: req.body.state.replace(/[^A-Za-z0-9]/g,'').toUpperCase() } : {}),
           }, { onConflict: "user_id,vin,type" });
+          if (upsertResult.error) {
+            console.error("[Upsert] vin_queries upsert failed:", upsertResult.error.message);
+          }
         }
 
         if (pendingChargeId) await resolvePendingCharge(pendingChargeId);
@@ -1118,13 +1251,16 @@ app.get("/api/history", async (req, res) => {
 
     const { data, error } = await supabaseService
       .from("vin_queries")
-      .select("vin, type, success, created_at, plate, state")
+      .select("vin, type, success, created_at")
       .eq("user_id", user.id)
       .eq("success", true)
       .order("created_at", { ascending: false })
       .limit(500);
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      console.error("[/api/history] Supabase error:", error.message);
+      return res.status(500).json({ error: error.message });
+    }
     res.json({ ok: true, rows: data || [] });
   } catch { res.status(500).json({ error: "Server error" }); }
 });
@@ -1218,6 +1354,232 @@ app.get("/api/admin/history", requireAdmin, async (_req, res) => {
 });
 
 app.get("/admin", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
+
+/* ================================================================
+   Dashboard Stats — single endpoint for the user dashboard
+================================================================ */
+app.get("/api/dashboard", async (req, res) => {
+  try {
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "unauthorized" });
+
+    const { data: credRow } = await supabaseService
+      .from("credits")
+      .select("balance, stripe_subscription_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const { data: queries } = await supabaseService
+      .from("vin_queries")
+      .select("vin, type, success, created_at")
+      .eq("user_id", user.id)
+      .eq("success", true)
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    const rows = queries || [];
+
+    // Monthly breakdown — last 6 months
+    const now = new Date();
+    const monthly = {};
+    for (let i = 5; i >= 0; i--) {
+      const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+      monthly[key] = 0;
+    }
+    for (const r of rows) {
+      const d   = new Date(r.created_at);
+      const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+      if (key in monthly) monthly[key]++;
+    }
+
+    const thisMonthKey = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+    const thisMonth    = monthly[thisMonthKey] || 0;
+
+    // Top checked VINs
+    const vinCount = {};
+    for (const r of rows) { vinCount[r.vin] = (vinCount[r.vin] || 0) + 1; }
+    const topVins = Object.entries(vinCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([vin, count]) => ({ vin, count }));
+
+    // Subscription plan label
+    let plan = "None";
+    if (credRow && credRow.stripe_subscription_id) {
+      try {
+        const sub     = await stripeDefault.subscriptions.retrieve(credRow.stripe_subscription_id);
+        const priceId = sub.items && sub.items.data[0] && sub.items.data[0].price && sub.items.data[0].price.id;
+        if      (priceId === SUB_STARTER)  plan = "Starter";
+        else if (priceId === SUB_PRO)      plan = "Pro";
+        else if (priceId === SUB_PREMIUM)  plan = "Premium";
+        else                               plan = "Active";
+      } catch { plan = "Active"; }
+    }
+
+    res.json({
+      ok: true,
+      balance:       credRow ? credRow.balance : 0,
+      plan,
+      totalReports:  rows.length,
+      thisMonth,
+      monthly,
+      topVins,
+      recentReports: rows.slice(0, 10),
+    });
+  } catch (err) {
+    console.error("Dashboard error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+/* ================================================================
+   AI Chat Widget
+================================================================ */
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { message, history = [], userEmail = null } = req.body || {};
+    if (!message) return res.status(400).json({ error: "message required" });
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "Chat not configured" });
+
+    const systemPrompt = `ROLE: You are a live chat support agent for AutoVINReveal. You talk like a real human - short, warm, casual.
+
+ABSOLUTE FORMATTING RULES - breaking these is your only failure mode:
+ZERO markdown. No asterisks, no bold, no bullet points, no numbered lists, no dashes as list items, no headers.
+Write ONLY plain sentences. To list things write them inline: "You can pay by card or PayPal."
+Maximum 2 sentences per reply unless you are asking follow-up questions.
+Never start with "Great question!" or "Good question!" or "Of course!" - just answer.
+
+FACTS - never say anything outside this list:
+Single report is $6 and needs no account. 5-pack is $20 ($4 each) and needs an account. 20-pack is $58 ($2.90 each) and needs an account.
+Monthly plans: Starter $30/mo for 20 reports, Pro $98/mo for 100 reports, Premium $160/mo for 200 reports.
+Reports cover accidents, odometer rollbacks, title issues, service records, open recalls.
+Search by VIN or license plate plus state. Credits never expire. Pay by card or PayPal.
+Failed reports are automatically refunded. Support email is support@autovinreveal.com.
+
+IF ASKED ABOUT MISSING/FAILED REPORT - ask ONE question at a time in order:
+Step 1: Ask if they got a payment confirmation email.
+Step 2: Ask how long ago they paid.
+Step 3: Ask if they saw an error message.
+Only after getting all 3 answers say something like: "In that case email support@autovinreveal.com with your transaction ID and the VIN you searched and they will fix it fast."
+Do NOT give them a list of what to include. Just say to email with transaction ID and VIN.
+
+IF ASKED ANYTHING NOT IN THE FACTS LIST above: Say "I am not sure about that - email support@autovinreveal.com and they will help you out."
+Never mention APIs, integrations, or that you lack information.
+
+ESCALATE: Only add ESCALATE on its own final line when the customer has a real unresolved billing or account problem after you have walked through troubleshooting. Not for general questions.`;
+    const messages = [
+      ...history.slice(-6).map(m => ({ role: m.role, content: m.content })),
+      { role: "user", content: message },
+    ];
+
+    const response = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      { model: "claude-haiku-4-5-20251001", max_tokens: 300, system: systemPrompt, messages },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        timeout: 20000,
+      }
+    );
+
+    let reply = response.data?.content?.[0]?.text || "Sorry, I could not process that.";
+
+    // Check if AI wants to escalate to human
+    const shouldEscalate = reply.includes("ESCALATE");
+    reply = reply.replace(/\nESCALATE\s*$/m, "").replace(/ESCALATE\s*$/m, "").trim();
+
+    if (shouldEscalate && mailer) {
+      // Email the owner with the full conversation
+      const convoLines = [
+        ...history.map(m => (m.role === "user" ? "User: " : "Bot: ") + m.content),
+        "User: " + message,
+        "Bot: " + reply,
+      ];
+      const convoHtml = convoLines
+        .map(l => `<p style="margin:4px 0;${l.startsWith("User:") ? "color:#1e3a8a;font-weight:bold;" : "color:#475569;"}">${l}</p>`)
+        .join("");
+
+      mailer.sendMail({
+        from: SMTP_FROM,
+        to: SMTP_USER,
+        subject: "AutoVINReveal: Chat needs your attention" + (userEmail ? " — " + userEmail : ""),
+        html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <div style="background:#1e3a8a;color:white;padding:16px 20px;border-radius:8px 8px 0 0;">
+            <strong>Customer needs help</strong>${userEmail ? " &mdash; " + userEmail : ""}
+          </div>
+          <div style="border:1px solid #e2e8f0;border-top:none;padding:20px;border-radius:0 0 8px 8px;background:#f8fafc;">
+            <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Full conversation:</p>
+            ${convoHtml}
+            <hr style="margin:16px 0;border:none;border-top:1px solid #e2e8f0;"/>
+            <p style="color:#64748b;font-size:12px;">Reply directly to the customer at: <a href="mailto:${userEmail || "support@autovinreveal.com"}">${userEmail || "support@autovinreveal.com"}</a></p>
+          </div>
+        </div>`,
+      }).catch(e => console.error("[Chat escalation email failed]", e.message));
+    }
+
+    res.json({ reply, escalated: shouldEscalate });
+  } catch (err) {
+    console.error("Chat error:", err.response?.data || err.message);
+    res.status(500).json({ error: "Chat failed" });
+  }
+});
+
+/* ================================================================
+   Chat Escalation — sends conversation to owner when AI can't help
+================================================================ */
+app.post("/api/chat-escalate", async (req, res) => {
+  try {
+    const { email, convo = [] } = req.body || {};
+    if (!mailer) return res.status(500).json({ error: "email_not_configured" });
+
+    const convoHtml = convo.map(function(m) {
+      const isUser = m.role === "user";
+      const style  = isUser ? "color:#1e3a8a;font-weight:bold;" : "color:#475569;";
+      const prefix = isUser ? "Customer: " : "Bot: ";
+      const text   = String(m.content || "").replace(/</g, "&lt;");
+      return "<p style='margin:4px 0;" + style + "'>" + prefix + text + "</p>";
+    }).join("");
+
+    const emailHeader = email
+      ? " &mdash; <a href='mailto:" + email + "' style='color:#93c5fd;'>" + email + "</a>"
+      : " (no email provided)";
+
+    const noMessages = "<p style='color:#94a3b8;'>No messages recorded.</p>";
+
+    const html = [
+      "<div style='font-family:sans-serif;max-width:600px;margin:0 auto;'>",
+      "  <div style='background:#1e3a8a;color:white;padding:16px 20px;border-radius:8px 8px 0 0;'>",
+      "    <strong>Customer needs human support</strong>" + emailHeader,
+      "  </div>",
+      "  <div style='border:1px solid #e2e8f0;border-top:none;padding:20px;border-radius:0 0 8px 8px;background:#f8fafc;'>",
+      "    <p style='color:#64748b;font-size:13px;margin-bottom:12px;'>Conversation history:</p>",
+      "    " + (convoHtml || noMessages),
+      "    <hr style='margin:16px 0;border:none;border-top:1px solid #e2e8f0;'/>",
+      "    <p style='color:#64748b;font-size:12px;'>Hit <strong>Reply</strong> to respond directly to the customer.</p>",
+      "  </div>",
+      "</div>",
+    ].join("\n");
+
+    await mailer.sendMail({
+      from:    SMTP_FROM,
+      to:      SMTP_USER,
+      replyTo: email || SMTP_USER,
+      subject: "AutoVINReveal: Customer needs help" + (email ? " — " + email : ""),
+      html,
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Chat escalate error:", err.message);
+    res.status(500).json({ error: "failed" });
+  }
+});
 
 /* ================================================================
    Static Files & Boot

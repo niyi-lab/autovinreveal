@@ -131,6 +131,14 @@
             </svg>
             History
           </a>
+          <a id="dashNavLink" href="/dashboard.html"
+            style="display:none"
+            class="text-sm font-semibold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+            </svg>
+            Dashboard
+          </a>
           <div id="balancePill" class="hidden px-3 py-1 bg-green-50 text-green-700 text-xs font-bold uppercase tracking-wider rounded-full border border-green-100 flex items-center gap-1">
             <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
             <span id="balanceText">0 credits</span>
@@ -173,6 +181,13 @@
               d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
           </svg>
           Report History
+        </a>
+        <a href="/dashboard.html"
+          class="flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+          Dashboard
         </a>
         <button id="logoutBtnMobile"
           class="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-red-500 hover:bg-red-50 transition-colors">
@@ -374,9 +389,20 @@
         </section>
 
         <section id="pricing" class="mt-20">
-          <div class="text-center mb-10">
+          <div class="text-center mb-8">
             <h2 class="text-3xl font-bold text-slate-900">Simple, Honest Pricing</h2>
-            <p class="text-gray-500 mt-2">No subscriptions. No hidden fees. Credits never expire.</p>
+            <p class="text-gray-500 mt-2">Pay as you go or save more with a monthly plan.</p>
+            <!-- Toggle -->
+            <div class="inline-flex items-center mt-6 bg-gray-100 rounded-xl p-1">
+              <button id="tabOneTime" onclick="showPricingTab('onetime')"
+                class="px-5 py-2 rounded-lg text-sm font-bold transition-all bg-white text-slate-900 shadow-sm">
+                Buy Credits
+              </button>
+              <button id="tabSubscription" onclick="showPricingTab('subscription')"
+                class="px-5 py-2 rounded-lg text-sm font-bold transition-all text-gray-500">
+                Monthly Plans
+              </button>
+            </div>
           </div>
 
           <!-- All 3 plans side-by-side (scrollable on mobile) -->
@@ -464,7 +490,104 @@
             </div>
 
           </div>
-          <p class="sm:hidden text-center text-xs text-gray-400 mt-3">← Swipe to see all plans →</p>
+          <p class="sm:hidden text-center text-xs text-gray-400 mt-3" id="swipeHint">← Swipe to see all plans →</p>
+
+          <!-- Monthly Plans (hidden by default) -->
+          <div id="subscriptionPlans" style="display:none">
+            <div class="pricing-row">
+
+              <!-- Starter -->
+              <div class="pricing-col">
+                <div class="plan-card bg-white rounded-2xl border border-gray-200 p-6 flex flex-col h-full">
+                  <div class="mb-5">
+                    <div class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Starter</div>
+                    <div class="flex items-end gap-1 mb-1">
+                      <span class="text-4xl font-black text-slate-900">$30</span>
+                      <span class="text-gray-400 text-sm mb-1">/ mo</span>
+                    </div>
+                    <p class="text-sm text-gray-500">Perfect for occasional shoppers.</p>
+                  </div>
+                  <div class="bg-blue-50 rounded-xl px-4 py-3 mb-4 text-center">
+                    <span class="text-2xl font-black text-blue-700">20</span>
+                    <span class="text-sm text-blue-500 ml-1">reports / month</span>
+                    <div class="text-xs text-blue-400 mt-0.5">$1.50 per report</div>
+                  </div>
+                  <ul class="space-y-2 text-sm text-slate-600 flex-1 mb-6">
+                    <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> 20 CARFAX reports/mo</li>
+                                        <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> Email support</li>
+                    <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> Cancel anytime</li>
+                  </ul>
+                  <button id="subStarterBtn" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-xl transition-colors text-sm">
+                    Get Started — $30/mo
+                  </button>
+                </div>
+              </div>
+
+              <!-- Pro -->
+              <div class="pricing-col">
+                <div class="plan-card featured relative bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-6 flex flex-col h-full text-white overflow-hidden shadow-xl shadow-blue-600/25">
+                  <div class="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -translate-y-10 translate-x-10 pointer-events-none"></div>
+                  <div class="absolute top-4 right-4 bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">Most Popular</div>
+                  <div class="mb-5 relative z-10">
+                    <div class="text-xs font-bold text-blue-200 uppercase tracking-widest mb-2">Pro</div>
+                    <div class="flex items-end gap-1 mb-1">
+                      <span class="text-4xl font-black">$98</span>
+                      <span class="text-blue-200 text-sm mb-1">/ mo</span>
+                    </div>
+                    <p class="text-sm text-blue-100">For active car shoppers & flippers.</p>
+                  </div>
+                  <div class="bg-white/15 rounded-xl px-4 py-3 mb-4 text-center relative z-10">
+                    <span class="text-2xl font-black">100</span>
+                    <span class="text-sm text-blue-100 ml-1">reports / month</span>
+                    <div class="text-xs text-blue-200 mt-0.5">$0.98 per report</div>
+                  </div>
+                  <ul class="space-y-2 text-sm text-blue-50 flex-1 mb-6 relative z-10">
+                    <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> 100 CARFAX reports/mo</li>
+                                        <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> Priority support</li>
+                    <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> Monthly analytics</li>
+                    <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> Cancel anytime</li>
+                  </ul>
+                  <button id="subProBtn" class="relative z-10 w-full bg-white text-blue-700 hover:bg-yellow-400 hover:text-blue-900 font-black py-3 rounded-xl transition-all text-sm shadow-lg">
+                    Get Started — $98/mo
+                  </button>
+                </div>
+              </div>
+
+              <!-- Premium -->
+              <div class="pricing-col">
+                <div class="plan-card relative bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl border border-slate-700 p-6 flex flex-col h-full text-white overflow-hidden shadow-xl">
+                  <div class="absolute top-0 right-0 w-32 h-32 bg-green-500/10 rounded-full -translate-y-10 translate-x-10 pointer-events-none"></div>
+                  <div class="absolute top-4 right-4 bg-green-400 text-green-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">Best Value</div>
+                  <div class="mb-5 relative z-10">
+                    <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Premium</div>
+                    <div class="flex items-end gap-1 mb-1">
+                      <span class="text-4xl font-black">$160</span>
+                      <span class="text-slate-400 text-sm mb-1">/ mo</span>
+                    </div>
+                    <p class="text-sm text-slate-300">For dealers and power users.</p>
+                  </div>
+                  <div class="bg-green-500/20 rounded-xl px-4 py-3 mb-4 text-center relative z-10">
+                    <span class="text-2xl font-black">200</span>
+                    <span class="text-sm text-slate-300 ml-1">reports / month</span>
+                    <div class="text-xs text-green-400 mt-0.5">$0.80 per report</div>
+                  </div>
+                  <ul class="space-y-2 text-sm text-slate-300 flex-1 mb-6 relative z-10">
+                    <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> 200 CARFAX reports/mo</li>
+                                        <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> Live chat support</li>
+                    <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> Advanced analytics</li>
+                    <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> Cancel anytime</li>
+                  </ul>
+                  <button id="subPremiumBtn" class="relative z-10 w-full bg-green-500 hover:bg-green-400 text-white font-black py-3 rounded-xl transition-all text-sm shadow-lg shadow-green-900/40">
+                    Get Started — $160/mo
+                  </button>
+                </div>
+              </div>
+
+            </div>
+            <p class="sm:hidden text-center text-xs text-gray-400 mt-3">← Swipe to see all plans →</p>
+            <p class="text-center text-xs text-gray-400 mt-4">Credits refresh every billing cycle · Cancel anytime · No hidden fees</p>
+          </div>
+
         </section>
 
         <div class="grid lg:grid-cols-[2fr_1fr] gap-8 mt-16">
@@ -714,7 +837,7 @@
               </summary>
               <div class="text-gray-600 text-sm mt-3">
                 If your payment went through but the report didn't load, don't worry — your purchase is safe. First, try refreshing the page or clearing your browser cache. If the report still doesn't appear, please contact our support team at
-                <a href="mailto:support@autovinreveal.com" class="text-blue-600 font-semibold hover:underline">support@autovinreveal.com</a>
+                <a href="/cdn-cgi/l/email-protection#ccbfb9bcbca3beb88cadb9b8a3baa5a2bea9baa9ada0e2afa3a1" class="text-blue-600 font-semibold hover:underline"><span class="__cf_email__" data-cfemail="02717772726d7076426377766d746b6c70677467636e2c616d6f">[email&#160;protected]</span></a>
                 with your VIN (or license plate) and the email address used at checkout. We'll resolve it for you promptly.
               </div>
             </details>
@@ -744,7 +867,7 @@
           <div>
             <h4 class="font-bold text-slate-900 mb-3">Support</h4>
             <ul class="space-y-2 text-sm text-gray-500">
-              <li><a href="mailto:support@autovinreveal.com" class="hover:text-blue-600">Contact Us</a></li>
+              <li><a href="/cdn-cgi/l/email-protection#fb888e8b8b94898fbb9a8e8f948d9295899e8d9e9a97d5989496" class="hover:text-blue-600">Contact Us</a></li>
               <li><a href="#" onclick="document.querySelector('details').open = true" class="hover:text-blue-600">FAQ</a></li>
             </ul>
           </div>
@@ -970,7 +1093,7 @@
       </div>
     </div>
 
-    <script>
+    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
     (function() {
       const LOCATIONS = [
         { city: 'New York',       state: 'NY', flag: 'US' },
@@ -1093,9 +1216,313 @@
       scheduleNext();
     })();
     </script>
+    <!-- ============================================================
+         Pricing Tab Toggle + Subscription Buttons
+    ============================================================ -->
     <script>
+      function showPricingTab(tab) {
+        const oneTime  = document.getElementById('subscriptionPlans') ? true : false;
+        const subPlans = document.getElementById('subscriptionPlans');
+        const onetimePlans = document.querySelector('.pricing-row');
+        const swipeHint = document.getElementById('swipeHint');
+        const tabOT  = document.getElementById('tabOneTime');
+        const tabSub = document.getElementById('tabSubscription');
+
+        if (tab === 'onetime') {
+          if (onetimePlans) onetimePlans.style.display = '';
+          if (swipeHint)    swipeHint.style.display    = '';
+          if (subPlans)     subPlans.style.display     = 'none';
+          tabOT.className  = 'px-5 py-2 rounded-lg text-sm font-bold transition-all bg-white text-slate-900 shadow-sm';
+          tabSub.className = 'px-5 py-2 rounded-lg text-sm font-bold transition-all text-gray-500';
+        } else {
+          if (onetimePlans) onetimePlans.style.display = 'none';
+          if (swipeHint)    swipeHint.style.display    = 'none';
+          if (subPlans)     subPlans.style.display     = '';
+          tabSub.className = 'px-5 py-2 rounded-lg text-sm font-bold transition-all bg-white text-slate-900 shadow-sm';
+          tabOT.className  = 'px-5 py-2 rounded-lg text-sm font-bold transition-all text-gray-500';
+        }
+      }
+
+      async function startSubscription(priceKey) {
+        // Check session directly from Supabase in case _currentSession not yet set
+        let session = window._currentSession;
+        if (!session?.user) {
+          // Try fetching live session before giving up
+          if (window.supabase) {
+            try {
+              const sb = window.supabase.createClient(window.VITE_SUPABASE_URL, window.VITE_SUPABASE_ANON_KEY);
+              const { data } = await sb.auth.getSession();
+              if (data?.session) session = data.session;
+            } catch(_) {}
+          }
+        }
+        if (!session?.user) {
+          window._pendingSubscription = priceKey;
+          document.getElementById('loginBtn')?.click();
+          return;
+        }
+        const token = session.access_token;
+        const btn = document.getElementById('sub' + priceKey.charAt(0).toUpperCase() + priceKey.slice(1) + 'Btn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+        try {
+          const r = await fetch('/api/create-subscription-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ price_id: window['SUB_PRICE_' + priceKey.toUpperCase()] }),
+          });
+          const d = await r.json();
+          if (d.url) window.location.href = d.url;
+          else throw new Error(d.error || 'Failed');
+        } catch (e) {
+          alert('Error: ' + e.message);
+          if (btn) { btn.disabled = false; }
+        }
+      }
+
+      document.getElementById('subStarterBtn')?.addEventListener('click',  () => startSubscription('starter'));
+      document.getElementById('subProBtn')?.addEventListener('click',      () => startSubscription('pro'));
+      document.getElementById('subPremiumBtn')?.addEventListener('click',  () => startSubscription('premium'));
+    </script>
+
+    <!-- ============================================================
+         AI Chat Widget
+    ============================================================ -->
+    <div id="chatWidget" style="position:fixed;bottom:80px;right:16px;z-index:300;font-family:'Inter',sans-serif;" class="sm:bottom-6">
+
+      <!-- Bubble button -->
+      <button id="chatBubble" onclick="toggleChat()"
+        style="width:52px;height:52px;border-radius:50%;background:#2563eb;border:none;cursor:pointer;
+               box-shadow:0 4px 20px rgba(37,99,235,0.4);display:flex;align-items:center;justify-content:center;
+               transition:transform 0.2s;"
+        onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+        <svg id="chatIconOpen" width="22" height="22" fill="white" viewBox="0 0 24 24">
+          <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+        </svg>
+        <svg id="chatIconClose" width="22" height="22" fill="white" viewBox="0 0 24 24" style="display:none">
+          <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+        </svg>
+        <!-- Unread dot -->
+        <span id="chatUnread" style="position:absolute;top:2px;right:2px;width:10px;height:10px;
+          background:#ef4444;border-radius:50%;border:2px solid white;display:none;"></span>
+      </button>
+
+      <!-- Chat window -->
+      <div id="chatWindow" style="display:none;position:absolute;bottom:64px;right:0;
+        width:320px;background:white;border-radius:16px;
+        box-shadow:0 20px 60px rgba(0,0,0,0.15);overflow:hidden;
+        border:1px solid #e2e8f0;">
+
+        <!-- Header -->
+        <div style="background:#1e3a8a;padding:14px 16px;display:flex;align-items:center;gap:10px;">
+          <div style="width:36px;height:36px;background:#2563eb;border-radius:10px;
+            display:flex;align-items:center;justify-content:center;font-weight:900;color:white;font-size:16px;">A</div>
+          <div>
+            <div style="color:white;font-weight:700;font-size:14px;">AutoVINReveal Support</div>
+            <div style="color:#93c5fd;font-size:11px;display:flex;align-items:center;gap:4px;">
+              <span style="width:6px;height:6px;background:#4ade80;border-radius:50%;display:inline-block;"></span>
+              Online · Powered by AI
+            </div>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div id="chatMessages" style="height:300px;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;">
+          <div style="background:#f1f5f9;border-radius:12px 12px 12px 4px;padding:10px 12px;max-width:85%;font-size:13px;color:#334155;line-height:1.5;">
+            Hi! 👋 I'm the AutoVINReveal assistant. Ask me anything about reports, pricing, or your account!
+          </div>
+        </div>
+
+        <!-- Input -->
+        <div style="border-top:1px solid #e2e8f0;padding:10px;display:flex;gap:8px;align-items:flex-end;">
+          <textarea id="chatInput" placeholder="Type a message…" rows="1"
+            style="flex:1;border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;
+              font-size:13px;resize:none;outline:none;font-family:inherit;line-height:1.5;
+              max-height:80px;overflow-y:auto;"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"
+            oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,80)+'px'"></textarea>
+          <button onclick="sendChat()" id="chatSendBtn"
+            style="width:36px;height:36px;border-radius:50%;background:#2563eb;border:none;
+              cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" fill="white" viewBox="0 0 24 24">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let chatOpen    = false;
+      let chatHistory = [];
+      let chatBusy    = false;
+
+      function toggleChat() {
+        chatOpen = !chatOpen;
+        document.getElementById('chatWindow').style.display = chatOpen ? 'block' : 'none';
+        document.getElementById('chatIconOpen').style.display  = chatOpen ? 'none'  : 'block';
+        document.getElementById('chatIconClose').style.display = chatOpen ? 'block' : 'none';
+        document.getElementById('chatUnread').style.display    = 'none';
+        if (chatOpen) setTimeout(() => document.getElementById('chatInput')?.focus(), 100);
+      }
+
+      function appendMessage(text, role) {
+        const box = document.getElementById('chatMessages');
+        const el  = document.createElement('div');
+        const isUser = role === 'user';
+        el.style.cssText = isUser
+          ? 'background:#2563eb;color:white;border-radius:12px 12px 4px 12px;padding:10px 12px;max-width:85%;align-self:flex-end;font-size:13px;line-height:1.5;'
+          : 'background:#f1f5f9;color:#334155;border-radius:12px 12px 12px 4px;padding:10px 12px;max-width:85%;font-size:13px;line-height:1.5;';
+        el.textContent = text;
+        box.appendChild(el);
+        box.scrollTop = box.scrollHeight;
+        return el;
+      }
+
+      function showTyping() {
+        const box = document.getElementById('chatMessages');
+        const el  = document.createElement('div');
+        el.id = 'chatTyping';
+        el.style.cssText = 'background:#f1f5f9;border-radius:12px 12px 12px 4px;padding:10px 14px;max-width:60px;display:flex;gap:4px;align-items:center;';
+        el.innerHTML = '<span style="width:6px;height:6px;background:#94a3b8;border-radius:50%;animation:bounce 1s infinite 0s;display:inline-block;"></span><span style="width:6px;height:6px;background:#94a3b8;border-radius:50%;animation:bounce 1s infinite 0.2s;display:inline-block;"></span><span style="width:6px;height:6px;background:#94a3b8;border-radius:50%;animation:bounce 1s infinite 0.4s;display:inline-block;"></span><style>@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}</style>';
+        box.appendChild(el);
+        box.scrollTop = box.scrollHeight;
+      }
+
+      async function sendChat() {
+        if (chatBusy) return;
+        const input = document.getElementById('chatInput');
+        const msg   = (input.value || '').trim();
+        if (!msg) return;
+
+        input.value = '';
+        input.style.height = 'auto';
+        appendMessage(msg, 'user');
+        chatHistory.push({ role: 'user', content: msg });
+
+        chatBusy = true;
+        document.getElementById('chatSendBtn').style.opacity = '0.5';
+        showTyping();
+
+        try {
+          // Get user email if logged in
+          const userEmail = window._currentSession?.user?.email || null;
+
+          const r = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: msg, history: chatHistory.slice(-6), userEmail }),
+          });
+          document.getElementById('chatTyping')?.remove();
+          const d = await r.json();
+          const reply = d.reply || 'Sorry, something went wrong.';
+          appendMessage(reply, 'assistant');
+          chatHistory.push({ role: 'assistant', content: reply });
+
+
+          // If escalated to human
+          if (d.escalated) {
+            if (userEmail) {
+              showEscalationConfirm(userEmail, chatHistory.concat([{role:"user",content:msg},{role:"assistant",content:reply}]));
+            } else {
+              showEmailCollector(chatHistory.concat([{role:"user",content:msg},{role:"assistant",content:reply}]));
+            }
+          }
+          // Show unread dot if chat is closed
+          if (!chatOpen) {
+            document.getElementById('chatUnread').style.display = 'block';
+          }
+        } catch {
+          document.getElementById('chatTyping')?.remove();
+          appendMessage('Sorry, I couldn\'t connect. Please email support@autovinreveal.com', 'assistant');
+        } finally {
+          chatBusy = false;
+          document.getElementById('chatSendBtn').style.opacity = '1';
+        }
+      }
+
+      // Show greeting after 3s if user hasn't opened chat
+      setTimeout(() => {
+        if (!chatOpen) {
+          document.getElementById('chatUnread').style.display = 'block';
+        }
+      }, 3000);
+
+      function showEscalationConfirm(email, convo) {
+        // Send convo to server so owner gets notified, then show confirm
+        fetch('/api/chat-escalate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, convo }),
+        }).catch(() => {});
+        const box = document.getElementById('chatMessages');
+        const el  = document.createElement('div');
+        el.style.cssText = 'background:#fef3c7;border:1px solid #fde68a;border-radius:12px;padding:12px 14px;font-size:12px;color:#92400e;line-height:1.6;';
+        el.innerHTML = '<strong>Our team has been notified</strong> and will follow up at your email <strong>' + email + '</strong> shortly. You can also email us directly at <a href="mailto:support@autovinreveal.com" style="color:#b45309;font-weight:bold;">support@autovinreveal.com</a>';
+        box.appendChild(el);
+        box.scrollTop = 99999;
+      }
+
+      function showEmailCollector(convo) {
+        // Inject an email input right into the chat
+        const box = document.getElementById('chatMessages');
+
+        const el = document.createElement('div');
+        el.style.cssText = 'background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;padding:12px 14px;font-size:13px;color:#0c4a6e;line-height:1.6;';
+        el.innerHTML = '<p style="margin:0 0 8px 0;font-weight:600;">What\'s your email? We\'ll follow up with you directly.</p>' +
+          '<div style="display:flex;gap:6px;">' +
+          '<input id="chatEscalateEmail" type="email" placeholder="you@example.com" style="flex:1;border:1px solid #bae6fd;border-radius:8px;padding:6px 10px;font-size:12px;outline:none;font-family:inherit;" />' +
+          '<button onclick="submitEscalateEmail(this, ' + JSON.stringify(convo).replace(/"/g, '&quot;') + ')" style="background:#0284c7;color:white;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:bold;cursor:pointer;white-space:nowrap;">Send</button>' +
+          '</div>';
+        box.appendChild(el);
+        box.scrollTop = 99999;
+
+        // Disable chat input while waiting for email
+        document.getElementById('chatInput').placeholder = 'Enter your email above first…';
+        document.getElementById('chatInput').disabled = true;
+      }
+
+      async function submitEscalateEmail(btn, convo) {
+        const input = document.getElementById('chatEscalateEmail');
+        const email = (input ? input.value : '').trim();
+        if (!email || !email.includes('@')) {
+          input.style.borderColor = '#ef4444';
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+          await fetch('/api/chat-escalate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, convo }),
+          });
+        } catch(_) {}
+
+        // Replace the email collector with confirmation
+        const box = document.getElementById('chatMessages');
+        const collector = btn.closest('div[style]');
+        if (collector) collector.remove();
+
+        const confirm = document.createElement('div');
+        confirm.style.cssText = 'background:#fef3c7;border:1px solid #fde68a;border-radius:12px;padding:12px 14px;font-size:12px;color:#92400e;line-height:1.6;';
+        confirm.innerHTML = '<strong>Got it!</strong> Our team will follow up at <strong>' + email + '</strong> shortly. You can also reach us at <a href="mailto:support@autovinreveal.com" style="color:#b45309;font-weight:bold;">support@autovinreveal.com</a>';
+        box.appendChild(confirm);
+        box.scrollTop = 99999;
+
+        // Re-enable chat input
+        const chatIn = document.getElementById('chatInput');
+        chatIn.disabled = false;
+        chatIn.placeholder = 'Type a message…';
+      }
+    </script>
+
+        <script>
       window.VITE_SUPABASE_URL = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
       window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
+      // ── Subscription price IDs — paste your Stripe price IDs here ──
+      window.SUB_PRICE_STARTER  = "REPLACE_WITH_STRIPE_STARTER_PRICE_ID";   // $30/mo
+      window.SUB_PRICE_PRO      = "REPLACE_WITH_STRIPE_PRO_PRICE_ID";       // $98/mo
+      window.SUB_PRICE_PREMIUM  = "REPLACE_WITH_STRIPE_PREMIUM_PRICE_ID";   // $160/mo
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script type="module" src="/app.js"></script>

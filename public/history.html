@@ -253,7 +253,10 @@
           const r = await apiFetch('/api/history', {
             headers: { Authorization: `Bearer ${token}` },
           }, 15_000);
-          if (!r.ok) return [];
+          if (!r.ok) {
+            console.error('[history] /api/history returned', r.status, await r.text());
+            return [];
+          }
           const { rows = [] } = await r.json();
           return rows.map(row => ({
             vin:    row.vin,
@@ -363,23 +366,73 @@
       /* ============================================================
          Row actions
       ============================================================ */
-      async function viewReport(item) {
+      let reportLoading = false; // global flag — prevent double-clicks
+
+      function showReportLoader() {
+        document.getElementById('reportLoaderOverlay')?.remove();
+        const el = document.createElement('div');
+        el.id = 'reportLoaderOverlay';
+        el.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(255,255,255,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+        el.innerHTML = `
+          <div style="display:flex;flex-direction:column;align-items:center;gap:16px;">
+            <div style="width:48px;height:48px;border:4px solid #e2e8f0;border-top:4px solid #2563eb;border-radius:50%;animation:spin 0.9s linear infinite;"></div>
+            <div style="text-align:center;">
+              <p style="font-family:'Inter',sans-serif;font-weight:700;font-size:15px;color:#1e3a8a;margin:0;">Loading Report…</p>
+              <p style="font-family:'Inter',sans-serif;font-size:13px;color:#64748b;margin:4px 0 0;">This may take a few seconds</p>
+            </div>
+          </div>
+          <style>@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}</style>
+        `;
+        document.body.appendChild(el);
+      }
+
+      function hideReportLoader() {
+        document.getElementById('reportLoaderOverlay')?.remove();
+      }
+
+      async function viewReport(item, triggerBtn) {
+        if (reportLoading) return; // block spam clicks
+        reportLoading = true;
+
+        // Disable the clicked button visually
+        if (triggerBtn) {
+          triggerBtn.disabled = true;
+          triggerBtn.style.opacity = '0.5';
+        }
+
+        showReportLoader();
+
+        const { token } = await getSession();
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
         const data = {
           vin:       item.vin !== '(from plate)' ? item.vin : '',
           state:     item.state || '',
           plate:     item.plate || '',
           type:      item.type,
           as:        'html',
-          allowLive: false,
+          allowLive: true,
         };
-        const { token } = await getSession();
-        const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
+
         try {
-          const r = await apiFetch('/api/report', { method: 'POST', headers, body: JSON.stringify(data) });
-          if (!r.ok) { showToast(await r.text() || `HTTP ${r.status}`, 'error'); return; }
+          const r = await apiFetch('/api/report', { method: 'POST', headers, body: JSON.stringify(data) }, 60_000);
+          hideReportLoader();
+          if (!r.ok) {
+            showToast(await r.text() || `HTTP ${r.status}`, 'error');
+            return;
+          }
           openReport(await r.text());
-        } catch (e) { showToast(e.message || 'Request failed', 'error'); }
+        } catch (e) {
+          hideReportLoader();
+          showToast(e.message || 'Request failed', 'error');
+        } finally {
+          reportLoading = false;
+          if (triggerBtn) {
+            triggerBtn.disabled = false;
+            triggerBtn.style.opacity = '';
+          }
+        }
       }
 
       async function downloadPDF(item, btn) {
@@ -391,7 +444,7 @@
           plate:     item.plate || '',
           type:      item.type,
           as:        'pdf',
-          allowLive: false,
+          allowLive: true,  // re-fetch if cache missing, no charge (alreadyOwned)
         };
         const { token } = await getSession();
         const headers = { 'Content-Type': 'application/json' };
@@ -538,7 +591,7 @@
           row.querySelectorAll('button[data-action]').forEach(btn => {
             btn.addEventListener('click', async () => {
               const action = btn.dataset.action;
-              if (action === 'view')  await viewReport(item);
+              if (action === 'view')  await viewReport(item, btn);
               if (action === 'pdf')   await downloadPDF(item, btn);
               if (action === 'email') openEmailModal(item);
               if (action === 'share') await copyShareLink(item);

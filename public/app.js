@@ -480,6 +480,7 @@ let currentSession = null;
 
 function reflectAuthUI(session) {
   currentSession = session;
+  window._currentSession = session; // expose for inline scripts
 
   // Desktop
   const historyLink = $id('historyNavLink');
@@ -498,6 +499,8 @@ function reflectAuthUI(session) {
     if (userChip)    userChip.style.display = 'flex';
     $id('loginBtn')?.classList.add('hidden');
     if (historyLink) historyLink.style.display = 'flex';
+    const dashLink = $id('dashNavLink');
+    if (dashLink) dashLink.style.display = 'flex';
 
     // Mobile: show hamburger, hide login button
     if (hamburger)      hamburger.style.display = 'flex';
@@ -510,6 +513,8 @@ function reflectAuthUI(session) {
     const lb = $id('loginBtn');
     if (lb) { lb.classList.remove('hidden'); lb.textContent = 'Log in'; }
     if (historyLink) historyLink.style.display = 'none';
+    const dashLink2 = $id('dashNavLink');
+    if (dashLink2) dashLink2.style.display = 'none';
 
     // Mobile: hide hamburger, show login button, close menu
     if (hamburger)      hamburger.style.display = 'none';
