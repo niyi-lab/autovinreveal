@@ -416,6 +416,7 @@ function closeLogin() { loginModal?.classList.add('hidden'); }
 $id('closeLoginModal')?.addEventListener('click', closeLogin);
 $id('logoutBtn')?.addEventListener('click', doLogout);
 $id('loginBtn')?.addEventListener('click', openLogin);
+$id('loginBtnMobile')?.addEventListener('click', openLogin); // mobile nav
 
 $id('closeUpdatePasswordModal')?.addEventListener('click', () => {
   $id('updatePasswordModal')?.classList.add('hidden');
@@ -479,17 +480,43 @@ let currentSession = null;
 
 function reflectAuthUI(session) {
   currentSession = session;
+
+  // Desktop
   const historyLink = $id('historyNavLink');
+
+  // Mobile
+  const hamburger       = $id('hamburgerBtn');
+  const loginBtnMobile  = $id('loginBtnMobile');
+  const balanceMobile   = $id('balancePillMobile');
+  const emailMobile     = $id('mobileUserEmail');
+
   if (session?.user) {
-    if (userEmailEl) userEmailEl.textContent = session.user.email || '';
+    const email = session.user.email || '';
+
+    // Desktop: show email, chip, history; hide login
+    if (userEmailEl) userEmailEl.textContent = email;
     if (userChip)    userChip.style.display = 'flex';
     $id('loginBtn')?.classList.add('hidden');
     if (historyLink) historyLink.style.display = 'flex';
+
+    // Mobile: show hamburger, hide login button
+    if (hamburger)      hamburger.style.display = 'flex';
+    if (loginBtnMobile) loginBtnMobile.style.display = 'none';
+    if (emailMobile)    emailMobile.textContent = email;
+
   } else {
-    if (userChip)    userChip.style.display = 'none';
+    // Desktop
+    if (userChip) userChip.style.display = 'none';
     const lb = $id('loginBtn');
     if (lb) { lb.classList.remove('hidden'); lb.textContent = 'Log in'; }
     if (historyLink) historyLink.style.display = 'none';
+
+    // Mobile: hide hamburger, show login button, close menu
+    if (hamburger)      hamburger.style.display = 'none';
+    if (loginBtnMobile) loginBtnMobile.style.display = 'block';
+    if (balanceMobile)  balanceMobile.style.display = 'none';
+    const menu = $id('mobileMenu');
+    if (menu) menu.style.display = 'none';
   }
 }
 
@@ -549,6 +576,13 @@ async function refreshBalancePill() {
   if (pill && txt) {
     txt.textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
     pill.classList.remove('hidden');
+  }
+  // Mobile credit pill
+  const pillMobile = $id('balancePillMobile');
+  const txtMobile  = $id('balanceTextMobile');
+  if (pillMobile && txtMobile) {
+    txtMobile.textContent = `${balance} CREDITS`;
+    pillMobile.style.display = 'flex';
   }
   setPrimaryCTA(balance <= 0 ? 'buy' : 'view');
 }
@@ -780,10 +814,10 @@ $id('buy5Btn')?.addEventListener('click', async () => {
   await startStripePurchase({ user, price_id: 'STRIPE_PRICE_5PACK', requireLogin: true });
   restore();
 });
-$id('buy10Btn')?.addEventListener('click', async () => {
-  const btn = $id('buy10Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
+$id('buy20Btn')?.addEventListener('click', async () => {
+  const btn = $id('buy20Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
   const { user } = await getSession(); closeBuyModal();
-  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_10PACK', requireLogin: true });
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_20PACK', requireLogin: true });
   restore();
 });
 
@@ -792,11 +826,11 @@ $id('buy5Sidebar')?.addEventListener('click',  async () => {
   const { user } = await getSession();
   await startStripePurchase({ user, price_id: 'STRIPE_PRICE_5PACK', requireLogin: true });
 });
-$id('buy10Sidebar')?.addEventListener('click', async () => {
+$id('buy20Sidebar')?.addEventListener('click', async () => {
   const { user } = await getSession();
-  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_10PACK', requireLogin: true });
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_20PACK', requireLogin: true });
 });
-['pricingBuy1Btn', 'pricingBuy5Btn', 'pricingBuy10Btn'].forEach(id => {
+['pricingBuy1Btn', 'pricingBuy5Btn', 'pricingBuy20Btn'].forEach(id => {
   $id(id)?.addEventListener('click', () => openBuyModal());
 });
 $id('mobileViewPlans')?.addEventListener('click', () => openBuyModal());

@@ -1,110 +1,135 @@
-<!doctype html>
-<html lang="en" class="h-full">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-
-  <!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-FF0NXRN0Y6"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-FF0NXRN0Y6');
-</script>
-  <meta charset="utf-8" />
-  <title>Privacy Policy · AutoVINReveal</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="/style.css" />
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-FF0NXRN0Y6"></script>
   <script>
-    tailwind.config = { darkMode: 'class', theme: { extend: { colors: { brand: { DEFAULT: '#2563eb', dark: '#1d4ed8' } } } } };
-    // apply dark mode early
-    (() => {
-      const saved = localStorage.getItem('theme');
-      const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
-      if (saved === 'dark' || (!saved && prefersDark)) {
-        document.documentElement.classList.add('dark');
-      }
-    })();
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-FF0NXRN0Y6');
   </script>
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, follow" />
+  <title>Privacy Policy · AutoVINReveal</title>
+  <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32" />
+  <meta name="theme-color" content="#1e3a8a" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    h1, h2, .brand-font { font-family: 'Poppins', sans-serif; }
+    .prose h2 { font-size: 1.1rem; font-weight: 700; color: #1e293b; margin-top: 2rem; margin-bottom: 0.5rem; }
+    .prose p, .prose li { font-size: 0.9375rem; color: #475569; line-height: 1.75; }
+    .prose ul { list-style: disc; padding-left: 1.25rem; margin-bottom: 1rem; }
+    .prose li { margin-bottom: 0.25rem; }
+    .prose a { color: #2563eb; text-decoration: underline; }
+  </style>
 </head>
-<body class="h-full">
-  <div class="max-w-3xl mx-auto p-6">
-    <header class="flex items-center justify-between">
-      <a href="/" class="text-2xl font-semibold text-[rgb(153,120,77)]">AutoVINReveal</a>
-      <a href="/" class="btn-outline text-sm">← Back</a>
-    </header>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col">
 
-    <main class="card mt-6">
+  <!-- Nav -->
+  <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2">
+        <div class="w-9 h-9 bg-blue-700 rounded-lg flex items-center justify-center text-white font-extrabold text-xl shadow-lg shadow-blue-700/30">A</div>
+        <span class="text-xl font-bold text-slate-900 tracking-tight brand-font">AutoVIN<span class="text-blue-600">Reveal</span></span>
+      </a>
+      <a href="/" class="flex items-center gap-1.5 text-sm font-semibold text-gray-600 hover:text-blue-600 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+        </svg>
+        Back to Home
+      </a>
+    </div>
+  </nav>
+
+  <!-- Content -->
+  <main class="flex-grow max-w-3xl mx-auto w-full px-4 sm:px-6 py-12">
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 sm:p-10">
+      <div class="mb-8">
+        <h1 class="text-3xl font-bold text-slate-900 mb-2">Privacy Policy</h1>
+        <p class="text-sm text-gray-400">Last updated: March 1, 2025</p>
+      </div>
+
       <article class="prose">
-        <h1 class="text-2xl font-bold">Privacy Policy</h1>
-        <p><strong>Last updated:</strong> <span id="pp-date"></span></p>
 
-        <p>AutoVINReveal (“we”, “our”, “us”) respects your privacy. This policy explains what we collect, how we use it, and your choices.</p>
+        <p>AutoVINReveal ("we", "our", "us") respects your privacy. This policy explains what we collect, how we use it, and your choices.</p>
 
         <h2>Information We Collect</h2>
-        <ul class="list-disc ml-6">
+        <ul>
           <li><strong>Account data:</strong> Email address and authentication metadata managed by our auth provider (Supabase Auth). We do not store your password ourselves.</li>
           <li><strong>Payment data:</strong> Payments are processed by Stripe. We do not store full card numbers on our servers.</li>
-          <li><strong>Usage data:</strong> VINs/plates you submit, report type/format, success/failure logs, basic analytics, and cached report files for faster retrieval.</li>
-          <li><strong>Technical data:</strong> IP address, device/browser information, and cookies or local storage for session and UI preferences (e.g., theme).</li>
+          <li><strong>Usage data:</strong> VINs and license plates you submit, report type, success/failure logs, basic analytics, and cached report files for faster retrieval.</li>
+          <li><strong>Technical data:</strong> IP address, device and browser information, and local storage for session preferences.</li>
         </ul>
 
         <h2>How We Use Information</h2>
-        <ul class="list-disc ml-6">
+        <ul>
           <li>Authenticate users and maintain sessions.</li>
           <li>Process payments and manage credit balances.</li>
           <li>Retrieve, generate, and cache vehicle history reports.</li>
-          <li>Detect fraud/abuse, enhance security, and improve our service.</li>
-          <li>Respond to support requests and communicate about the service.</li>
+          <li>Detect fraud and abuse, enhance security, and improve the Service.</li>
+          <li>Respond to support requests and communicate about the Service.</li>
         </ul>
 
         <h2>Sharing</h2>
-        <p>We share data with service providers only as needed to operate the service:
-          <ul class="list-disc ml-6">
-            <li><strong>Supabase</strong> (authentication, database, storage).</li>
-            <li><strong>Stripe</strong> (payments and billing).</li>
-            <li>Our vehicle data provider(s) used to fetch reports.</li>
-          </ul>
-        </p>
+        <p>We share data with service providers only as needed to operate the Service:</p>
+        <ul>
+          <li><strong>Supabase</strong> — authentication, database, and storage.</li>
+          <li><strong>Stripe</strong> — payment processing and billing.</li>
+          <li><strong>CarSimulcast</strong> — upstream vehicle history report provider.</li>
+        </ul>
+        <p>We do not sell your personal data to third parties.</p>
 
         <h2>Data Retention</h2>
-        <p>We retain account/payment records as required for legal, tax, and accounting purposes. Report files may be cached to speed up repeat access; you can contact us to request deletion of cached items tied to your account.</p>
+        <p>We retain account and payment records as required for legal, tax, and accounting purposes. Cached report files may be stored to speed up repeat access. You can contact us to request deletion of cached data tied to your account.</p>
 
         <h2>Security</h2>
-        <p>We implement reasonable technical and organizational measures. No method of transmission or storage is 100% secure.</p>
+        <p>We implement reasonable technical and organizational measures to protect your data, including encrypted connections (HTTPS), access-controlled databases, and hashed credentials. No method of transmission or storage is 100% secure.</p>
 
-        <h2>Your Choices & Rights</h2>
-        <ul class="list-disc ml-6">
-          <li>You can sign in to view/update your account email, or contact us to delete your account.</li>
-          <li>You can clear local history on the site via the “Clear all” button.</li>
-          <li>To request access, correction, or deletion of your data, contact us.</li>
+        <h2>Your Choices &amp; Rights</h2>
+        <ul>
+          <li>You can sign in to view or update your account email.</li>
+          <li>You can clear your local report history on the site using the "Clear all" button.</li>
+          <li>To request access, correction, or deletion of your data, contact us at the address below.</li>
         </ul>
 
-        <h2>Children’s Privacy</h2>
-        <p>Our service is not directed to children under 13, and we do not knowingly collect their data.</p>
+        <h2>Cookies &amp; Local Storage</h2>
+        <p>We use browser local storage to remember your report history on your device. We do not use third-party advertising cookies. Our analytics provider (Google Analytics) may set cookies for usage measurement — you can opt out via browser settings or the Google Analytics opt-out extension.</p>
+
+        <h2>Children's Privacy</h2>
+        <p>Our Service is not directed to children under 13, and we do not knowingly collect their personal data. If you believe a child has provided us with information, please contact us and we will delete it.</p>
 
         <h2>International Transfers</h2>
-        <p>Data may be processed in the United States or other regions where our providers operate.</p>
-
-        <h2>Contact</h2>
-        <p>Email: <a href="mailto:support@autovinreveal.com">support@autovinreveal.com</a></p>
+        <p>Data may be processed in the United States or other regions where our service providers operate. By using the Service you consent to such transfers.</p>
 
         <h2>Changes</h2>
-        <p>We may update this policy. We’ll revise the “Last updated” date and, if changes are significant, provide additional notice.</p>
+        <p>We may update this policy from time to time. We will revise the "Last updated" date and, if changes are significant, provide additional notice via the site or email.</p>
+
+        <h2>Contact</h2>
+        <p>Questions or requests? Email us at <a href="mailto:support@autovinreveal.com">support@autovinreveal.com</a></p>
+
       </article>
-    </main>
+    </div>
+  </main>
 
-    <footer class="mt-6 text-sm text-center" style="color:var(--muted)">
-      © <span id="year"></span> AutoVINReveal ·
-      <a href="/terms.html" class="link">Terms of Use</a> ·
-      <a href="/privacy.html" class="link">Privacy Policy</a>
-    </footer>
-  </div>
+  <!-- Footer -->
+  <footer class="bg-white border-t border-gray-200 py-8">
+    <div class="max-w-3xl mx-auto px-4 text-center text-xs text-gray-400 space-y-2">
+      <p>&copy; 2025 AutoVINReveal. All rights reserved.</p>
+      <p class="flex items-center justify-center gap-3">
+        <a href="/terms.html" class="hover:text-blue-600 transition-colors">Terms of Service</a>
+        <span>·</span>
+        <a href="/privacy.html" class="hover:text-blue-600 transition-colors">Privacy Policy</a>
+        <span>·</span>
+        <a href="mailto:support@autovinreveal.com" class="hover:text-blue-600 transition-colors">Contact</a>
+      </p>
+      <p class="text-gray-300">Not affiliated with CARFAX, Inc. Trademarks belong to their respective owners.</p>
+    </div>
+  </footer>
 
-  <script>
-    document.getElementById('year').textContent = new Date().getFullYear();
-    document.getElementById('pp-date').textContent = new Date().toLocaleDateString();
-  </script>
 </body>
 </html>

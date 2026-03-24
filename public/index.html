@@ -113,12 +113,15 @@
 
     <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+
+        <!-- Logo -->
         <a href="/" class="flex items-center gap-2">
           <div class="w-9 h-9 bg-blue-700 rounded-lg flex items-center justify-center text-white font-extrabold text-xl shadow-lg shadow-blue-700/30">A</div>
           <span class="text-xl font-bold text-slate-900 tracking-tight brand-font">AutoVIN<span class="text-blue-600">Reveal</span></span>
         </a>
-        <div class="flex items-center gap-3">
-          <!-- PATCH 4: History link — shown/hidden by reflectAuthUI() in app.js -->
+
+        <!-- Desktop nav (sm+) -->
+        <div class="hidden sm:flex items-center gap-3">
           <a id="historyNavLink" href="/history.html"
             style="display:none"
             class="text-sm font-semibold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors flex items-center gap-1.5">
@@ -132,21 +135,77 @@
             <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
             <span id="balanceText">0 credits</span>
           </div>
-          <!-- PATCH 2: Changed from class="hidden" to style="display:none" so
-               app.js can show it via style.display = 'flex' without conflict. -->
           <div id="userChip" style="display:none" class="flex items-center gap-3">
-            <span id="userEmail" class="text-sm font-medium text-gray-600 hidden sm:block"></span>
+            <span id="userEmail" class="text-sm font-medium text-gray-600"></span>
             <button id="logoutBtn" class="text-xs text-red-500 hover:text-red-700 font-medium">Sign out</button>
           </div>
           <button id="loginBtn" class="text-sm font-bold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors">Log in</button>
-          <button id="themeBtn" class="p-2 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors" aria-label="Toggle theme">
+        </div>
+
+        <!-- Mobile right side -->
+        <div class="flex sm:hidden items-center gap-2">
+          <!-- Credits pill (logged in) -->
+          <div id="balancePillMobile" class="hidden px-2.5 py-1 bg-green-50 text-green-700 text-xs font-bold uppercase tracking-wider rounded-full border border-green-100 items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block"></span>
+            <span id="balanceTextMobile">0</span>
+          </div>
+          <!-- Log in button (logged out) -->
+          <button id="loginBtnMobile" class="text-sm font-bold text-blue-600 px-3 py-1.5 border border-blue-200 rounded-lg transition-colors">Log in</button>
+          <!-- Hamburger (logged in) -->
+          <button id="hamburgerBtn" style="display:none"
+            class="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"
+            aria-label="Open menu" aria-expanded="false">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
             </svg>
           </button>
         </div>
       </div>
+
+      <!-- Mobile dropdown -->
+      <div id="mobileMenu" style="display:none"
+        class="sm:hidden border-t border-gray-100 bg-white px-4 pt-2 pb-4 shadow-lg space-y-1">
+        <p id="mobileUserEmail" class="text-xs text-gray-400 px-2 pb-1 truncate"></p>
+        <a id="historyNavLinkMobile" href="/history.html"
+          class="flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+          </svg>
+          Report History
+        </a>
+        <button id="logoutBtnMobile"
+          class="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-red-500 hover:bg-red-50 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+          </svg>
+          Sign out
+        </button>
+      </div>
     </nav>
+
+    <script>
+      (function() {
+        var hamburger = document.getElementById('hamburgerBtn');
+        var menu      = document.getElementById('mobileMenu');
+        if (hamburger && menu) {
+          hamburger.addEventListener('click', function() {
+            var open = menu.style.display === 'none' || menu.style.display === '';
+            menu.style.display = open ? 'block' : 'none';
+            hamburger.setAttribute('aria-expanded', String(open));
+          });
+        }
+        document.getElementById('historyNavLinkMobile')?.addEventListener('click', function() {
+          if (menu) menu.style.display = 'none';
+        });
+        document.getElementById('logoutBtnMobile')?.addEventListener('click', function() {
+          if (menu) menu.style.display = 'none';
+          document.getElementById('logoutBtn')?.click();
+        });
+        // loginBtnMobile is wired directly in app.js
+      })();
+    </script>
 
     <header class="relative hero-bg pt-12 pb-32 lg:pt-20 lg:pb-48 px-3 sm:px-4 overflow-hidden">
       <div class="absolute top-0 left-0 w-full h-full overflow-hidden opacity-10 pointer-events-none">
@@ -183,14 +242,14 @@
                 <svg class="w-3 h-3 text-gray-300 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
                 <div class="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-blue-50 border border-blue-200">
                   <span class="text-[10px] sm:text-[11px] font-semibold text-blue-500">5-Pack</span>
-                  <span class="font-black text-blue-700 text-sm sm:text-base leading-none">$25</span>
-                  <span class="text-[10px] font-bold text-blue-400 bg-blue-100 px-1.5 py-0.5 rounded-full hidden sm:inline">$5 each</span>
+                  <span class="font-black text-blue-700 text-sm sm:text-base leading-none">$20</span>
+                  <span class="text-[10px] font-bold text-blue-400 bg-blue-100 px-1.5 py-0.5 rounded-full hidden sm:inline">$4 each</span>
                 </div>
                 <svg class="w-3 h-3 text-gray-300 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
                 <div class="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-green-50 border border-green-200">
-                  <span class="text-[10px] sm:text-[11px] font-semibold text-green-600">10-Pack</span>
-                  <span class="font-black text-green-700 text-sm sm:text-base leading-none">$40</span>
-                  <span class="text-[10px] font-bold text-green-500 bg-green-100 px-1.5 py-0.5 rounded-full hidden sm:inline">$4 each</span>
+                  <span class="text-[10px] sm:text-[11px] font-semibold text-green-600">20-Pack</span>
+                  <span class="font-black text-green-700 text-sm sm:text-base leading-none">$58</span>
+                  <span class="text-[10px] font-bold text-green-500 bg-green-100 px-1.5 py-0.5 rounded-full hidden sm:inline">$2.90 each</span>
                 </div>
               </div>
               <div class="flex items-center gap-3 text-[11px] text-gray-400 font-medium flex-shrink-0">
@@ -319,7 +378,11 @@
             <h2 class="text-3xl font-bold text-slate-900">Simple, Honest Pricing</h2>
             <p class="text-gray-500 mt-2">No subscriptions. No hidden fees. Credits never expire.</p>
           </div>
+
+          <!-- All 3 plans side-by-side (scrollable on mobile) -->
           <div class="pricing-row">
+
+            <!-- Single -->
             <div class="pricing-col">
               <div class="plan-card bg-white rounded-2xl border border-gray-200 p-6 flex flex-col h-full">
                 <div class="mb-5">
@@ -334,60 +397,72 @@
                   <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> 1 full CARFAX report</li>
                   <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> Instant PDF download</li>
                   <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> No account needed</li>
-                  <li class="flex items-center gap-2 text-gray-300"><span>—</span> Does not expire</li>
+                  <li class="flex items-center gap-2 text-gray-300"><span>—</span> Credits never expire</li>
                 </ul>
                 <button id="pricingBuy1Btn" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-xl transition-colors text-sm">
                   Buy 1 Report — $6
                 </button>
               </div>
             </div>
+
+            <!-- 5-Pack -->
             <div class="pricing-col">
-              <div class="plan-card featured bg-blue-600 rounded-2xl p-6 flex flex-col h-full text-white relative overflow-hidden">
-                <div class="absolute -right-6 -top-6 w-24 h-24 bg-white rounded-full opacity-10"></div>
-                <div class="absolute -left-4 -bottom-4 w-20 h-20 bg-blue-400 rounded-full opacity-20"></div>
+              <div class="plan-card featured relative bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-6 flex flex-col h-full text-white overflow-hidden shadow-xl shadow-blue-600/25">
+                <div class="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -translate-y-10 translate-x-10 pointer-events-none"></div>
+                <div class="absolute -left-4 -bottom-4 w-20 h-20 bg-blue-400/20 rounded-full pointer-events-none"></div>
                 <div class="absolute top-4 right-4 bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">Most Popular</div>
                 <div class="mb-5 relative z-10">
                   <div class="text-xs font-bold text-blue-200 uppercase tracking-widest mb-2">5-Pack Bundle</div>
                   <div class="flex items-end gap-1 mb-1">
-                    <span class="text-4xl font-black">$25</span>
+                    <span class="text-4xl font-black">$20</span>
                     <span class="text-blue-200 text-sm mb-1">/ 5 reports</span>
                   </div>
-                  <p class="text-sm text-blue-100">Great for shopping multiple cars.</p>
+                  <div class="flex items-center gap-2 mt-1">
+                    <span class="bg-white/20 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">$4.00 each</span>
+                    <span class="text-blue-200 text-xs">Save $10</span>
+                  </div>
                 </div>
                 <ul class="space-y-2 text-sm text-blue-50 flex-1 mb-6 relative z-10">
                   <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> 5 full CARFAX reports</li>
-                  <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> <strong>$5.00 each</strong> — save $5</li>
                   <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> Credits never expire</li>
-                  <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> Share across devices</li>
+                  <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> Use across any device</li>
+                  <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> Account required</li>
                 </ul>
-                <button id="pricingBuy5Btn" class="relative z-10 w-full bg-white text-blue-600 hover:bg-yellow-400 hover:text-blue-800 font-bold py-3 rounded-xl transition-colors text-sm shadow-lg">
-                  Buy 5-Pack — $25
+                <button id="pricingBuy5Btn" class="relative z-10 w-full bg-white text-blue-700 hover:bg-yellow-400 hover:text-blue-900 font-black py-3 rounded-xl transition-all text-sm shadow-lg">
+                  Get 5 Reports — $20
                 </button>
               </div>
             </div>
+
+            <!-- 20-Pack -->
             <div class="pricing-col">
-              <div class="plan-card bg-slate-900 rounded-2xl border border-slate-700 p-6 flex flex-col h-full text-white relative overflow-hidden">
+              <div class="plan-card relative bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl border border-slate-700 p-6 flex flex-col h-full text-white overflow-hidden shadow-xl shadow-slate-900/30">
+                <div class="absolute top-0 right-0 w-32 h-32 bg-green-500/10 rounded-full -translate-y-10 translate-x-10 pointer-events-none"></div>
+                <div class="absolute -right-6 -bottom-6 w-28 h-28 bg-green-400/10 rounded-full pointer-events-none"></div>
                 <div class="absolute top-4 right-4 bg-green-400 text-green-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">Best Value</div>
-                <div class="absolute -right-8 -bottom-8 w-32 h-32 bg-green-500 rounded-full opacity-10"></div>
                 <div class="mb-5 relative z-10">
-                  <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">10-Pack Bundle</div>
+                  <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">20-Pack Bundle</div>
                   <div class="flex items-end gap-1 mb-1">
-                    <span class="text-4xl font-black">$40</span>
-                    <span class="text-slate-400 text-sm mb-1">/ 10 reports</span>
+                    <span class="text-4xl font-black">$58</span>
+                    <span class="text-slate-400 text-sm mb-1">/ 20 reports</span>
                   </div>
-                  <p class="text-sm text-slate-300">For dealers and serious flippers.</p>
+                  <div class="flex items-center gap-2 mt-1">
+                    <span class="bg-green-500/30 text-green-300 text-[11px] font-bold px-2 py-0.5 rounded-full">$2.90 each</span>
+                    <span class="text-slate-400 text-xs">Save $62</span>
+                  </div>
                 </div>
                 <ul class="space-y-2 text-sm text-slate-300 flex-1 mb-6 relative z-10">
-                  <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> 10 full CARFAX reports</li>
-                  <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> <strong class="text-white">$4.00 each</strong> — save $20</li>
+                  <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> 20 full CARFAX reports</li>
                   <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> Credits never expire</li>
                   <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> Priority support</li>
+                  <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> Account required</li>
                 </ul>
-                <button id="pricingBuy10Btn" class="relative z-10 w-full bg-green-500 hover:bg-green-400 text-white font-bold py-3 rounded-xl transition-colors text-sm shadow-lg shadow-green-900/40">
-                  Buy 10-Pack — $40
+                <button id="pricingBuy20Btn" class="relative z-10 w-full bg-green-500 hover:bg-green-400 text-white font-black py-3 rounded-xl transition-all text-sm shadow-lg shadow-green-900/40">
+                  Get 20 Reports — $58
                 </button>
               </div>
             </div>
+
           </div>
           <p class="sm:hidden text-center text-xs text-gray-400 mt-3">← Swipe to see all plans →</p>
         </section>
@@ -434,10 +509,10 @@
                     <span>1 Report</span><span class="text-gray-300">$6</span>
                   </button>
                   <button id="buy5Sidebar" class="w-full bg-white text-slate-900 font-bold py-2.5 rounded-lg hover:bg-yellow-400 transition-colors text-sm flex items-center justify-between px-4">
-                    <span>5-Pack <span class="text-xs font-normal opacity-60">most popular</span></span><span>$25</span>
+                    <span>5-Pack <span class="text-xs font-normal opacity-60">most popular</span></span><span>$20</span>
                   </button>
-                  <button id="buy10Sidebar" class="w-full bg-green-500 hover:bg-green-400 text-white font-bold py-2.5 rounded-lg transition-colors text-sm flex items-center justify-between px-4">
-                    <span>10-Pack <span class="text-xs font-normal opacity-70">best value</span></span><span>$40</span>
+                  <button id="buy20Sidebar" class="w-full bg-green-500 hover:bg-green-400 text-white font-bold py-2.5 rounded-lg transition-colors text-sm flex items-center justify-between px-4">
+                    <span>20-Pack <span class="text-xs font-normal opacity-70">best value</span></span><span>$58</span>
                   </button>
                 </div>
                 <p class="text-xs text-gray-500 text-center pt-1">Credits never expire</p>
@@ -669,7 +744,7 @@
           <div>
             <h4 class="font-bold text-slate-900 mb-3">Support</h4>
             <ul class="space-y-2 text-sm text-gray-500">
-              <li><a href="mailto:autovinreveal@gmail.com" class="hover:text-blue-600">Contact Us</a></li>
+              <li><a href="mailto:support@autovinreveal.com" class="hover:text-blue-600">Contact Us</a></li>
               <li><a href="#" onclick="document.querySelector('details').open = true" class="hover:text-blue-600">FAQ</a></li>
             </ul>
           </div>
@@ -715,8 +790,8 @@
               </div>
               <div class="flex-1 sm:mb-4 pt-1 sm:pt-0">
                 <div class="flex sm:flex-col items-baseline sm:items-start gap-2">
-                  <span class="text-2xl sm:text-3xl font-black text-slate-900">$25</span>
-                  <span class="text-xs text-blue-600 font-medium">5 Reports · $5 each</span>
+                  <span class="text-2xl sm:text-3xl font-black text-slate-900">$20</span>
+                  <span class="text-xs text-blue-600 font-medium">5 Reports · $4 each</span>
                 </div>
                 <p class="hidden sm:block text-xs text-gray-500 mt-1">Car shopping? This is for you.</p>
                 <p class="sm:hidden text-[10px] text-blue-500 mt-1">Account required for bundles</p>
@@ -740,14 +815,14 @@
               </div>
               <div class="flex-1 sm:mb-4 pt-1 sm:pt-0">
                 <div class="flex sm:flex-col items-baseline sm:items-start gap-2">
-                  <span class="text-2xl sm:text-3xl font-black text-slate-900">$40</span>
-                  <span class="text-xs text-green-600 font-medium">10 Reports · $4 each</span>
+                  <span class="text-2xl sm:text-3xl font-black text-slate-900">$58</span>
+                  <span class="text-xs text-green-600 font-medium">20 Reports · $2.90 each</span>
                 </div>
                 <p class="hidden sm:block text-xs text-gray-500 mt-1">For flippers &amp; dealers.</p>
                 <p class="sm:hidden text-[10px] text-green-600 mt-1">Account required for bundles</p>
               </div>
               <div class="w-full space-y-2">
-                <button id="buy10Btn"
+                <button id="buy20Btn"
                   class="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
                   Pay with Card
@@ -873,6 +948,151 @@
       <p class="text-slate-600 font-medium animate-pulse">Connecting to server...</p>
     </div>
 
+
+    <!-- Social Proof Toast -->
+    <div id="socialProofToast"
+      style="display:none;position:fixed;bottom:80px;left:16px;z-index:200;max-width:300px;"
+      class="sm:bottom-6">
+      <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 flex items-start gap-3 animate-[fadeIn_0.3s_ease-out]">
+        <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-base flex-shrink-0 font-bold text-blue-700" id="spFlag">US</div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold text-slate-900 leading-tight">
+            <span id="spName">Someone</span> in <span id="spCity">New York</span>
+          </p>
+          <p class="text-xs text-gray-500 mt-0.5">purchased a report for a <span id="spCar">2019 Honda Accord</span></p>
+          <p class="text-[11px] text-gray-400 mt-1 flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span id="spTime">2 mins ago</span>
+          </p>
+        </div>
+        <button onclick="document.getElementById('socialProofToast').style.display='none'"
+          class="text-gray-300 hover:text-gray-500 text-lg leading-none flex-shrink-0 mt-0.5">×</button>
+      </div>
+    </div>
+
+    <script>
+    (function() {
+      const LOCATIONS = [
+        { city: 'New York',       state: 'NY', flag: 'US' },
+        { city: 'Los Angeles',    state: 'CA', flag: 'US' },
+        { city: 'Chicago',        state: 'IL', flag: 'US' },
+        { city: 'Houston',        state: 'TX', flag: 'US' },
+        { city: 'Phoenix',        state: 'AZ', flag: 'US' },
+        { city: 'Philadelphia',   state: 'PA', flag: 'US' },
+        { city: 'San Antonio',    state: 'TX', flag: 'US' },
+        { city: 'San Diego',      state: 'CA', flag: 'US' },
+        { city: 'Dallas',         state: 'TX', flag: 'US' },
+        { city: 'Jacksonville',   state: 'FL', flag: 'US' },
+        { city: 'Austin',         state: 'TX', flag: 'US' },
+        { city: 'Columbus',       state: 'OH', flag: 'US' },
+        { city: 'Charlotte',      state: 'NC', flag: 'US' },
+        { city: 'Indianapolis',   state: 'IN', flag: 'US' },
+        { city: 'Seattle',        state: 'WA', flag: 'US' },
+        { city: 'Denver',         state: 'CO', flag: 'US' },
+        { city: 'Nashville',      state: 'TN', flag: 'US' },
+        { city: 'Oklahoma City',  state: 'OK', flag: 'US' },
+        { city: 'Las Vegas',      state: 'NV', flag: 'US' },
+        { city: 'Portland',       state: 'OR', flag: 'US' },
+        { city: 'Memphis',        state: 'TN', flag: 'US' },
+        { city: 'Louisville',     state: 'KY', flag: 'US' },
+        { city: 'Baltimore',      state: 'MD', flag: 'US' },
+        { city: 'Milwaukee',      state: 'WI', flag: 'US' },
+        { city: 'Albuquerque',    state: 'NM', flag: 'US' },
+        { city: 'Tucson',         state: 'AZ', flag: 'US' },
+        { city: 'Atlanta',        state: 'GA', flag: 'US' },
+        { city: 'Miami',          state: 'FL', flag: 'US' },
+        { city: 'Minneapolis',    state: 'MN', flag: 'US' },
+        { city: 'Tampa',          state: 'FL', flag: 'US' },
+        { city: 'Toronto',        state: 'ON', flag: 'CA' },
+        { city: 'Vancouver',      state: 'BC', flag: 'CA' },
+        { city: 'Calgary',        state: 'AB', flag: 'CA' },
+      ];
+
+      const CARS = [
+        '2018 Dodge Charger',    '2020 Toyota Camry',     '2019 Honda Accord',
+        '2021 Ford F-150',       '2017 Chevrolet Malibu', '2022 Hyundai Elantra',
+        '2016 BMW 3 Series',     '2019 Nissan Altima',    '2020 Jeep Wrangler',
+        '2018 Ford Escape',      '2021 Toyota RAV4',      '2017 Honda CR-V',
+        '2020 Subaru Outback',   '2019 Kia Sorento',      '2022 Tesla Model 3',
+        '2018 Audi A4',          '2021 Chevrolet Silverado', '2017 Ford Explorer',
+        '2020 Mazda CX-5',       '2019 GMC Sierra',       '2021 Volkswagen Jetta',
+        '2018 Mercedes C-Class', '2020 Lexus RX 350',     '2022 Kia Telluride',
+        '2017 Toyota Highlander','2019 Honda Pilot',       '2020 Subaru Forester',
+        '2021 Ford Edge',        '2018 Chevrolet Equinox', '2019 Dodge Durango',
+        '2022 Honda Civic',      '2020 Toyota 4Runner',   '2018 Ram 1500',
+        '2021 Hyundai Tucson',   '2019 Nissan Rogue',     '2020 Ford Mustang',
+        '2017 Acura MDX',        '2022 Jeep Grand Cherokee','2018 Subaru Impreza',
+        '2021 Kia Sportage',     '2019 Chevrolet Traverse','2020 Toyota Corolla',
+        '2018 Honda Odyssey',    '2022 Ford Bronco',      '2019 Mazda3',
+        '2021 Nissan Pathfinder','2017 Toyota Tacoma',    '2020 Buick Enclave',
+        '2018 Infiniti Q50',     '2022 Hyundai Santa Fe',
+      ];
+
+      const NAMES = [
+        'Someone', 'A buyer', 'A customer', 'A driver',
+        'A shopper', 'A user', 'Someone',
+      ];
+
+      const TIMES = [
+        'Just now', '1 min ago', '2 mins ago', '3 mins ago',
+        '5 mins ago', '7 mins ago', '10 mins ago', '12 mins ago',
+        '15 mins ago', '20 mins ago',
+      ];
+
+      // Shuffle and track index so we never repeat until full cycle
+      function shuffle(arr) {
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+      }
+
+      let carPool = shuffle(CARS);
+      let locPool = shuffle(LOCATIONS);
+      let carIdx  = 0;
+      let locIdx  = 0;
+
+      function nextCar() {
+        if (carIdx >= carPool.length) { carPool = shuffle(CARS); carIdx = 0; }
+        return carPool[carIdx++];
+      }
+      function nextLoc() {
+        if (locIdx >= locPool.length) { locPool = shuffle(LOCATIONS); locIdx = 0; }
+        return locPool[locIdx++];
+      }
+      function rand(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+      function showProof() {
+        const car  = nextCar();
+        const loc  = nextLoc();
+        const name = rand(NAMES);
+        const time = rand(TIMES);
+
+        document.getElementById('spName').textContent = name;
+        document.getElementById('spCity').textContent = loc.city;
+        document.getElementById('spCar').textContent  = car;
+        document.getElementById('spTime').textContent = time;
+        document.getElementById('spFlag').textContent = loc.flag;
+
+        const toast = document.getElementById('socialProofToast');
+        toast.style.display = 'block';
+
+        // Auto-hide after 6s
+        setTimeout(() => { toast.style.display = 'none'; }, 6000);
+      }
+
+      // First show: 4-8s after page load
+      setTimeout(showProof, 4000 + Math.random() * 4000);
+
+      // Then repeat every 18-30s
+      function scheduleNext() {
+        setTimeout(() => { showProof(); scheduleNext(); }, 18000 + Math.random() * 12000);
+      }
+      scheduleNext();
+    })();
+    </script>
     <script>
       window.VITE_SUPABASE_URL = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
       window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";

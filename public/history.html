@@ -55,7 +55,7 @@
       <!-- Page header -->
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-slate-900">Report History</h1>
-        <p class="text-gray-500 mt-1 text-sm">All vehicle history reports you've run.</p>
+        <p class="text-gray-500 mt-1 text-sm">All vehicle history reports you've run. Signed-in users also see server-side records.</p>
       </div>
 
       <!-- Search + controls bar -->
@@ -252,29 +252,31 @@
         try {
           const r = await apiFetch('/api/history', {
             headers: { Authorization: `Bearer ${token}` },
-          }, 10_000);
+          }, 15_000);
           if (!r.ok) return [];
           const { rows = [] } = await r.json();
           return rows.map(row => ({
-            vin:      row.vin,
-            type:     row.type || 'carfax',
-            ts:       new Date(row.created_at).getTime(),
-            state:    '',
-            plate:    '',
-            source:   'server',
+            vin:    row.vin,
+            type:   row.type || 'carfax',
+            ts:     new Date(row.created_at).getTime(),
+            state:  row.state  || '',
+            plate:  row.plate  || '',
+            source: 'server',
           }));
         } catch { return []; }
       }
 
-      function mergeHistories(local, server) {
-        // Build a set of "vin|type" keys from local so we don't duplicate
-        const seen = new Set(local.map(i => `${i.vin}|${i.type}`));
-        const merged = [...local];
-        for (const row of server) {
+      function mergeHistories(serverRows, localRows) {
+        // Supabase is the source of truth.
+        // Start with all server records, then append any local-only records
+        // (e.g. guest reports that were never saved to the DB).
+        const seen = new Set(serverRows.map(i => `${i.vin}|${i.type}`));
+        const merged = [...serverRows];
+        for (const row of localRows) {
           const key = `${row.vin}|${row.type}`;
           if (!seen.has(key)) {
             seen.add(key);
-            merged.push(row);
+            merged.push({ ...row, source: row.source || 'local' });
           }
         }
         return merged;
@@ -486,8 +488,11 @@
             : `<span class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-blue-100 text-blue-700 rounded-full">CARFAX</span>`;
 
           const srcTag = item.source === 'server'
-            ? `<span class="px-2 py-0.5 text-[10px] font-medium text-gray-400 bg-gray-100 rounded-full">cloud</span>`
-            : '';
+            ? `<span class="px-2 py-0.5 text-[10px] font-medium text-blue-500 bg-blue-50 border border-blue-100 rounded-full flex items-center gap-1">
+                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                Supabase
+              </span>`
+            : `<span class="px-2 py-0.5 text-[10px] font-medium text-gray-400 bg-gray-100 rounded-full">local</span>`
 
           const row = document.createElement('div');
           row.className = 'row-enter bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-all p-4 sm:p-5';
@@ -565,22 +570,29 @@
 
         supabase.auth.onAuthStateChange((_e, s) => reflectAuthNav(s?.user || null));
 
-        // Load local history first so page is instant
-        allItems = loadLocalHistory();
-        applyFilters();
+        // Show local history instantly while we wait for Supabase
+        const localRows = loadLocalHistory();
 
-        // If logged in, fetch server history and merge
         if (session?.user && session?.access_token) {
+          // Logged in: show loading state, fetch ALL Supabase records first
           const syncEl = $id('syncStatus');
-          syncEl?.classList.remove('hidden');
-          syncEl?.style.setProperty('display', 'flex');
+          if (syncEl) { syncEl.classList.remove('hidden'); syncEl.style.display = 'flex'; }
 
-          const serverRows = await fetchServerHistory(session.access_token);
-          allItems = mergeHistories(allItems, serverRows);
+          // Show local as a placeholder while fetching
+          allItems = localRows;
           applyFilters();
 
-          syncEl?.classList.add('hidden');
-          syncEl?.style.setProperty('display', 'none');
+          const serverRows = await fetchServerHistory(session.access_token);
+
+          // Supabase is source of truth — server rows first, local fills any gaps
+          allItems = mergeHistories(serverRows, localRows);
+          applyFilters();
+
+          if (syncEl) { syncEl.classList.add('hidden'); syncEl.style.display = 'none'; }
+        } else {
+          // Guest: localStorage only
+          allItems = localRows;
+          applyFilters();
         }
       }
 

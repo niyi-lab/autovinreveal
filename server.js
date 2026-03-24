@@ -122,13 +122,20 @@ app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 const stripeLive = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 const STRIPE_TEST_SECRET_KEY = process.env.STRIPE_TEST_SECRET_KEY || null;
 
-const PRICE_SINGLE = process.env.STRIPE_PRICE_SINGLE;
-const PRICE_5PACK  = process.env.STRIPE_PRICE_5PACK;
-const PRICE_10PACK = process.env.STRIPE_PRICE_10PACK;
+// In non-production environments, use test keys if available
+const IS_PROD = process.env.NODE_ENV === "production";
+const stripeDefault = (!IS_PROD && STRIPE_TEST_SECRET_KEY)
+  ? new Stripe(STRIPE_TEST_SECRET_KEY, { apiVersion: "2024-06-20" })
+  : stripeLive;
+
+// Use test price IDs in dev if provided, otherwise fall back to live IDs
+const PRICE_SINGLE = (!IS_PROD && process.env.STRIPE_TEST_PRICE_SINGLE) ? process.env.STRIPE_TEST_PRICE_SINGLE : process.env.STRIPE_PRICE_SINGLE;
+const PRICE_5PACK  = (!IS_PROD && process.env.STRIPE_TEST_PRICE_5PACK)  ? process.env.STRIPE_TEST_PRICE_5PACK  : process.env.STRIPE_PRICE_5PACK;
+const PRICE_20PACK = (!IS_PROD && process.env.STRIPE_TEST_PRICE_20PACK) ? process.env.STRIPE_TEST_PRICE_20PACK : process.env.STRIPE_PRICE_20PACK;
 
 const CREDITS_PER_SINGLE = Number(process.env.CREDITS_PER_SINGLE || "1");
 const CREDITS_PER_5PACK  = Number(process.env.CREDITS_PER_5PACK  || "5");
-const CREDITS_PER_10PACK = Number(process.env.CREDITS_PER_10PACK || "10");
+const CREDITS_PER_20PACK = Number(process.env.CREDITS_PER_20PACK || "20");
 
 function stripeForId(id) {
   const isTest = typeof id === "string" && id.startsWith("cs_test_");
@@ -144,10 +151,11 @@ function stripeForId(id) {
 ================================================================ */
 const PAYPAL_PACKAGE_CONFIG = {
   single:   { amount: "6.00",  credits: 1  },
-  "5pack":  { amount: "25.00", credits: 5  },
-  "10pack": { amount: "40.00", credits: 10 },
+  "5pack":  { amount: "20.00", credits: 5  },
+  "20pack": { amount: "58.00", credits: 20 },
 };
 function resolvePaypalPackage(pkg) {
+  if (pkg === "10pack") return PAYPAL_PACKAGE_CONFIG["20pack"]; // legacy alias
   return PAYPAL_PACKAGE_CONFIG[pkg] || PAYPAL_PACKAGE_CONFIG["single"];
 }
 
@@ -567,7 +575,7 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
       for (const li of lineItems.data) {
         const pid = li.price?.id;
         const qty = li.quantity || 1;
-        if      (pid === PRICE_10PACK) creditsToAdd += qty * CREDITS_PER_10PACK;
+        if      (pid === PRICE_20PACK) creditsToAdd += qty * CREDITS_PER_20PACK;
         else if (pid === PRICE_5PACK)  creditsToAdd += qty * CREDITS_PER_5PACK;
         else if (pid === PRICE_SINGLE) creditsToAdd += qty * CREDITS_PER_SINGLE;
       }
@@ -635,22 +643,22 @@ app.post("/api/create-checkout-session", async (req, res) => {
       if (user?.id) userId = user.id;
     }
 
-    const isTenPack  = price_id === "STRIPE_PRICE_10PACK" || price_id === "10pack";
-    const isFivePack = price_id === "STRIPE_PRICE_5PACK"  || price_id === "5pack";
+    const isTwentyPack = price_id === "STRIPE_PRICE_20PACK" || price_id === "20pack";
+    const isFivePack   = price_id === "STRIPE_PRICE_5PACK"  || price_id === "5pack";
 
     let priceLive = PRICE_SINGLE;
     let intent    = vin ? "buy_report" : "buy_credit_single";
-    if (isTenPack)       { priceLive = PRICE_10PACK; intent = "buy_credits_10pack"; }
+    if (isTwentyPack)    { priceLive = PRICE_20PACK; intent = "buy_credits_20pack"; }
     else if (isFivePack) { priceLive = PRICE_5PACK;  intent = "buy_credits_5pack"; }
 
-    const session = await stripeLive.checkout.sessions.create({
+    const session = await stripeDefault.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
       line_items: [{ price: priceLive, quantity: 1 }],
       payment_intent_data: {
         description: vin
           ? `AutoVINReveal – VIN: ${vin}`
-          : isTenPack  ? "AutoVINReveal – 10 Report Bundle"
+          : isTwentyPack ? "AutoVINReveal – 20 Report Bundle"
           : isFivePack ? "AutoVINReveal – 5 Report Bundle"
           : "AutoVINReveal – 1 Report Credit",
         metadata: { ...(vin ? { vin } : {}) },
@@ -914,6 +922,8 @@ app.post("/api/report", async (req, res) => {
             type:        type,
             report_data: raw,
             success:     true,
+            ...(req.body?.plate ? { plate: req.body.plate.replace(/[^A-Za-z0-9]/g,'').toUpperCase() } : {}),
+            ...(req.body?.state ? { state: req.body.state.replace(/[^A-Za-z0-9]/g,'').toUpperCase() } : {}),
           }, { onConflict: "user_id,vin,type" });
         }
 
@@ -1095,6 +1105,28 @@ app.post("/api/email-report", async (req, res) => {
     });
     return res.json({ ok: true, format: "link_fallback" });
   } catch { return res.status(500).json({ error: "email_failed" }); }
+});
+
+/* ================================================================
+   User History — returns the logged-in user's vin_queries records
+   Used by history.html to merge server-side records with localStorage.
+================================================================ */
+app.get("/api/history", async (req, res) => {
+  try {
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "unauthorized" });
+
+    const { data, error } = await supabaseService
+      .from("vin_queries")
+      .select("vin, type, success, created_at, plate, state")
+      .eq("user_id", user.id)
+      .eq("success", true)
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true, rows: data || [] });
+  } catch { res.status(500).json({ error: "Server error" }); }
 });
 
 /* ================================================================
