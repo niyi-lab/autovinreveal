@@ -139,6 +139,15 @@
             </svg>
             Dashboard
           </a>
+          <!-- Owner-only CFC dashboard button — shown via app.js after /api/is-owner check -->
+          <a id="ownerDashBtn" href="/cfc-dashboard.html" style="display:none"
+            class="flex items-center gap-1.5 text-xs font-bold text-purple-600 hover:text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-3 py-1.5 rounded-lg transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+            </svg>
+            Credits
+          </a>
+
           <div id="balancePill" class="hidden px-3 py-1 bg-green-50 text-green-700 text-xs font-bold uppercase tracking-wider rounded-full border border-green-100 flex items-center gap-1">
             <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
             <span id="balanceText">0 credits</span>
@@ -188,6 +197,14 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
           </svg>
           Dashboard
+        </a>
+        <!-- Owner-only mobile credits link -->
+        <a id="ownerDashBtnMobile" href="/cfc-dashboard.html" style="display:none"
+          class="flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-purple-600 hover:bg-purple-50 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+          Credits Dashboard
         </a>
         <button id="logoutBtnMobile"
           class="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-red-500 hover:bg-red-50 transition-colors">
@@ -837,7 +854,7 @@
               </summary>
               <div class="text-gray-600 text-sm mt-3">
                 If your payment went through but the report didn't load, don't worry — your purchase is safe. First, try refreshing the page or clearing your browser cache. If the report still doesn't appear, please contact our support team at
-                <a href="/cdn-cgi/l/email-protection#ccbfb9bcbca3beb88cadb9b8a3baa5a2bea9baa9ada0e2afa3a1" class="text-blue-600 font-semibold hover:underline"><span class="__cf_email__" data-cfemail="02717772726d7076426377766d746b6c70677467636e2c616d6f">[email&#160;protected]</span></a>
+                <a href="mailto:support@autovinreveal.com" class="text-blue-600 font-semibold hover:underline">support@autovinreveal.com</a>
                 with your VIN (or license plate) and the email address used at checkout. We'll resolve it for you promptly.
               </div>
             </details>
@@ -867,7 +884,7 @@
           <div>
             <h4 class="font-bold text-slate-900 mb-3">Support</h4>
             <ul class="space-y-2 text-sm text-gray-500">
-              <li><a href="/cdn-cgi/l/email-protection#fb888e8b8b94898fbb9a8e8f948d9295899e8d9e9a97d5989496" class="hover:text-blue-600">Contact Us</a></li>
+              <li><a href="mailto:support@autovinreveal.com" class="hover:text-blue-600">Contact Us</a></li>
               <li><a href="#" onclick="document.querySelector('details').open = true" class="hover:text-blue-600">FAQ</a></li>
             </ul>
           </div>
@@ -1093,7 +1110,7 @@
       </div>
     </div>
 
-    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+<script>
     (function() {
       const LOCATIONS = [
         { city: 'New York',       state: 'NY', flag: 'US' },
@@ -1457,7 +1474,7 @@
         const box = document.getElementById('chatMessages');
         const el  = document.createElement('div');
         el.style.cssText = 'background:#fef3c7;border:1px solid #fde68a;border-radius:12px;padding:12px 14px;font-size:12px;color:#92400e;line-height:1.6;';
-        el.innerHTML = '<strong>Our team has been notified</strong> and will follow up at your email <strong>' + email + '</strong> shortly. You can also email us directly at <a href="mailto:support@autovinreveal.com" style="color:#b45309;font-weight:bold;">support@autovinreveal.com</a>';
+        el.innerHTML = '<strong>Our team has been notified</strong> and will follow up at <strong>' + email + '</strong> shortly. You can also email us directly at <a href="mailto:support@autovinreveal.com" style="color:#b45309;font-weight:bold;">support@autovinreveal.com</a>';
         box.appendChild(el);
         box.scrollTop = 99999;
       }

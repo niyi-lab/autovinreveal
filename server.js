@@ -216,26 +216,237 @@ if (SMTP_USER && SMTP_PASS) {
 }
 
 /* ================================================================
-   CarSimulcast API
+   CarfaxCheaper API
 ================================================================ */
-const CS     = "https://connect.carsimulcast.com";
-const KEY    = process.env.API_KEY;
-const SECRET = process.env.API_SECRET;
-const H      = { "API-KEY": KEY, "API-SECRET": SECRET };
+const CFC_BASE       = "https://carfaxcheaper.com/api/v1";
+const CFC_OWNER_EMAIL = process.env.CFC_OWNER_EMAIL || ""; // email of special user who can see credit dashboard
+const CFC_CREDITS_KEY = "cfc_credits_remaining";           // key in Supabase app_settings table
+const CFC_KEY  = process.env.CFC_API_KEY || "cfc_79212d01b00f9569b37218eacfeca89d2f03ac01ba2f78fa9ad82c088b16e2f1";
+const CFC_H    = { "X-API-Key": CFC_KEY };
 
-async function csGet(url) {
+// GET /decode?vin=VIN — returns JSON with make/model/year etc.
+async function cfcDecode(vin) {
   try {
-    const r = await axios.get(url, {
-      headers: H, responseType: "text", timeout: 30000,
-      validateStatus: () => true,
+    const r = await axios.get(`${CFC_BASE}/decode`, {
+      params:  { vin },
+      headers: CFC_H,
+      timeout: 15000,
     });
-    if (r.status >= 400) {
-      const hint = String(r.data || "").slice(0, 200).toLowerCase();
-      throw new Error(`CS_${r.status}:${hint}`);
-    }
     return r.data;
   } catch (err) {
-    throw new Error(`CS_ERROR:${String(err?.message || "cs-error")}`);
+    throw new Error(`CFC_DECODE_ERROR:${err?.response?.status || err?.message}`);
+  }
+}
+
+// GET /plate?plate=PLATE&state=STATE — returns JSON with vin field
+async function cfcPlateLookup(plate, state) {
+  try {
+    const r = await axios.get(`${CFC_BASE}/plate`, {
+      params:  { plate, state },
+      headers: CFC_H,
+      timeout: 15000,
+    });
+    // Response may have { vin: "..." } or { data: { vin: "..." } }
+    const vin = r.data?.vin || r.data?.data?.vin || null;
+    if (!vin) throw new Error("CFC_NO_VIN_IN_RESPONSE");
+    return vin.toUpperCase();
+  } catch (err) {
+    throw new Error(`CFC_PLATE_ERROR:${err?.response?.status || err?.message}`);
+  }
+}
+
+// GET /report?vin=VIN — returns the full vehicle history report
+// Response may be: HTML string, base64 string, JSON with report_url/html/content
+async function cfcGetReport(vin) {
+  try {
+    const r = await axios.get(`${CFC_BASE}/report`, {
+      params:  { vin },
+      headers: CFC_H,
+      timeout: 45000,
+      validateStatus: () => true,
+    });
+
+    if (r.status === 402) throw new Error("CFC_INSUFFICIENT_CREDITS");
+    if (r.status === 404) throw new Error("CS_404:vin not found");
+    if (r.status >= 400)  throw new Error(`CFC_${r.status}:${JSON.stringify(r.data).slice(0,100)}`);
+
+    const json = r.data;
+
+    // Confirmed response shape: { success, data: { html_content, has_pdf, pdf_endpoint, ... } }
+    if (!json?.success) {
+      throw new Error(`CFC_API_ERROR:${JSON.stringify(json).slice(0,100)}`);
+    }
+
+    const data = json.data || {};
+
+    // 1. If there's real HTML content — use it directly
+    if (data.html_content && data.html_content.trim().length > 200) {
+      return Buffer.from(data.html_content, "utf8").toString("base64");
+    }
+
+    // 2. If API provides a PDF endpoint — fetch the PDF bytes
+    if (data.has_pdf && data.pdf_endpoint) {
+      const pdfUrl = data.pdf_endpoint.startsWith("http")
+        ? data.pdf_endpoint
+        : `https://carfaxcheaper.com${data.pdf_endpoint}`;
+      const pdfRes = await axios.get(pdfUrl, {
+        headers:      CFC_H,
+        responseType: "arraybuffer",
+        timeout:      30000,
+      });
+      return Buffer.from(pdfRes.data).toString("base64");
+    }
+
+    // 3. Build a clean HTML report from the structured JSON data
+    // This is the fallback when html_content is empty but we have structured fields
+    const html = buildReportHtml(data, vin);
+    return Buffer.from(html, "utf8").toString("base64");
+
+  } catch (err) {
+    if (err.message.startsWith("CFC_") || err.message.startsWith("CS_")) throw err;
+    throw new Error(`CFC_ERROR:${err?.message}`);
+  }
+}
+
+// Build a clean styled HTML report from the CFC structured JSON response
+function buildReportHtml(data, vin) {
+  const safe = (v, fallback = "N/A") => v != null ? String(v) : fallback;
+  const yn   = (v) => v ? "Yes" : "No";
+
+  const accidents = Array.isArray(data.accident_history) ? data.accident_history : [];
+  const services  = Array.isArray(data.service_history)  ? data.service_history  : [];
+  const owners    = Array.isArray(data.ownership_history)? data.ownership_history : [];
+  const title     = data.title_info || {};
+
+  const accidentRows = accidents.length === 0
+    ? "<tr><td colspan='3' style='text-align:center;color:#16a34a;padding:12px;'>No accidents reported ✓</td></tr>"
+    : accidents.map(a => `<tr>
+        <td>${safe(a.date)}</td>
+        <td>${safe(a.type || a.description)}</td>
+        <td>${safe(a.state || a.location)}</td>
+      </tr>`).join("");
+
+  const serviceRows = services.length === 0
+    ? "<tr><td colspan='3' style='text-align:center;color:#6b7280;padding:12px;'>No service records on file</td></tr>"
+    : services.map(s => `<tr>
+        <td>${safe(s.date)}</td>
+        <td>${safe(s.description || s.type)}</td>
+        <td>${safe(s.mileage ? s.mileage.toLocaleString() + " mi" : null)}</td>
+      </tr>`).join("");
+
+  const ownerRows = owners.length === 0
+    ? "<tr><td colspan='3' style='text-align:center;color:#6b7280;padding:12px;'>Ownership data not available</td></tr>"
+    : owners.map((o, i) => `<tr>
+        <td>Owner ${i + 1}</td>
+        <td>${safe(o.state || o.location)}</td>
+        <td>${safe(o.date_obtained || o.from)} – ${safe(o.date_sold || o.to, "Present")}</td>
+      </tr>`).join("");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Vehicle History Report — ${vin}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;padding:24px;}
+  .header{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:white;padding:24px 32px;border-radius:12px;margin-bottom:24px;}
+  .header h1{font-size:22px;font-weight:800;margin-bottom:4px;}
+  .header p{font-size:13px;opacity:0.8;}
+  .badges{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;}
+  .badge{background:rgba(255,255,255,0.15);padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;}
+  .badge.clean{background:#16a34a;color:white;}
+  .badge.issue{background:#dc2626;color:white;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px;}
+  .stat{background:white;border:1px solid #e2e8f0;border-radius:10px;padding:16px;}
+  .stat-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:4px;}
+  .stat-value{font-size:22px;font-weight:800;color:#1e3a8a;}
+  .section{background:white;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:20px;overflow:hidden;}
+  .section-header{background:#f1f5f9;padding:14px 20px;font-weight:700;font-size:14px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:8px;}
+  table{width:100%;border-collapse:collapse;}
+  th{text-align:left;padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#64748b;background:#f8fafc;border-bottom:1px solid #e2e8f0;}
+  td{padding:10px 16px;font-size:13px;border-bottom:1px solid #f1f5f9;}
+  tr:last-child td{border-bottom:none;}
+  .footer{text-align:center;font-size:11px;color:#94a3b8;margin-top:24px;}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Vehicle History Report</h1>
+  <p>VIN: ${vin} &nbsp;·&nbsp; Generated ${new Date().toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"})}</p>
+  <div class="badges">
+    <span class="badge ${accidents.length === 0 ? "clean" : "issue"}">${accidents.length === 0 ? "✓ No Accidents" : accidents.length + " Accident(s)"}</span>
+    <span class="badge ${title.branded ? "issue" : "clean"}">${title.branded ? "⚠ Branded Title" : "✓ Clean Title"}</span>
+    <span class="badge">${owners.length || "?"} Owner${owners.length !== 1 ? "s" : ""}</span>
+    ${data.mileage ? `<span class="badge">${Number(data.mileage).toLocaleString()} mi</span>` : ""}
+  </div>
+</div>
+
+<div class="grid">
+  <div class="stat"><div class="stat-label">Year</div><div class="stat-value">${safe(data.year)}</div></div>
+  <div class="stat"><div class="stat-label">Make</div><div class="stat-value">${safe(data.make)}</div></div>
+  <div class="stat"><div class="stat-label">Model</div><div class="stat-value">${safe(data.model)}</div></div>
+  <div class="stat"><div class="stat-label">Trim</div><div class="stat-value">${safe(data.trim, "—")}</div></div>
+  <div class="stat"><div class="stat-label">Mileage</div><div class="stat-value">${data.mileage ? Number(data.mileage).toLocaleString() : "—"}</div></div>
+  <div class="stat"><div class="stat-label">Title</div><div class="stat-value" style="font-size:16px;color:${title.branded ? "#dc2626" : "#16a34a"}">${safe(title.status, "Clean")}</div></div>
+</div>
+
+<div class="section">
+  <div class="section-header">🚗 Accident History</div>
+  <table><thead><tr><th>Date</th><th>Type</th><th>State</th></tr></thead>
+  <tbody>${accidentRows}</tbody></table>
+</div>
+
+<div class="section">
+  <div class="section-header">👤 Ownership History</div>
+  <table><thead><tr><th>Owner</th><th>Location</th><th>Period</th></tr></thead>
+  <tbody>${ownerRows}</tbody></table>
+</div>
+
+<div class="section">
+  <div class="section-header">🔧 Service History</div>
+  <table><thead><tr><th>Date</th><th>Service</th><th>Mileage</th></tr></thead>
+  <tbody>${serviceRows}</tbody></table>
+</div>
+
+<div class="footer">Report provided by AutoVINReveal · Data sourced from national vehicle history database · VIN: ${vin}</div>
+</body>
+</html>`;
+}
+
+/* ================================================================
+   CFC Credit Counter
+   Tracks remaining CFC API report credits in Supabase app_settings.
+   Starts at 195, decrements by 1 on every live report fetch.
+================================================================ */
+async function getCfcCredits() {
+  try {
+    const { data } = await supabaseService
+      .from("app_settings")
+      .select("value")
+      .eq("key", CFC_CREDITS_KEY)
+      .maybeSingle();
+    if (data?.value != null) return parseInt(data.value, 10);
+    // Not set yet — initialise to 195
+    await supabaseService.from("app_settings")
+      .upsert({ key: CFC_CREDITS_KEY, value: "195" }, { onConflict: "key" });
+    return 195;
+  } catch { return null; }
+}
+
+async function decrementCfcCredits() {
+  try {
+    // Read-modify-write with a small race window — acceptable for a counter
+    const current = await getCfcCredits();
+    if (current === null) return;
+    const next = Math.max(0, current - 1);
+    await supabaseService.from("app_settings")
+      .upsert({ key: CFC_CREDITS_KEY, value: String(next) }, { onConflict: "key" });
+    console.log(`[CFC Credits] ${current} → ${next}`);
+  } catch (e) {
+    console.error("[CFC Credits] Failed to decrement:", e.message);
   }
 }
 
@@ -372,17 +583,50 @@ function injectReportChrome(html) {
     out = guard + out;
   }
 
-  // 5. Dealer-hide CSS
+  // 5. Dealer-hide CSS + fix blank desktop rendering
   const css = [
     "<style>",
+    "  /* Hide dealer branding */",
     "  .dealer-info,.dealer-header,.co-brand-header,#dealer-wrapper,",
     "  .cpo-header,.cobrand-header,.dealer-contact-info,",
     "  div[class*='dealer'],div[id*='dealer'],div[class*='cobrand'],",
     "  .switch-wrapper,.language-toggle-wrapper{display:none!important;}",
+    "  /* Force report content visible on all screen sizes.",
+    "     CARFAX hides the right-side panel on wide viewports via media queries.",
+    "     We force all panels visible regardless of width. */",
+    "  #detail-content,#report-content,.report-content,",
+    "  .main-content,.content-main,#main-content,",
+    "  .right-col,.right-panel,.content-right,",
+    "  [class*='content-right'],[class*='right-content'],",
+    "  [class*='main-col'],[class*='report-body'],",
+    "  .cfx-content,.cfx-main,#cfx-content{display:block!important;visibility:visible!important;}",
+    "  /* Force full width layout so nothing hides off-screen */",
+    "  body{max-width:none!important;overflow-x:auto!important;}",
+    "  /* Undo any JS-driven hide that sets display:none inline on content wrappers */",
+    "  .tab-content,.tabcontent,.panel,.panel-body{display:block!important;}",
     "</style>",
     "</head>",
   ].join("\n");
   out = out.replace("</head>", css);
+
+  // 6. Patch JS that hides content based on window width
+  // CARFAX sometimes runs: if(window.innerWidth > X) { element.style.display='none' }
+  // We override innerWidth to always return a mobile-like value inside the srcdoc context
+  const widthPatch = [
+    "<script>",
+    "try{",
+    "  Object.defineProperty(window,'innerWidth',{get:function(){return 800;},configurable:true});",
+    "  Object.defineProperty(window,'outerWidth',{get:function(){return 800;},configurable:true});",
+    "  Object.defineProperty(screen,'width',{get:function(){return 800;},configurable:true});",
+    "}catch(e){}",
+    "<\/script>",
+  ].join("");
+
+  if (/<head[\s>]/i.test(out)) {
+    out = out.replace(/(<head(?:\s[^>]*)?>)/i, "$1" + widthPatch);
+  } else {
+    out = widthPatch + out;
+  }
 
   return out;
 }
@@ -968,9 +1212,7 @@ app.post("/api/report", async (req, res) => {
       const safeState = state.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
       const safePlate = plate.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
       try {
-        const txt = await csGet(`${CS}/checkplate/${safeState}/${safePlate}`);
-        const m   = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
-        if (m) targetVin = m[0];
+        targetVin = await cfcPlateLookup(safePlate, safeState);
       } catch { return res.status(400).json({ error: "plate_lookup_failed" }); }
     }
     if (!targetVin) return res.status(400).json({ error: "vin_required" });
@@ -1039,11 +1281,7 @@ app.post("/api/report", async (req, res) => {
       }
 
       try {
-        const live = await csGet(`${CS}/getrecord/${type}/${targetVin}`);
-        if (!live || live.length < 50)      throw new Error("CS_EMPTY_RESPONSE");
-        const checkDecode = decodeReportBase64(live);
-        if (checkDecode.kind === "unknown") throw new Error("CS_INVALID_FORMAT");
-
+        const live = await cfcGetReport(targetVin);
         raw = live;
         writeCache(targetVin, type, raw);
 
@@ -1061,6 +1299,9 @@ app.post("/api/report", async (req, res) => {
         }
 
         if (pendingChargeId) await resolvePendingCharge(pendingChargeId);
+
+        // Decrement CFC API credit counter on every successful live fetch
+        decrementCfcCredits().catch(() => {});
 
       } catch (e) {
         console.error(`[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`);
@@ -1090,30 +1331,54 @@ app.post("/api/report", async (req, res) => {
     const decoded = decodeReportBase64(raw);
 
     if (as === "pdf") {
-      try {
-        if (decoded.kind === "pdf") {
-          res.setHeader("Content-Type", "application/pdf");
-          res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-${type}.pdf"`);
-          return res.send(decoded.buffer);
-        }
-        if (decoded.kind === "html") {
-          const form = new FormData();
-          form.append("base64_content", Buffer.from(decoded.html, "utf8").toString("base64"));
-          form.append("vin",         targetVin);
-          form.append("report_type", type);
-          const pdf = await axios.post(`${CS}/pdf`, form, {
-            headers: { ...H, ...form.getHeaders() },
-            responseType: "arraybuffer",
-            timeout: 60000,
+      // Step 1: already a real PDF buffer
+      if (decoded.kind === "pdf") {
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-report.pdf"`);
+        return res.send(decoded.buffer);
+      }
+
+      // Step 2: fetch PDF from CFC (no extra credit cost)
+      if (decoded.kind === "html") {
+        try {
+          const pdfRes = await axios.get(CFC_BASE + "/report/pdf", {
+            params:         { vin: targetVin },
+            headers:        CFC_H,
+            responseType:   "arraybuffer",
+            timeout:        30000,
+            validateStatus: () => true,
           });
-          res.setHeader("Content-Type", "application/pdf");
-          res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-${type}.pdf"`);
-          return res.send(Buffer.from(pdf.data));
+          console.log("[PDF] CFC status=" + pdfRes.status + " bytes=" + (pdfRes.data && pdfRes.data.byteLength));
+          if (pdfRes.status === 200 && pdfRes.data && pdfRes.data.byteLength > 200) {
+            const buf = Buffer.from(pdfRes.data);
+            if (buf.slice(0, 4).toString() === "%PDF") {
+              res.setHeader("Content-Type", "application/pdf");
+              res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-report.pdf"`);
+              return res.send(buf);
+            }
+          }
+        } catch (pdfErr) {
+          console.error("[PDF] CFC fetch failed:", pdfErr.message);
         }
-      } catch (pdfErr) {
-        console.error("PDF generation failed, falling back to HTML:", pdfErr.message);
+
+        // Step 3: fallback — open HTML with print dialog
+        const tag = "<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},600);});</script>";
+        const printHtml = injectReportChrome(decoded.html).replace("</body>", tag + "</body>");
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        return res.send(printHtml);
       }
     }
+
+
+        // Fallback: return HTML with auto-print script so browser opens print dialog
+        if (decoded.kind === "html") {
+          const printHtml = injectReportChrome(decoded.html).replace(
+            "</body>",
+            `<script>window.onload = function(){ window.print(); }<\/script></body>`
+          );
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          return res.send(printHtml);
+        }
 
     if (decoded.kind === "html") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -1161,9 +1426,7 @@ app.post("/api/email-report", async (req, res) => {
     if (!targetVin && state && plate) {
       const safeState = state.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
       const safePlate = plate.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      const txt = await csGet(`${CS}/checkplate/${safeState}/${safePlate}`);
-      const m   = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
-      if (m) targetVin = m[0];
+      targetVin = await cfcPlateLookup(safePlate, safeState);
     }
     if (!targetVin) return res.status(400).json({ error: "vin_required" });
 
@@ -1180,16 +1443,7 @@ app.post("/api/email-report", async (req, res) => {
       pdfBuffer = decoded.buffer;
     } else if (decoded.kind === "html") {
       try {
-        const form = new FormData();
-        form.append("base64_content", Buffer.from(decoded.html, "utf8").toString("base64"));
-        form.append("vin",         targetVin);
-        form.append("report_type", type);
-        const pdfRes = await axios.post(`${CS}/pdf`, form, {
-          headers: { ...H, ...form.getHeaders() },
-          responseType: "arraybuffer",
-          timeout: 60000,
-        });
-        pdfBuffer = Buffer.from(pdfRes.data);
+        // PDF generation not available — will fall back to link email below
       } catch (pdfErr) {
         console.error("[email-report] PDF generation failed:", pdfErr.message);
       }
@@ -1344,13 +1598,28 @@ app.post("/api/admin/login", (req, res) => {
 
 app.get("/api/admin/history", requireAdmin, async (_req, res) => {
   try {
-    const { data } = await supabaseService
-      .from("vin_queries")
-      .select("id, user_id, vin, success, result_url, created_at")
-      .order("created_at", { ascending: false })
-      .limit(200);
-    res.json({ ok: true, rows: data || [] });
-  } catch { res.status(500).json({ ok: false }); }
+    const [queriesRes, creditsRes] = await Promise.all([
+      supabaseService
+        .from("vin_queries")
+        .select("id, user_id, vin, type, success, created_at")
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      supabaseService
+        .from("credits")
+        .select("user_id, email, balance, stripe_subscription_id, updated_at")
+        .order("updated_at", { ascending: false })
+        .limit(200),
+    ]);
+
+    res.json({
+      ok:    true,
+      rows:  queriesRes.data  || [],
+      users: creditsRes.data  || [],
+    });
+  } catch (e) {
+    console.error("Admin history error:", e.message);
+    res.status(500).json({ ok: false });
+  }
 });
 
 app.get("/admin", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
@@ -1434,6 +1703,168 @@ app.get("/api/dashboard", async (req, res) => {
 });
 
 /* ================================================================
+   Direct PDF Download
+   Calls CFC /report/pdf directly and streams it to the browser.
+   Falls back to print-dialog HTML if CFC has no PDF.
+================================================================ */
+app.get("/api/download-pdf", async (req, res) => {
+  try {
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "unauthorized" });
+
+    const vin = (req.query.vin || "").toUpperCase().trim();
+    if (!vin || vin.length !== 17) {
+      return res.status(400).json({ error: "valid VIN required" });
+    }
+
+    // Verify the user has run this report before (owns it)
+    const { data: owned } = await supabaseService
+      .from("vin_queries")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("vin", vin)
+      .eq("success", true)
+      .maybeSingle();
+
+    if (!owned) {
+      return res.status(403).json({ error: "report_not_owned" });
+    }
+
+    console.log(`[PDF] Fetching PDF from CFC for VIN ${vin}`);
+
+    // Call CFC PDF endpoint directly
+    const pdfRes = await axios.get(`${CFC_BASE}/report/pdf`, {
+      params:         { vin },
+      headers:        CFC_H,
+      responseType:   "arraybuffer",
+      timeout:        45000,
+      validateStatus: () => true,
+    });
+
+    console.log(`[PDF] CFC response: status=${pdfRes.status} bytes=${pdfRes.data?.byteLength} content-type=${pdfRes.headers["content-type"]}`);
+
+    // Check if we got a real PDF
+    if (pdfRes.status === 200 && pdfRes.data?.byteLength > 100) {
+      const buf  = Buffer.from(pdfRes.data);
+      const isPdf = buf.slice(0, 4).toString() === "%PDF";
+
+      if (isPdf) {
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${vin}-report.pdf"`);
+        res.setHeader("Content-Length", buf.length);
+        return res.send(buf);
+      }
+
+      // CFC returned 200 but not a PDF — log what we got
+      console.warn(`[PDF] CFC 200 but not a PDF. First bytes: ${buf.slice(0, 80).toString()}`);
+    }
+
+    // Fallback: get the HTML report and inject print trigger
+    console.log(`[PDF] CFC has no PDF for ${vin} — falling back to print-dialog HTML`);
+    const raw = await getReportData(vin, "carfax");
+    if (!raw) return res.status(404).json({ error: "report_not_cached" });
+
+    const decoded = decodeReportBase64(raw);
+    if (decoded.kind !== "html") return res.status(404).json({ error: "no_html" });
+
+    // Inject auto-print and a banner telling user to Save as PDF
+    const banner = [
+      "<div style='position:fixed;top:0;left:0;right:0;background:#1e3a8a;color:white;",
+      "padding:10px 16px;font-family:sans-serif;font-size:13px;font-weight:600;",
+      "display:flex;align-items:center;justify-content:space-between;z-index:99999;'>",
+      "<span>📄 To save as PDF: press <kbd style='background:#3b82f6;padding:2px 8px;border-radius:4px;'>Ctrl+P</kbd>",
+      " (Windows) or <kbd style='background:#3b82f6;padding:2px 8px;border-radius:4px;'>Cmd+P</kbd>",
+      " (Mac) then choose <strong>Save as PDF</strong></span>",
+      "<button onclick='window.print()' style='background:#3b82f6;border:none;color:white;",
+      "padding:6px 14px;border-radius:6px;cursor:pointer;font-weight:bold;'>Print / Save PDF</button>",
+      "</div>",
+      "<div style='height:44px;'></div>",
+    ].join("");
+
+    const printScript = "<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},800);});<\/script>";
+    const finalHtml   = injectReportChrome(decoded.html)
+      .replace("<body", `<body style='padding-top:0;'`)
+      .replace(/<body[^>]*>/, (m) => m + banner)
+      .replace("</body>", printScript + "</body>");
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.send(finalHtml);
+
+  } catch (err) {
+    console.error("[PDF] Error:", err.message);
+    return res.status(500).json({ error: "pdf_failed", message: err.message });
+  }
+});
+
+/* ================================================================
+   Is Owner — lightweight check, returns true only for CFC_OWNER_EMAIL
+================================================================ */
+app.get("/api/is-owner", async (req, res) => {
+  try {
+    const { user } = await getUser(req);
+    if (!user) return res.json({ owner: false });
+    const isOwner = CFC_OWNER_EMAIL && user.email === CFC_OWNER_EMAIL;
+    res.json({ owner: !!isOwner });
+  } catch {
+    res.json({ owner: false });
+  }
+});
+
+/* ================================================================
+   CFC Owner Dashboard — only accessible to CFC_OWNER_EMAIL
+================================================================ */
+app.get("/api/cfc-dashboard", async (req, res) => {
+  try {
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "unauthorized" });
+    if (CFC_OWNER_EMAIL && user.email !== CFC_OWNER_EMAIL) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
+    // Credits remaining
+    const credits = await getCfcCredits();
+
+    // All-time report stats
+    const { data: allReports } = await supabaseService
+      .from("vin_queries")
+      .select("vin, type, success, created_at, user_id")
+      .eq("success", true)
+      .order("created_at", { ascending: false })
+      .limit(1000);
+
+    const rows = allReports || [];
+
+    // Monthly breakdown last 6 months
+    const now = new Date();
+    const monthly = {};
+    for (let i = 5; i >= 0; i--) {
+      const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+      monthly[key] = 0;
+    }
+    for (const r of rows) {
+      const d   = new Date(r.created_at);
+      const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+      if (key in monthly) monthly[key]++;
+    }
+
+    const thisMonthKey = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+
+    res.json({
+      ok: true,
+      credits_remaining: credits,
+      total_reports:     rows.length,
+      this_month:        monthly[thisMonthKey] || 0,
+      monthly,
+      recent:            rows.slice(0, 20),
+    });
+  } catch (err) {
+    console.error("CFC dashboard error:", err.message);
+    res.status(500).json({ error: "server_error" });
+  }
+});
+
+/* ================================================================
    AI Chat Widget
 ================================================================ */
 app.post("/api/chat", async (req, res) => {
@@ -1470,7 +1901,20 @@ IF ASKED ANYTHING NOT IN THE FACTS LIST above: Say "I am not sure about that - e
 Never mention APIs, integrations, or that you lack information.
 
 ESCALATE: Only add ESCALATE on its own final line when the customer has a real unresolved billing or account problem after you have walked through troubleshooting. Not for general questions.`;
+    // One-shot example teaches the model the exact tone and format expected
+    const FEW_SHOT = [
+      { role: "user",      content: "i didnt get my report" },
+      { role: "assistant", content: "Sorry about that! Did you get a payment confirmation email after you paid?" },
+      { role: "user",      content: "yes i got the email" },
+      { role: "assistant", content: "Got it. How long ago did you pay?" },
+      { role: "user",      content: "like 10 mins ago" },
+      { role: "assistant", content: "Ok. Did you see any error message on screen, or did it just not show the report?" },
+      { role: "user",      content: "no error it just didnt show" },
+      { role: "assistant", content: "In that case email support@autovinreveal.com with your transaction ID and the VIN you searched and they will get it sorted fast." },
+    ];
+
     const messages = [
+      ...FEW_SHOT,
       ...history.slice(-6).map(m => ({ role: m.role, content: m.content })),
       { role: "user", content: message },
     ];

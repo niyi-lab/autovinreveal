@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="robots" content="noindex,nofollow"/>
+  <title>Credits Dashboard · AutoVINReveal</title>
+  <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@700;800&display=swap" rel="stylesheet"/>
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #0f172a; }
+    .brand-font { font-family: 'Poppins', sans-serif; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 24px; }
+    .loader { border: 3px solid #334155; border-radius: 50%; border-top: 3px solid #3b82f6; width: 32px; height: 32px; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes countUp { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+    .count-anim { animation: countUp 0.5s cubic-bezier(.4,0,.2,1) both; }
+    .bar { transition: height 0.6s cubic-bezier(.4,0,.2,1); }
+    .credit-ring { transform: rotate(-90deg); transform-origin: center; }
+  </style>
+</head>
+<body class="min-h-screen text-slate-200 antialiased">
+
+  <!-- Loading -->
+  <div id="loadingState" class="flex items-center justify-center min-h-screen">
+    <div class="text-center">
+      <div class="loader mx-auto mb-4"></div>
+      <p class="text-slate-500 text-sm">Loading dashboard…</p>
+    </div>
+  </div>
+
+  <!-- Auth error -->
+  <div id="authError" class="hidden flex items-center justify-center min-h-screen">
+    <div class="text-center px-4">
+      <div class="text-6xl mb-4">🔒</div>
+      <h2 class="text-2xl font-bold text-white mb-2">Access Denied</h2>
+      <p class="text-slate-400 mb-6">This dashboard is restricted to one account.</p>
+      <a href="/" class="bg-blue-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-blue-500 transition-colors inline-block">← Go Home</a>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dash" class="hidden min-h-screen">
+
+    <!-- Nav -->
+    <nav class="border-b border-slate-700/50 bg-slate-900/80 backdrop-blur-sm sticky top-0 z-40">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+        <a href="/" class="flex items-center gap-2">
+          <div class="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">A</div>
+          <span class="font-bold text-white brand-font text-sm">AutoVINReveal <span class="text-slate-500 font-normal">· Credits</span></span>
+        </a>
+        <div class="flex items-center gap-3">
+          <span id="lastUpdated" class="text-xs text-slate-500 hidden sm:block"></span>
+          <button onclick="loadDash()" class="text-xs text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 py-10 space-y-8">
+
+      <!-- Credits hero card -->
+      <div class="card relative overflow-hidden">
+        <div class="absolute -right-8 -top-8 w-40 h-40 bg-blue-500/10 rounded-full pointer-events-none"></div>
+        <div class="absolute -left-4 -bottom-4 w-28 h-28 bg-purple-500/10 rounded-full pointer-events-none"></div>
+        <div class="relative z-10 flex flex-col sm:flex-row items-center sm:items-start gap-8">
+
+          <!-- Ring gauge -->
+          <div class="flex-shrink-0 relative w-40 h-40">
+            <svg viewBox="0 0 140 140" class="w-full h-full">
+              <!-- Background ring -->
+              <circle cx="70" cy="70" r="58" fill="none" stroke="#334155" stroke-width="12"/>
+              <!-- Progress ring -->
+              <circle id="creditRing" cx="70" cy="70" r="58" fill="none"
+                stroke="#3b82f6" stroke-width="12"
+                stroke-linecap="round"
+                stroke-dasharray="364.4"
+                stroke-dashoffset="364.4"
+                class="credit-ring"
+                style="transition: stroke-dashoffset 1s cubic-bezier(.4,0,.2,1);"/>
+            </svg>
+            <div class="absolute inset-0 flex flex-col items-center justify-center">
+              <span id="creditNum" class="text-4xl font-black text-white brand-font count-anim">—</span>
+              <span class="text-xs text-slate-400 font-semibold uppercase tracking-wider mt-0.5">left</span>
+            </div>
+          </div>
+
+          <!-- Stats -->
+          <div class="flex-1 space-y-4 text-center sm:text-left">
+            <div>
+              <h1 class="text-2xl font-black text-white brand-font">CFC Report Credits</h1>
+              <p class="text-slate-400 text-sm mt-1">Depletes by 1 on every new report fetch (cached reports don't count)</p>
+            </div>
+            <div class="grid grid-cols-3 gap-4">
+              <div class="bg-slate-900/60 rounded-xl p-4 border border-slate-700">
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Remaining</p>
+                <p id="creditsRemaining" class="text-2xl font-black text-blue-400">—</p>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-4 border border-slate-700">
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Used</p>
+                <p id="creditsUsed" class="text-2xl font-black text-purple-400">—</p>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-4 border border-slate-700">
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">This Month</p>
+                <p id="thisMonth" class="text-2xl font-black text-green-400">—</p>
+              </div>
+            </div>
+
+            <!-- Progress bar -->
+            <div>
+              <div class="flex justify-between text-xs text-slate-400 mb-1.5">
+                <span>Usage</span>
+                <span id="progressLabel">—% used</span>
+              </div>
+              <div class="h-2.5 bg-slate-700 rounded-full overflow-hidden">
+                <div id="progressBar" class="h-full rounded-full transition-all duration-1000"
+                  style="width:0%;background:linear-gradient(90deg,#3b82f6,#8b5cf6)"></div>
+              </div>
+            </div>
+
+            <!-- Warning -->
+            <div id="lowCreditWarn" class="hidden bg-red-900/30 border border-red-700/50 rounded-xl px-4 py-3 flex items-center gap-3">
+              <span class="text-xl">⚠️</span>
+              <p class="text-sm text-red-300 font-semibold">Credits running low! Purchase more at <a href="https://carfaxcheaper.com" target="_blank" class="underline hover:text-red-200">carfaxcheaper.com</a></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats row + chart -->
+      <div class="grid sm:grid-cols-3 gap-6">
+        <div class="card sm:col-span-2">
+          <div class="flex items-center justify-between mb-6">
+            <h3 class="font-bold text-white">Reports per Month</h3>
+            <span class="text-xs text-slate-500">Last 6 months</span>
+          </div>
+          <div id="barChart" class="flex items-end gap-2 h-32"></div>
+          <div id="barLabels" class="flex gap-2 mt-2"></div>
+        </div>
+        <div class="card">
+          <h3 class="font-bold text-white mb-4">All Time</h3>
+          <div class="space-y-4">
+            <div>
+              <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Total Reports Run</p>
+              <p id="totalReports" class="text-3xl font-black text-white">—</p>
+            </div>
+            <div>
+              <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Started With</p>
+              <p class="text-3xl font-black text-slate-400">195</p>
+            </div>
+            <div class="pt-2 border-t border-slate-700">
+              <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Est. Cost Used</p>
+              <p id="costUsed" class="text-xl font-black text-yellow-400">—</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent reports -->
+      <div class="card">
+        <h3 class="font-bold text-white mb-5">Recent Reports</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-slate-700">
+                <th class="text-left text-xs font-bold text-slate-400 uppercase tracking-wider pb-3 pr-4">VIN</th>
+                <th class="text-left text-xs font-bold text-slate-400 uppercase tracking-wider pb-3 pr-4 hidden sm:table-cell">Type</th>
+                <th class="text-left text-xs font-bold text-slate-400 uppercase tracking-wider pb-3 pr-4 hidden md:table-cell">User</th>
+                <th class="text-left text-xs font-bold text-slate-400 uppercase tracking-wider pb-3">Date</th>
+              </tr>
+            </thead>
+            <tbody id="recentBody" class="divide-y divide-slate-700/40">
+              <tr><td colspan="4" class="py-8 text-center text-slate-500">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const STARTING_CREDITS = 195;
+
+    window.VITE_SUPABASE_URL      = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
+    window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const sb = window.supabase.createClient(
+      window.VITE_SUPABASE_URL,
+      window.VITE_SUPABASE_ANON_KEY
+    );
+
+    function $id(id) { return document.getElementById(id); }
+
+    function renderChart(monthly) {
+      const keys   = Object.keys(monthly).sort();
+      const vals   = keys.map(k => monthly[k]);
+      const max    = Math.max(...vals, 1);
+      const chart  = $id('barChart');
+      const labels = $id('barLabels');
+      chart.innerHTML = ''; labels.innerHTML = '';
+      keys.forEach((key, i) => {
+        const val   = vals[i];
+        const pct   = Math.max((val / max) * 100, val > 0 ? 6 : 3);
+        const isCur = i === keys.length - 1;
+        const [,month] = key.split('-');
+        const label = MONTH_LABELS[parseInt(month) - 1];
+
+        const wrap = document.createElement('div');
+        wrap.className = 'flex flex-col items-center flex-1 gap-1';
+        const valEl = document.createElement('span');
+        valEl.className = 'text-xs font-bold ' + (isCur ? 'text-blue-400' : 'text-slate-500');
+        valEl.textContent = val > 0 ? val : '';
+        const bar = document.createElement('div');
+        bar.className = 'bar w-full rounded-t-md ' + (isCur ? 'bg-blue-500' : 'bg-slate-600');
+        bar.style.height = pct + '%';
+        wrap.appendChild(valEl); wrap.appendChild(bar);
+        chart.appendChild(wrap);
+
+        const lbl = document.createElement('div');
+        lbl.className = 'flex-1 text-center text-xs ' + (isCur ? 'text-blue-400 font-bold' : 'text-slate-500');
+        lbl.textContent = label;
+        labels.appendChild(lbl);
+      });
+    }
+
+    function renderRecent(rows) {
+      const tbody = $id('recentBody');
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-slate-500">No reports yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(r => {
+        const date = new Date(r.created_at).toLocaleString('en-US', {
+          month: 'short', day: 'numeric', year: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        });
+        const uid = r.user_id ? r.user_id.slice(0, 8) + '…' : '<span class="text-slate-600">guest</span>';
+        return `<tr>
+          <td class="py-3 pr-4 font-mono text-xs text-slate-200">${r.vin}</td>
+          <td class="py-3 pr-4 hidden sm:table-cell"><span class="px-2 py-0.5 text-[10px] font-bold bg-blue-900/50 text-blue-400 rounded-full uppercase">${r.type || 'carfax'}</span></td>
+          <td class="py-3 pr-4 text-xs text-slate-400 hidden md:table-cell">${uid}</td>
+          <td class="py-3 text-xs text-slate-400">${date}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function loadDash() {
+      try {
+        const { data: sessData } = await sb.auth.getSession();
+        const session = sessData?.session;
+        if (!session) {
+          $id('loadingState').classList.add('hidden');
+          $id('authError').classList.remove('hidden');
+          return;
+        }
+
+        const r = await fetch('/api/cfc-dashboard', {
+          headers: { Authorization: 'Bearer ' + session.access_token }
+        });
+
+        if (r.status === 401 || r.status === 403) {
+          $id('loadingState').classList.add('hidden');
+          $id('authError').classList.remove('hidden');
+          return;
+        }
+
+        const d = await r.json();
+
+        const remaining  = d.credits_remaining ?? 0;
+        const used       = STARTING_CREDITS - remaining;
+        const usedPct    = Math.min(100, Math.round((used / STARTING_CREDITS) * 100));
+        const circumf    = 364.4; // 2 * π * 58
+
+        // Update numbers
+        $id('creditNum').textContent       = remaining;
+        $id('creditsRemaining').textContent = remaining;
+        $id('creditsUsed').textContent      = Math.max(0, used);
+        $id('thisMonth').textContent        = d.this_month ?? 0;
+        $id('totalReports').textContent     = d.total_reports ?? 0;
+        $id('costUsed').textContent         = '$' + (Math.max(0, used) * 0.50).toFixed(2);
+        $id('progressLabel').textContent    = usedPct + '% used';
+
+        // Animate ring
+        const offset = circumf - (circumf * (remaining / STARTING_CREDITS));
+        const ring   = $id('creditRing');
+        setTimeout(() => {
+          ring.style.strokeDashoffset = offset;
+          // Color: green > 50%, yellow 20-50%, red < 20%
+          ring.style.stroke = remaining > 97 ? '#22c55e' : remaining > 39 ? '#f59e0b' : '#ef4444';
+        }, 100);
+
+        // Progress bar
+        $id('progressBar').style.width = usedPct + '%';
+        if (usedPct > 60) $id('progressBar').style.background = 'linear-gradient(90deg,#f59e0b,#ef4444)';
+
+        // Low credit warning
+        if (remaining <= 30) $id('lowCreditWarn').classList.remove('hidden');
+
+        // Chart
+        if (d.monthly) renderChart(d.monthly);
+
+        // Recent
+        renderRecent(d.recent || []);
+
+        // Timestamp
+        $id('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+        // Show
+        $id('loadingState').classList.add('hidden');
+        $id('dash').classList.remove('hidden');
+
+      } catch (err) {
+        console.error('Dashboard error:', err);
+        $id('loadingState').innerHTML =
+          '<p class="text-red-400 text-center">Failed to load. <button onclick="loadDash()" class="underline">Retry</button></p>';
+      }
+    }
+
+    loadDash();
+  </script>
+</body>
+</html>

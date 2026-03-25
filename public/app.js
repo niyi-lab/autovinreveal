@@ -135,11 +135,11 @@ async function apiFetch(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
      allow-forms       — needed for any forms inside the report
    Top-level navigation is NOT in the list — the report cannot escape.
 ================================ */
-function openReport(html) {
-  showReportOverlay(html);
+function openReport(html, vin) {
+  showReportOverlay(html, vin);
 }
 
-function showReportOverlay(html) {
+function showReportOverlay(html, vin) {
   document.getElementById('reportOverlay')?.remove();
 
   const overlay = document.createElement('div');
@@ -149,14 +149,26 @@ function showReportOverlay(html) {
 
   const bar = document.createElement('div');
   bar.style.cssText =
-    'flex-shrink:0;background:#1e3a8a;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;';
+    'flex-shrink:0;background:#1e3a8a;padding:8px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;';
   bar.innerHTML = `
-    <span style="color:white;font-weight:bold;font-size:14px;">Vehicle History Report</span>
-    <button id="closeReportOverlay"
-      style="background:#ef4444;color:white;border:none;padding:6px 14px;border-radius:6px;
-             font-weight:bold;cursor:pointer;font-size:13px;">
-      ✕ Close
-    </button>`;
+    <span style="color:white;font-weight:bold;font-size:14px;flex-shrink:0;">Vehicle History Report</span>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button id="overlayPrintBtn"
+        style="background:transparent;color:white;border:1px solid rgba(255,255,255,0.4);padding:5px 12px;border-radius:6px;
+               font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
+        🖨 Save as PDF
+      </button>
+      <button id="overlayDownloadBtn"
+        style="background:#2563eb;color:white;border:none;padding:5px 12px;border-radius:6px;
+               font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
+        ⬇ Download
+      </button>
+      <button id="closeReportOverlay"
+        style="background:#ef4444;color:white;border:none;padding:5px 14px;border-radius:6px;
+               font-weight:bold;cursor:pointer;font-size:13px;">
+        ✕ Close
+      </button>
+    </div>`;
 
   const iframe = document.createElement('iframe');
   iframe.style.cssText = 'flex:1;border:none;width:100%;';
@@ -170,6 +182,25 @@ function showReportOverlay(html) {
 
   // Push history state so Android back-button also closes the overlay
   try { window.history.pushState({ reportOverlayOpen: true }, ''); } catch (_) {}
+
+  // Save as PDF — opens the report in a new tab and triggers print dialog there
+  // so the overlay stays intact and the CARFAX page scripts can't break anything
+  overlay.querySelector('#overlayPrintBtn')?.addEventListener('click', () => {
+    const win = window.open('', '_blank');
+    if (!win) { showToast('Pop-up blocked — please allow pop-ups and try again', 'error'); return; }
+    win.document.write(html);
+    win.document.close();
+    // Small delay so the page renders before print fires
+    win.addEventListener('load', () => { setTimeout(() => win.print(), 500); });
+  });
+
+  // Download — auto-downloads via /api/download-pdf or as HTML blob
+  overlay.querySelector('#overlayDownloadBtn')?.addEventListener('click', () => {
+    // Immediately download the HTML already in memory — no server call, no dialog
+    const blob = new Blob([html], { type: 'text/html' });
+    downloadBlob(blob, (vin || 'report') + '-vehicle-history.html');
+    showToast('Download started!', 'ok');
+  });
 
   function closeOverlay() {
     const el = document.getElementById('reportOverlay');
@@ -507,6 +538,9 @@ function reflectAuthUI(session) {
     if (loginBtnMobile) loginBtnMobile.style.display = 'none';
     if (emailMobile)    emailMobile.textContent = email;
 
+    // Check if this is the owner — show credits dashboard button if so
+    checkOwnerAccess();
+
   } else {
     // Desktop
     if (userChip) userChip.style.display = 'none';
@@ -522,7 +556,30 @@ function reflectAuthUI(session) {
     if (balanceMobile)  balanceMobile.style.display = 'none';
     const menu = $id('mobileMenu');
     if (menu) menu.style.display = 'none';
+
+    // Hide owner button on logout
+    const ob  = $id('ownerDashBtn');
+    const obm = $id('ownerDashBtnMobile');
+    if (ob)  ob.style.display  = 'none';
+    if (obm) obm.style.display = 'none';
   }
+}
+
+// Silently check if logged-in user is the owner
+async function checkOwnerAccess() {
+  try {
+    const { token } = await getSession();
+    if (!token) return;
+    const r = await fetch('/api/is-owner', {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (!r.ok) return;
+    const { owner } = await r.json();
+    const ob  = $id('ownerDashBtn');
+    const obm = $id('ownerDashBtnMobile');
+    if (ob)  ob.style.display  = owner ? 'flex' : 'none';
+    if (obm) obm.style.display = owner ? 'flex' : 'none';
+  } catch {}
 }
 
 (async () => {
@@ -618,37 +675,36 @@ async function openHistoryHTML(item) {
     const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
     if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
-    openReport(html);
+    openReport(html, data.vin || '');
   } catch (e) { showToast(e.message || 'Request failed', 'error'); }
 }
 
 async function downloadHistoryPDF(item, btn = null) {
   const restore = setBtnLoading(btn, '…');
-  showToast('Generating PDF… this may take a few seconds.', 'ok');
-  const data = {
-    vin:       item.vin !== '(from plate)' ? item.vin : '',
-    state:     item.state || '',
-    plate:     item.plate || '',
-    type:      item.type,
-    as:        'pdf',
-    allowLive: false,
-  };
-  const headers = { 'Content-Type': 'application/json' };
+  showToast('Generating PDF…', 'ok');
+  const vin = item.vin !== '(from plate)' ? item.vin : '';
+  if (!vin) { showToast('No VIN available for PDF download.', 'error'); restore(); return; }
   try {
     const { token } = await getSession();
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (!token) { showToast('Please sign in to download PDFs.', 'error'); restore(); return; }
     await ensureBackendReady();
-    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) }, 60_000);
-    if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
-    if ((r.headers.get('content-type') || '').includes('text/html')) {
-      showToast('PDF service busy. Opening web report instead…', 'ok');
+    // Use dedicated PDF endpoint — streams PDF or print-dialog HTML from CFC
+    const url = '/api/download-pdf?vin=' + encodeURIComponent(vin);
+    const r   = await apiFetch(url, { headers: { Authorization: `Bearer ${token}` } }, 60_000);
+    if (!r.ok) { showToast('PDF failed — ' + r.status, 'error'); restore(); return; }
+    const ct = r.headers.get('content-type') || '';
+    if (ct.includes('application/pdf')) {
+      // Real PDF — trigger download
+      const blob = await r.blob();
+      downloadBlob(blob, `${vin}-report.pdf`);
+      showToast('PDF downloaded!', 'ok');
+    } else {
+      // Fallback: open the print-dialog HTML in a new tab
       const html = await r.text();
-      openReport(html);
-      return;
+      const win  = window.open('', '_blank');
+      if (win) { win.document.write(html); win.document.close(); }
+      showToast('Print dialog will open — choose Save as PDF', 'ok');
     }
-    const blob = await r.blob();
-    downloadBlob(blob, `${(data.vin || item.plate || 'report').replace(/\W+/g,'_')}_${item.type}.pdf`);
-    showToast('Download started!', 'ok');
   } catch (e) {
     showToast(e.message || 'Request failed', 'error');
   } finally { restore(); }
@@ -963,7 +1019,7 @@ f?.addEventListener('submit', async (e) => {
     if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
 
     const html = await r.text();
-    openReport(html);
+    openReport(html, data.vin || '');
     showToast('Report fetched successfully!', 'ok');
     addToHistory({ vin: data.vin || '(from plate)', type: data.type, ts: Date.now(), state: data.state, plate: data.plate });
     renderHistory();

@@ -1,679 +1,1058 @@
-<!DOCTYPE html>
-<html lang="en" class="scroll-smooth">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Report History | AutoVINReveal</title>
-    <meta name="robots" content="noindex, nofollow" />
-    <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32" />
-    <meta name="theme-color" content="#1e3a8a" />
+// app.js
+// ORIGINAL FIXES (from prior session):
+//   #4  — document.write replaced with safe blob-URL / sandboxed-iframe approach
+//   #11 — lastFormData scoped to buy modal; cleared after use
+//   #12 — PayPal button re-renders when user login state changes [REMOVED — PayPal removed]
+//   #13 — openBlank() removed from PayPal onApprove [REMOVED — PayPal removed]
+//   #14 — reflectAuthUI uses style.display instead of classList
+//   #15 — All API.report fetches wrapped in apiFetch() with 30s timeout
+//   #16 — Fixed double-tab race condition; upgraded tryLoadPending()
+//   #17 — PayPal available for all 3 tiers [REMOVED — PayPal removed]
+//   #18 — PayPal container visible on mobile [REMOVED — PayPal removed]
+//
+// PREVIOUS FIXES:
+//   #A — trackPurchase now accepts dynamic value; callers pass correct amount per package
+//   #B — loading spinner hidden before early openBuyModal() return (was stuck on screen)
+//   #C — clearPending() moved into the success path so a throw in renderHistory can't skip it
+//   #D — dataset.renderedFor cleared on logout so guest→login→logout cycle re-renders buttons
+//   #E — plate/state inputs sanitised before being stored in pending data (alphanumeric only)
+//   FIX-6 — trackPurchase hardcoded 6.00 fixed in resumePendingPurchase() and handleSuccessIfNeeded()
+//   FIX-7 — setPrimaryCTA('buy') no longer gates guests behind openLogin()
+//   FIX-PP — PayPal fully removed. Stripe is the sole payment processor.
+//
+// FIXES IN THIS VERSION:
+//   FIX-S1 — iframe in showReportOverlay was unsandboxed. A CARFAX report script
+//             could call window.top.location and navigate the entire app away.
+//             sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+//             added to prevent top-level navigation while keeping the report functional.
+//
+//   FIX-S2 — Form submit: 401/402 early-return path never reset go.disabled or hid
+//             the loading spinner before calling openBuyModal(). Spinner stayed visible
+//             behind the modal. resetFormUI() now called before all early returns.
+//
+//   FIX-S3 — openEmailModal was passed a raw plate string in the vin field when the
+//             history item was a plate lookup. The server's /api/email-report validates
+//             vin and rejects non-VIN strings. openEmailModal now accepts the full
+//             history item and passes vin/state/plate as separate fields so the server
+//             can do the plate→VIN lookup itself.
+//
+//   FIX-S4 — Tailwind typo: active:scale-[0-98] is an invalid value (does nothing).
+//             Fixed to active:scale-[.98] in setPrimaryCTA.
 
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>tailwind.config = { darkMode: 'class' };</script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet" />
+/* ================================
+   Config & Utilities
+================================ */
+const API = {
+  report:   '/api/report',
+  checkout: '/api/create-checkout-session',
+  credits:  (uid) => `/api/credits/${uid}`,
+  share:    '/api/share',
+};
 
-    <style>
-      html, body { overflow-x: hidden; max-width: 100%; }
-      body { font-family: "Inter", sans-serif; background-color: #f8fafc; }
-      h1, h2, h3, .brand-font { font-family: "Poppins", sans-serif; }
-      .loader { border: 3px solid #e2e8f0; border-radius: 50%; border-top: 3px solid #2563eb; width: 20px; height: 20px; animation: spin 1s linear infinite; }
-      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-      .row-enter { animation: rowIn 0.15s ease-out; }
-      @keyframes rowIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-    </style>
-  </head>
+const PENDING_KEY    = 'pendingReport';
+const API_TIMEOUT_MS = 30_000;
 
-  <body class="text-slate-800 antialiased min-h-screen pb-16">
+function $id(id) { return document.getElementById(id); }
 
-    <!-- Nav (mirrors index.html) -->
-    <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-        <a href="/" class="flex items-center gap-2">
-          <div class="w-9 h-9 bg-blue-700 rounded-lg flex items-center justify-center text-white font-extrabold text-xl shadow-lg shadow-blue-700/30">A</div>
-          <span class="text-xl font-bold text-slate-900 tracking-tight brand-font">AutoVIN<span class="text-blue-600">Reveal</span></span>
-        </a>
-        <div class="flex items-center gap-3">
-          <div id="balancePill" class="hidden px-3 py-1 bg-green-50 text-green-700 text-xs font-bold uppercase tracking-wider rounded-full border border-green-100 items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-            <span id="balanceText">0 credits</span>
+function showToast(message, type = 'error') {
+  const box = $id('toastBox');
+  if (!box) { alert(message); return; }
+  const el = document.createElement('div');
+  el.className = `transform transition-all duration-300 flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${
+    type === 'error'
+      ? 'bg-red-50 text-red-700 border border-red-100'
+      : 'bg-green-50 text-green-700 border border-green-100'
+  }`;
+  const icon = type === 'error'
+    ? `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`
+    : `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
+  el.innerHTML = `${icon}<span>${message}</span>`;
+  box.appendChild(el);
+  requestAnimationFrame(() => { el.style.transform = 'translateY(0)'; el.style.opacity = '1'; });
+  setTimeout(() => {
+    el.style.transition = 'all 0.5s ease';
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(-10px)';
+    setTimeout(() => el.remove(), 500);
+  }, 4000);
+}
+
+function trackPurchase(value = 6.00) {
+  try {
+    fbq('track', 'Purchase', {
+      value, currency: 'USD',
+      contents: [{ id: 'VinReport', quantity: 1 }],
+      content_ids: ['VinReport'], content_type: 'product'
+    });
+  } catch {}
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function setBtnLoading(btn, loadingText = 'Processing…') {
+  if (!btn) return () => {};
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg><span>${loadingText}</span>`;
+  btn.classList.add('opacity-70', 'cursor-not-allowed');
+  return () => {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    btn.classList.remove('opacity-70', 'cursor-not-allowed');
+  };
+}
+
+/* ================================
+   fetch with timeout
+================================ */
+async function apiFetch(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } catch (err) {
+    if (err.name === 'AbortError')
+      throw new Error('Request timed out. Please check your connection and try again.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ================================
+   Safe report renderer (Overlay Only)
+   FIX-S1: iframe now has sandbox attribute so report scripts cannot
+   call window.top.location and navigate the parent app away.
+     allow-scripts     — needed for the React SPA to run
+     allow-same-origin — needed for webpack chunk loading
+     allow-popups      — needed for "open in new tab" report links
+     allow-forms       — needed for any forms inside the report
+   Top-level navigation is NOT in the list — the report cannot escape.
+================================ */
+function openReport(html, vin) {
+  showReportOverlay(html, vin);
+}
+
+function showReportOverlay(html, vin) {
+  document.getElementById('reportOverlay')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id    = 'reportOverlay';
+  overlay.style.cssText =
+    'position:fixed;inset:0;z-index:9999;background:#fff;display:flex;flex-direction:column;';
+
+  const bar = document.createElement('div');
+  bar.style.cssText =
+    'flex-shrink:0;background:#1e3a8a;padding:8px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;';
+  bar.innerHTML = `
+    <span style="color:white;font-weight:bold;font-size:14px;flex-shrink:0;">Vehicle History Report</span>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button id="overlayPrintBtn"
+        style="background:transparent;color:white;border:1px solid rgba(255,255,255,0.4);padding:5px 12px;border-radius:6px;
+               font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
+        🖨 Save as PDF
+      </button>
+      <button id="overlayDownloadBtn"
+        style="background:#2563eb;color:white;border:none;padding:5px 12px;border-radius:6px;
+               font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
+        ⬇ Download
+      </button>
+      <button id="closeReportOverlay"
+        style="background:#ef4444;color:white;border:none;padding:5px 14px;border-radius:6px;
+               font-weight:bold;cursor:pointer;font-size:13px;">
+        ✕ Close
+      </button>
+    </div>`;
+
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'flex:1;border:none;width:100%;';
+  // FIX-S1: sandbox prevents top-level navigation while keeping the report functional
+  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
+  iframe.srcdoc = html;
+
+  overlay.appendChild(bar);
+  overlay.appendChild(iframe);
+  document.body.appendChild(overlay);
+
+  // Push history state so Android back-button also closes the overlay
+  try { window.history.pushState({ reportOverlayOpen: true }, ''); } catch (_) {}
+
+  // Save as PDF — opens print dialog
+  overlay.querySelector('#overlayPrintBtn')?.addEventListener('click', () => {
+    const ifrm = overlay.querySelector('iframe');
+    if (ifrm?.contentWindow) {
+      ifrm.contentWindow.print();
+    } else {
+      window.print();
+    }
+  });
+
+  // Download — auto-downloads via /api/download-pdf or as HTML blob
+  overlay.querySelector('#overlayDownloadBtn')?.addEventListener('click', () => {
+    // Immediately download the HTML already in memory — no server call, no dialog
+    const blob = new Blob([html], { type: 'text/html' });
+    downloadBlob(blob, (vin || 'report') + '-vehicle-history.html');
+    showToast('Download started!', 'ok');
+  });
+
+  function closeOverlay() {
+    const el = document.getElementById('reportOverlay');
+    if (!el) return;
+    el.remove();
+    // Clean up the history entry we pushed, but only if still on it
+    try {
+      if (window.history.state?.reportOverlayOpen) window.history.back();
+    } catch (_) {}
+  }
+
+  // Primary: direct DOM removal — always works regardless of history state
+  overlay.querySelector('#closeReportOverlay')
+    .addEventListener('click', closeOverlay);
+
+  // Secondary: hardware/browser back button
+  window._closeReportOverlay = closeOverlay;
+}
+
+window.addEventListener('popstate', () => {
+  const overlay = document.getElementById('reportOverlay');
+  if (overlay) overlay.remove();
+});
+
+/* ================================
+   VIN Validation (ISO 3779)
+================================ */
+const VIN_RE      = /^[A-HJ-NPR-Z0-9]{17}$/;
+const VIN_WEIGHTS = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
+const VIN_MAP = Object.freeze({
+  A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,
+  J:1,K:2,L:3,M:4,N:5,P:7,R:9,
+  S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9,
+  '0':0,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9
+});
+function looksVinBasic(v) { return VIN_RE.test((v||'').toUpperCase()); }
+function vinCheckDigitOk(vinRaw) {
+  const vin = (vinRaw||'').toUpperCase();
+  if (!looksVinBasic(vin)) return false;
+  let sum = 0;
+  for (let i = 0; i < 17; i++) {
+    const val = VIN_MAP[vin[i]];
+    if (val === undefined) return false;
+    sum += val * VIN_WEIGHTS[i];
+  }
+  const rem = sum % 11;
+  return vin[8] === (rem === 10 ? 'X' : String(rem));
+}
+
+function ensureVinHelpEl() {
+  let help = $id('vinHelp');
+  if (!help) {
+    const vinInput = document.querySelector('input[name="vin"]');
+    if (!vinInput) return null;
+    help = document.createElement('div');
+    help.id = 'vinHelp';
+    help.className = 'text-xs mt-2 font-medium transition-all';
+    vinInput.closest('.group')?.appendChild(help);
+  }
+  return help;
+}
+function setVinHelp(text, ok = false) {
+  const el = ensureVinHelpEl();
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = `text-xs mt-2 font-medium transition-all ${ok ? 'text-green-600' : 'text-red-500'}`;
+}
+
+/* ================================
+   Primary CTA switcher
+   FIX-S4: active:scale-[0-98] was invalid — fixed to active:scale-[.98]
+================================ */
+function setPrimaryCTA(mode = 'view') {
+  const btn = $id('go');
+  if (!btn) return;
+  btn.className = 'glow-btn w-full bg-blue-600 hover:bg-blue-700 text-white h-14 rounded-xl font-bold text-lg shadow-xl shadow-blue-600/20 transition-all active:scale-[.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed';
+  if (mode === 'buy') {
+    btn.type = 'button';
+    btn.innerHTML = `<span>Buy Credits</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>`;
+    btn.onclick = () => openBuyModal();
+  } else {
+    btn.type = 'submit';
+    btn.innerHTML = `<span>Get CARFAX Report Now</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>`;
+    btn.onclick = null;
+  }
+}
+
+/* ================================
+   Supabase init
+================================ */
+const SB_URL  = window.VITE_SUPABASE_URL  || '';
+const SB_ANON = window.VITE_SUPABASE_ANON_KEY || '';
+let supabase = null;
+if (window.supabase && SB_URL && SB_ANON) {
+  supabase = window.supabase.createClient(SB_URL, SB_ANON);
+}
+
+/* ================================
+   Backend warmup
+================================ */
+const bootOverlay = $id('bootOverlay');
+let backendReadyOnce = false;
+function showBootOverlay() { bootOverlay?.classList.remove('hidden'); }
+function hideBootOverlay() { bootOverlay?.classList.add('hidden'); }
+async function pingBackendOnce(timeoutMs = 2000) {
+  const ctrl = new AbortController();
+  const t    = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch('/healthz', { cache: 'no-store', signal: ctrl.signal });
+    clearTimeout(t); return r.ok;
+  } catch { clearTimeout(t); return false; }
+}
+async function ensureBackendReady({ timeoutMs = 2000, maxWaitMs = 60000 } = {}) {
+  if (backendReadyOnce) return true;
+  let ok = await pingBackendOnce(timeoutMs);
+  if (ok) { backendReadyOnce = true; return true; }
+  showBootOverlay();
+  const start = Date.now(); let delay = 700;
+  while (Date.now() - start < maxWaitMs) {
+    ok = await pingBackendOnce(timeoutMs);
+    if (ok) { backendReadyOnce = true; hideBootOverlay(); return true; }
+    await new Promise(res => setTimeout(res, delay));
+    delay = Math.min(Math.round(delay * 1.7), 4000);
+  }
+  hideBootOverlay(); return false;
+}
+ensureBackendReady({ timeoutMs: 800, maxWaitMs: 3000 });
+
+/* ================================
+   URL params / success handling
+================================ */
+function onSuccessPage() { return location.pathname.endsWith('/success.html'); }
+function params() { return new URLSearchParams(location.search); }
+const p               = params();
+const stripeSessionId = p.get('session_id') || null;
+const intentParam     = p.get('intent') || null;
+const vinParam        = (p.get('vin') || '').toUpperCase();
+
+function tryLoadPending() {
+  try {
+    const local = localStorage.getItem(PENDING_KEY);
+    if (local) return JSON.parse(local);
+    const session = sessionStorage.getItem(PENDING_KEY);
+    if (session) return JSON.parse(session);
+    return null;
+  } catch { return null; }
+}
+function clearPending() {
+  localStorage.removeItem(PENDING_KEY);
+  sessionStorage.removeItem(PENDING_KEY);
+}
+
+async function resumePendingPurchase() {
+  const pending = tryLoadPending();
+  if (!pending) return;
+  if (pending.vin === '(from plate)') pending.vin = '';
+
+  await ensureBackendReady();
+  const headers = { 'Content-Type': 'application/json' };
+  const { token, user } = await getSession();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (!user && stripeSessionId) pending.oneTimeSession = stripeSessionId;
+  try {
+    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) });
+    if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
+    const html = await r.text();
+    clearPending();
+    openReport(html);
+    trackPurchase(pending.amount || 6.00);
+    showToast('Report ready!', 'ok');
+    addToHistory({
+      vin:   pending.vin || '(from plate)',
+      type:  pending.type || 'carfax',
+      ts:    Date.now(),
+      state: pending.state || '',
+      plate: pending.plate || '',
+    });
+    renderHistory();
+  } catch (e) {
+    showToast(e.message || 'Failed to resume purchase', 'error');
+  } finally {
+    await refreshBalancePill();
+  }
+}
+
+async function handleSuccessIfNeeded() {
+  if (!(onSuccessPage() || stripeSessionId)) return;
+  if (intentParam === 'buy_report' && stripeSessionId && vinParam) {
+    showToast('Payment confirmed. Preparing your report…', 'ok');
+    try {
+      const r = await apiFetch(API.report, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vin: vinParam, type: 'carfax', as: 'html', oneTimeSession: stripeSessionId }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const html = await r.text();
+      openReport(html);
+      trackPurchase(6.00);
+      return;
+    } catch (e) { showToast(e.message || 'Failed to fetch report', 'error'); }
+  }
+  if (stripeSessionId || onSuccessPage()) {
+    const pending = tryLoadPending();
+    if (pending) { showToast('Payment confirmed. Preparing your report…', 'ok'); await resumePendingPurchase(); }
+  }
+  await refreshBalancePill();
+  if (onSuccessPage()) {
+    setTimeout(() => { window.location.href = '/'; }, 1200);
+  } else {
+    const url = new URL(location.href);
+    ['session_id','intent','vin','one','state','plate','type'].forEach(k => url.searchParams.delete(k));
+    history.replaceState({}, '', url.pathname + url.search);
+  }
+}
+handleSuccessIfNeeded();
+
+/* ================================
+   Theme toggle
+================================ */
+$id('themeBtn')?.addEventListener('click', () => {
+  const nowDark = !document.documentElement.classList.contains('dark');
+  document.documentElement.classList.toggle('dark', nowDark);
+  localStorage.setItem('theme', nowDark ? 'dark' : 'light');
+});
+(() => {
+  const saved = localStorage.getItem('theme');
+  if (saved === 'dark' || (!saved && matchMedia('(prefers-color-scheme: dark)').matches))
+    document.documentElement.classList.add('dark');
+})();
+
+/* ================================
+   Auth & Modals
+================================ */
+const loginModal  = $id('loginModal');
+const emailEl     = $id('loginEmail');
+const pwEl        = $id('loginPassword');
+const userChip    = $id('userChip');
+const userEmailEl = $id('userEmail');
+
+function openLogin()  { loginModal?.classList.remove('hidden'); }
+function closeLogin() { loginModal?.classList.add('hidden'); }
+
+$id('closeLoginModal')?.addEventListener('click', closeLogin);
+$id('logoutBtn')?.addEventListener('click', doLogout);
+$id('loginBtn')?.addEventListener('click', openLogin);
+$id('loginBtnMobile')?.addEventListener('click', openLogin); // mobile nav
+
+$id('closeUpdatePasswordModal')?.addEventListener('click', () => {
+  $id('updatePasswordModal')?.classList.add('hidden');
+});
+
+async function doSignup() {
+  if (!supabase) return showToast('Supabase not loaded', 'error');
+  const email    = (emailEl.value || '').trim();
+  const password = pwEl.value || '';
+  if (!email)              return showToast('Enter your email', 'error');
+  if (password.length < 6) return showToast('Password must be at least 6 characters', 'error');
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email, password,
+      options: { emailRedirectTo: `${location.origin}/email-confirmed` },
+    });
+    if (error) {
+      if (/already|registered/i.test(error.message))
+        return showToast('Account already exists. Please sign in.', 'error');
+      throw error;
+    }
+    if (!data.session) showToast('Check your email to confirm account.', 'ok');
+    else { showToast('Account created!', 'ok'); closeLogin(); try { localStorage.setItem('fb_em', email.toLowerCase()); } catch {} }
+    await refreshBalancePill();
+  } catch (e) { showToast(e.message || 'Sign up failed', 'error'); }
+}
+
+async function doLogin() {
+  if (!supabase) return showToast('Supabase not loaded', 'error');
+  const email    = (emailEl.value || '').trim();
+  const password = pwEl.value || '';
+  if (!email || !password) return showToast('Enter email and password', 'error');
+  try {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    showToast('Signed in!', 'ok'); closeLogin();
+    await refreshBalancePill();
+  } catch (e) { showToast(e.message || 'Sign in failed', 'error'); }
+}
+
+async function doLogout() {
+  if (!supabase) return;
+  await supabase.auth.signOut();
+  showToast('Signed out', 'ok');
+  await refreshBalancePill();
+}
+
+$id('doSignup')?.addEventListener('click', doSignup);
+$id('doLogin')?.addEventListener('click', doLogin);
+$id('googleLogin')?.addEventListener('click', async () => {
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: location.origin },
+    });
+    if (error) showToast(error.message);
+  } catch (e) { showToast(e.message); }
+});
+
+let currentSession = null;
+
+function reflectAuthUI(session) {
+  currentSession = session;
+  window._currentSession = session; // expose for inline scripts
+
+  // Desktop
+  const historyLink = $id('historyNavLink');
+
+  // Mobile
+  const hamburger       = $id('hamburgerBtn');
+  const loginBtnMobile  = $id('loginBtnMobile');
+  const balanceMobile   = $id('balancePillMobile');
+  const emailMobile     = $id('mobileUserEmail');
+
+  if (session?.user) {
+    const email = session.user.email || '';
+
+    // Desktop: show email, chip, history; hide login
+    if (userEmailEl) userEmailEl.textContent = email;
+    if (userChip)    userChip.style.display = 'flex';
+    $id('loginBtn')?.classList.add('hidden');
+    if (historyLink) historyLink.style.display = 'flex';
+    const dashLink = $id('dashNavLink');
+    if (dashLink) dashLink.style.display = 'flex';
+
+    // Mobile: show hamburger, hide login button
+    if (hamburger)      hamburger.style.display = 'flex';
+    if (loginBtnMobile) loginBtnMobile.style.display = 'none';
+    if (emailMobile)    emailMobile.textContent = email;
+
+  } else {
+    // Desktop
+    if (userChip) userChip.style.display = 'none';
+    const lb = $id('loginBtn');
+    if (lb) { lb.classList.remove('hidden'); lb.textContent = 'Log in'; }
+    if (historyLink) historyLink.style.display = 'none';
+    const dashLink2 = $id('dashNavLink');
+    if (dashLink2) dashLink2.style.display = 'none';
+
+    // Mobile: hide hamburger, show login button, close menu
+    if (hamburger)      hamburger.style.display = 'none';
+    if (loginBtnMobile) loginBtnMobile.style.display = 'block';
+    if (balanceMobile)  balanceMobile.style.display = 'none';
+    const menu = $id('mobileMenu');
+    if (menu) menu.style.display = 'none';
+  }
+}
+
+(async () => {
+  if (!supabase) return;
+  if (/[?&]code=/.test(location.search)) {
+    const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
+    const url = new URL(location.href);
+    url.searchParams.delete('code'); url.searchParams.delete('state');
+    history.replaceState({}, '', url.pathname + url.search);
+    if (!error) showToast('You\'re signed in!', 'ok');
+  }
+  const { data } = await supabase.auth.getSession();
+  reflectAuthUI(data.session);
+  await refreshBalancePill();
+  supabase.auth.onAuthStateChange((_event, session) => {
+    reflectAuthUI(session);
+    refreshBalancePill();
+  });
+})();
+
+/* ================================
+   Session helper + Balance
+================================ */
+async function getSession() {
+  if (!supabase) return { session: null, user: null, token: null };
+  const { data } = await supabase.auth.getSession();
+  const session  = data?.session || null;
+  return { session, user: session?.user || null, token: session?.access_token || null };
+}
+
+async function fetchBalance() {
+  try {
+    const { user, token } = await getSession();
+    if (!user) return { balance: 0 };
+    const r = await apiFetch(
+      API.credits(user.id),
+      { headers: { Authorization: `Bearer ${token}` } },
+      5000
+    );
+    if (!r.ok) return { balance: 0 };
+    return await r.json();
+  } catch { return { balance: 0 }; }
+}
+
+async function refreshBalancePill() {
+  const pill = $id('balancePill');
+  const txt  = $id('balanceText');
+  const { user } = await getSession();
+  if (!user) {
+    pill?.classList.add('hidden');
+    setPrimaryCTA('view');
+    reflectAuthUI(null);
+    return;
+  }
+  const { balance = 0 } = await fetchBalance();
+  if (pill && txt) {
+    txt.textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
+    pill.classList.remove('hidden');
+  }
+  // Mobile credit pill
+  const pillMobile = $id('balancePillMobile');
+  const txtMobile  = $id('balanceTextMobile');
+  if (pillMobile && txtMobile) {
+    txtMobile.textContent = `${balance} CREDITS`;
+    pillMobile.style.display = 'flex';
+  }
+  setPrimaryCTA(balance <= 0 ? 'buy' : 'view');
+}
+
+/* ================================
+   History (localStorage)
+================================ */
+const HISTORY_KEY = 'reportHistory';
+function loadHistory() { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } }
+function saveHistory(list) { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); }
+function addToHistory(item) { const list = loadHistory(); list.unshift(item); saveHistory(list.slice(0, 20)); }
+function formatTime(ts) { return new Date(ts).toLocaleString(); }
+
+async function openHistoryHTML(item) {
+  const data = {
+    vin:       item.vin !== '(from plate)' ? item.vin : '',
+    state:     item.state || '',
+    plate:     item.plate || '',
+    type:      item.type,
+    as:        'html',
+    allowLive: false,
+  };
+  const headers = { 'Content-Type': 'application/json' };
+  const { token } = await getSession();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  try {
+    await ensureBackendReady();
+    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
+    if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
+    const html = await r.text();
+    openReport(html, data.vin || '');
+  } catch (e) { showToast(e.message || 'Request failed', 'error'); }
+}
+
+async function downloadHistoryPDF(item, btn = null) {
+  const restore = setBtnLoading(btn, '…');
+  showToast('Generating PDF…', 'ok');
+  const vin = item.vin !== '(from plate)' ? item.vin : '';
+  if (!vin) { showToast('No VIN available for PDF download.', 'error'); restore(); return; }
+  try {
+    const { token } = await getSession();
+    if (!token) { showToast('Please sign in to download PDFs.', 'error'); restore(); return; }
+    await ensureBackendReady();
+    // Use dedicated PDF endpoint — streams PDF or print-dialog HTML from CFC
+    const url = '/api/download-pdf?vin=' + encodeURIComponent(vin);
+    const r   = await apiFetch(url, { headers: { Authorization: `Bearer ${token}` } }, 60_000);
+    if (!r.ok) { showToast('PDF failed — ' + r.status, 'error'); restore(); return; }
+    const ct = r.headers.get('content-type') || '';
+    if (ct.includes('application/pdf')) {
+      // Real PDF — trigger download
+      const blob = await r.blob();
+      downloadBlob(blob, `${vin}-report.pdf`);
+      showToast('PDF downloaded!', 'ok');
+    } else {
+      // Fallback: open the print-dialog HTML in a new tab
+      const html = await r.text();
+      const win  = window.open('', '_blank');
+      if (win) { win.document.write(html); win.document.close(); }
+      showToast('Print dialog will open — choose Save as PDF', 'ok');
+    }
+  } catch (e) {
+    showToast(e.message || 'Request failed', 'error');
+  } finally { restore(); }
+}
+
+async function copyShareLink(vin, type) {
+  try {
+    const r = await apiFetch(
+      API.share,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vin, type }) },
+      10_000
+    );
+    if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
+    const { url } = await r.json();
+    await navigator.clipboard.writeText(url);
+    showToast('Share link copied!', 'ok');
+  } catch (e) { showToast(e.message || 'Could not create share link', 'error'); }
+}
+
+/* ================================
+   Email report
+   FIX-S3: openEmailModal now accepts the full history item instead of
+   just a vin string. When the item is a plate lookup (vin === '(from plate)'),
+   state and plate are sent as separate fields so the server can do the
+   plate→VIN resolution itself via /api/email-report, instead of receiving
+   a raw plate string in the vin field which fails VIN validation.
+================================ */
+const emailModal    = $id('emailModal');
+const emailInput    = $id('emailTargetInput');
+const sendEmailBtn  = $id('sendEmailBtn');
+let emailTargetItem = null; // FIX-S3: full history item, not just a vin string
+
+function openEmailModal(item) {
+  emailTargetItem = item;
+  if (currentSession?.user?.email) emailInput.value = currentSession.user.email;
+  emailModal?.classList.remove('hidden');
+  emailInput?.focus();
+}
+function closeEmailModal() { emailModal?.classList.add('hidden'); emailTargetItem = null; }
+$id('closeEmailModal')?.addEventListener('click', closeEmailModal);
+
+sendEmailBtn?.addEventListener('click', async () => {
+  const to = emailInput.value.trim();
+  if (!to || !to.includes('@')) return showToast('Invalid email', 'error');
+  if (!emailTargetItem) return;
+
+  // FIX-S3: pass vin/state/plate separately so the server handles plate lookups
+  const isPlate = emailTargetItem.vin === '(from plate)';
+  const body = {
+    to,
+    type:  emailTargetItem.type || 'carfax',
+    vin:   isPlate ? ''                           : emailTargetItem.vin,
+    state: isPlate ? (emailTargetItem.state || '') : '',
+    plate: isPlate ? (emailTargetItem.plate || '') : '',
+  };
+
+  const restore = setBtnLoading(sendEmailBtn, 'Sending…');
+  try {
+    const r = await apiFetch(
+      '/api/email-report',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      15_000
+    );
+    if (!r.ok) throw new Error(await r.text());
+    showToast(`Report sent to ${to}`, 'ok');
+    closeEmailModal();
+  } catch { showToast('Failed to send email', 'error'); }
+  finally { restore(); }
+});
+
+function renderHistory() {
+  const body = $id('historyBody');
+  const list = loadHistory();
+  if (!body) return;
+  body.innerHTML = '';
+  if (!list.length) {
+    body.innerHTML = `<div class="px-4 py-8 text-center text-sm text-gray-400">No reports yet — search a VIN above ↑</div>`;
+    return;
+  }
+  list.forEach((item, idx) => {
+    const tr = document.createElement('div');
+    tr.className = 'hover:bg-gray-50 transition-colors px-4 py-3';
+    tr.innerHTML = `
+      <div class="flex flex-col gap-2">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <span class="font-mono font-bold text-gray-900 text-sm">${item.vin}</span>
+            <div class="text-xs text-gray-400 mt-0.5">${formatTime(item.ts)}</div>
           </div>
-          <div id="userChip" style="display:none" class="flex items-center gap-3">
-            <span id="userEmail" class="text-sm font-medium text-gray-600 hidden sm:block"></span>
-            <button id="logoutBtn" class="text-xs text-red-500 hover:text-red-700 font-medium">Sign out</button>
-          </div>
-          <button id="loginBtn" class="text-sm font-bold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors">Log in</button>
-          <a href="/" class="text-sm font-bold text-blue-600 hover:text-blue-700 px-3 py-2 transition-colors flex items-center gap-1.5">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
-            Check VIN
-          </a>
+          <button data-idx="${idx}" data-action="del" class="text-red-300 hover:text-red-500 text-base leading-none flex-shrink-0 mt-0.5">✕</button>
         </div>
-      </div>
-    </nav>
-
-    <main class="max-w-5xl mx-auto px-4 sm:px-6 py-10">
-
-      <!-- Page header -->
-      <div class="mb-8">
-        <h1 class="text-3xl font-bold text-slate-900">Report History</h1>
-        <p class="text-gray-500 mt-1 text-sm">All vehicle history reports you've run. Signed-in users also see server-side records.</p>
-      </div>
-
-      <!-- Search + controls bar -->
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-6 flex flex-col sm:flex-row gap-3">
-
-        <!-- Search input -->
-        <div class="relative flex-1">
-          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-            </svg>
-          </div>
-          <input id="searchInput" type="text" placeholder="Search by VIN or plate…"
-            class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 outline-none text-sm transition-all font-mono uppercase placeholder:normal-case placeholder:font-sans placeholder:capitalize" />
+        <div class="flex items-center gap-2 flex-wrap">
+          <button data-idx="${idx}" data-action="open"  class="flex-1 min-w-0 text-center bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-1.5 px-2 rounded-lg transition-colors">View</button>
+          <button data-idx="${idx}" data-action="pdf"   class="flex-1 min-w-0 text-center bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-1.5 px-2 rounded-lg transition-colors">PDF</button>
+          <button data-idx="${idx}" data-action="email" class="flex-1 min-w-0 text-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-xs font-bold py-1.5 px-2 rounded-lg transition-colors">Email</button>
+          <button data-idx="${idx}" data-action="share" class="flex-1 min-w-0 text-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-xs font-bold py-1.5 px-2 rounded-lg transition-colors">Link</button>
         </div>
+      </div>`;
+    body.appendChild(tr);
+  });
+  body.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const i      = +e.currentTarget.getAttribute('data-idx');
+      const item   = loadHistory()[i]; if (!item) return;
+      const action = e.currentTarget.getAttribute('data-action');
+      if (action === 'open')  openHistoryHTML(item);
+      if (action === 'pdf')   downloadHistoryPDF(item, e.currentTarget);
+      if (action === 'email') openEmailModal(item); // FIX-S3: pass full item
+      if (action === 'share') copyShareLink(item.vin !== '(from plate)' ? item.vin : item.plate, item.type);
+      if (action === 'del')   { const list = loadHistory(); list.splice(i, 1); saveHistory(list); renderHistory(); }
+    });
+  });
+}
+$id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(HISTORY_KEY); renderHistory(); });
 
-        <!-- Type filter -->
-        <select id="typeFilter" class="h-10 rounded-xl border border-gray-200 bg-gray-50 focus:border-blue-400 outline-none px-3 text-sm font-medium text-gray-600 cursor-pointer">
-          <option value="">All types</option>
-          <option value="carfax">CARFAX</option>
-          <option value="autocheck">AutoCheck</option>
-        </select>
+/* ================================
+   Buy Credits Modal
+================================ */
+const buyModal = $id('buyCreditsModal');
+let currentBuyModalPendingData = null;
 
-        <!-- Sort -->
-        <select id="sortOrder" class="h-10 rounded-xl border border-gray-200 bg-gray-50 focus:border-blue-400 outline-none px-3 text-sm font-medium text-gray-600 cursor-pointer">
-          <option value="newest">Newest first</option>
-          <option value="oldest">Oldest first</option>
-          <option value="vin">VIN A–Z</option>
-        </select>
+function openBuyModal(pendingData = null) {
+  currentBuyModalPendingData = pendingData;
+  buyModal?.classList.remove('hidden');
+}
+function closeBuyModal() {
+  buyModal?.classList.add('hidden');
+  currentBuyModalPendingData = null;
+}
+$id('closeModalBtn')?.addEventListener('click', closeBuyModal);
 
-        <!-- Clear all -->
-        <button id="clearAllBtn" class="h-10 px-4 rounded-xl border border-red-200 bg-red-50 text-red-600 text-sm font-semibold hover:bg-red-100 transition-colors whitespace-nowrap">
-          Clear all
-        </button>
-      </div>
+async function startStripePurchase({ user, price_id, pendingReport = null, requireLogin = false }) {
+  if (requireLogin && !user) {
+    closeBuyModal();
+    showToast('Please sign in to buy a bundle.', 'error');
+    openLogin();
+    return;
+  }
+  try {
+    await ensureBackendReady();
+    const body = { user_id: user?.id || null, price_id };
+    if (pendingReport?.vin) {
+      localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport));
+      try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport)); } catch {}
+      body.vin         = pendingReport.vin;
+      body.report_type = pendingReport.type || 'carfax';
+    }
+    const r = await apiFetch(
+      API.checkout,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      10_000
+    );
+    if (!r.ok) throw new Error(await r.text() || 'Stripe error');
+    window.location.href = (await r.json()).url;
+  } catch (e) { showToast(e.message || 'Failed to start checkout', 'error'); }
+}
 
-      <!-- Status bar: result count + sync status -->
-      <div class="flex items-center justify-between mb-4 px-1">
-        <p id="resultCount" class="text-sm text-gray-500"></p>
-        <div id="syncStatus" class="hidden items-center gap-2 text-xs text-gray-400 font-medium">
-          <div class="loader w-3 h-3 border-2" style="width:12px;height:12px;border-width:2px;"></div>
-          <span>Syncing from server…</span>
-        </div>
-      </div>
+$id('buy1Btn')?.addEventListener('click', async () => {
+  const btn = $id('buy1Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
+  const { user } = await getSession(); const pending = currentBuyModalPendingData;
+  closeBuyModal();
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: pending });
+  restore();
+});
+$id('buy5Btn')?.addEventListener('click', async () => {
+  const btn = $id('buy5Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
+  const { user } = await getSession(); closeBuyModal();
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_5PACK', requireLogin: true });
+  restore();
+});
+$id('buy20Btn')?.addEventListener('click', async () => {
+  const btn = $id('buy20Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
+  const { user } = await getSession(); closeBuyModal();
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_20PACK', requireLogin: true });
+  restore();
+});
 
-      <!-- Report list -->
-      <div id="historyList" class="space-y-3"></div>
+$id('buy1Sidebar')?.addEventListener('click',  () => openBuyModal());
+$id('buy5Sidebar')?.addEventListener('click',  async () => {
+  const { user } = await getSession();
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_5PACK', requireLogin: true });
+});
+$id('buy20Sidebar')?.addEventListener('click', async () => {
+  const { user } = await getSession();
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_20PACK', requireLogin: true });
+});
+['pricingBuy1Btn', 'pricingBuy5Btn', 'pricingBuy20Btn'].forEach(id => {
+  $id(id)?.addEventListener('click', () => openBuyModal());
+});
+$id('mobileViewPlans')?.addEventListener('click', () => openBuyModal());
 
-      <!-- Empty state -->
-      <div id="emptyState" class="hidden bg-white rounded-2xl border border-dashed border-gray-200 p-16 text-center">
-        <div class="text-5xl mb-4">📋</div>
-        <h3 class="font-bold text-gray-700 text-lg mb-1">No reports found</h3>
-        <p class="text-gray-400 text-sm mb-6" id="emptyMsg">You haven't run any reports yet.</p>
-        <a href="/" class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl transition-colors text-sm shadow-lg shadow-blue-600/20">
-          Check a VIN
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
-        </a>
-      </div>
+/* ================================
+   VIN + Form gate
+================================ */
+const f       = $id('f');
+const go      = $id('go');
+const loading = $id('loading');
 
-    </main>
+function hasPlateCombo(fd) { return !!(fd.state?.trim() && fd.plate?.trim()); }
 
-    <!-- Email modal -->
-    <div id="emailModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
-      role="dialog" aria-modal="true" aria-labelledby="emailModalTitle">
-      <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
-        <button id="closeEmailModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600" aria-label="Close">✕</button>
-        <h3 id="emailModalTitle" class="text-xl font-bold text-gray-900 mb-2">Email Report</h3>
-        <p class="text-sm text-gray-500 mb-4">We'll send the PDF to this address.</p>
-        <input id="emailTargetInput" type="email" placeholder="name@example.com" autofocus
-          class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
-        <button id="sendEmailBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors">Send Now</button>
-      </div>
-    </div>
+let vinDebounceTimer = null;
+async function fetchCarDetails(vin) {
+  try {
+    const res  = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`);
+    const data = await res.json();
+    const get  = (v) => data.Results.find(r => r.Variable === v)?.Value;
+    const make = get('Make'), model = get('Model'), year = get('Model Year');
+    return (make && model && year) ? `${year} ${make} ${model}` : null;
+  } catch { return null; }
+}
 
-    <!-- Toast -->
-    <div id="toastBox" class="fixed top-20 right-4 space-y-3 z-[60]"></div>
-
-    <!-- Supabase config (same as index.html) -->
-    <script>
-      window.VITE_SUPABASE_URL = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
-      window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-    <script type="module">
-      /* ============================================================
-         Utilities
-      ============================================================ */
-      const $  = (sel) => document.querySelector(sel);
-      const $$ = (sel) => document.querySelectorAll(sel);
-      const $id = (id) => document.getElementById(id);
-
-      const PENDING_KEY  = 'pendingReport';
-      const HISTORY_KEY  = 'reportHistory';
-      const API_TIMEOUT  = 30_000;
-
-      function showToast(message, type = 'error') {
-        const box = $id('toastBox');
-        if (!box) return;
-        const el = document.createElement('div');
-        el.className = `transform transition-all duration-300 flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${
-          type === 'error'
-            ? 'bg-red-50 text-red-700 border border-red-100'
-            : 'bg-green-50 text-green-700 border border-green-100'
-        }`;
-        el.innerHTML = type === 'error'
-          ? `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>${message}</span>`
-          : `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span>${message}</span>`;
-        box.appendChild(el);
-        requestAnimationFrame(() => { el.style.transform = 'translateY(0)'; el.style.opacity = '1'; });
-        setTimeout(() => {
-          el.style.transition = 'all 0.5s ease'; el.style.opacity = '0'; el.style.transform = 'translateY(-10px)';
-          setTimeout(() => el.remove(), 500);
-        }, 4000);
-      }
-
-      function setBtnLoading(btn, text = 'Loading…') {
-        if (!btn) return () => {};
-        const orig = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = `<svg class="animate-spin w-4 h-4 inline mr-1" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>${text}`;
-        return () => { btn.disabled = false; btn.innerHTML = orig; };
-      }
-
-      function downloadBlob(blob, filename) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename;
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
-      }
-
-      async function apiFetch(url, opts = {}, timeout = API_TIMEOUT) {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), timeout);
-        try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
-        catch (e) {
-          if (e.name === 'AbortError') throw new Error('Request timed out.');
-          throw e;
-        } finally { clearTimeout(t); }
-      }
-
-      function formatTime(ts) { return new Date(ts).toLocaleString(); }
-
-      /* ============================================================
-         Supabase + Auth
-      ============================================================ */
-      const SB_URL  = window.VITE_SUPABASE_URL  || '';
-      const SB_ANON = window.VITE_SUPABASE_ANON_KEY || '';
-      let supabase = null;
-      if (window.supabase && SB_URL && SB_ANON) {
-        supabase = window.supabase.createClient(SB_URL, SB_ANON);
-      }
-
-      async function getSession() {
-        if (!supabase) return { user: null, token: null };
-        const { data } = await supabase.auth.getSession();
-        const session = data?.session || null;
-        return { user: session?.user || null, token: session?.access_token || null };
-      }
-
-      function reflectAuthNav(user) {
-        const chip  = $id('userChip');
-        const lb    = $id('loginBtn');
-        const email = $id('userEmail');
-        const pill  = $id('balancePill');
-        if (user) {
-          if (email) email.textContent = user.email || '';
-          if (chip)  chip.style.display = 'flex';
-          lb?.classList.add('hidden');
-        } else {
-          if (chip) chip.style.display = 'none';
-          lb?.classList.remove('hidden');
-        }
-      }
-
-      /* ============================================================
-         localStorage history
-      ============================================================ */
-      function loadLocalHistory() {
-        try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; }
-      }
-      function saveLocalHistory(list) {
-        localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
-      }
-
-      /* ============================================================
-         Server history (logged-in users only)
-         Merges server records into the local list, deduplicating by VIN.
-         Server rows use (vin, type, created_at); we adapt them to match
-         the local history shape { vin, type, ts, state, plate }.
-      ============================================================ */
-      async function fetchServerHistory(token) {
-        try {
-          const r = await apiFetch('/api/history', {
-            headers: { Authorization: `Bearer ${token}` },
-          }, 15_000);
-          if (!r.ok) {
-            console.error('[history] /api/history returned', r.status, await r.text());
-            return [];
-          }
-          const { rows = [] } = await r.json();
-          return rows.map(row => ({
-            vin:    row.vin,
-            type:   row.type || 'carfax',
-            ts:     new Date(row.created_at).getTime(),
-            state:  row.state  || '',
-            plate:  row.plate  || '',
-            source: 'server',
-          }));
-        } catch { return []; }
-      }
-
-      function mergeHistories(serverRows, localRows) {
-        // Supabase is the source of truth.
-        // Start with all server records, then append any local-only records
-        // (e.g. guest reports that were never saved to the DB).
-        const seen = new Set(serverRows.map(i => `${i.vin}|${i.type}`));
-        const merged = [...serverRows];
-        for (const row of localRows) {
-          const key = `${row.vin}|${row.type}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            merged.push({ ...row, source: row.source || 'local' });
-          }
-        }
-        return merged;
-      }
-
-      /* ============================================================
-         Report rendering
-      ============================================================ */
-      function openReport(html) {
-        // Open in overlay on the same page — identical to app.js approach
-        document.getElementById('reportOverlayPage')?.remove();
-        const overlay = document.createElement('div');
-        overlay.id = 'reportOverlayPage';
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#fff;display:flex;flex-direction:column;';
-        const bar = document.createElement('div');
-        bar.style.cssText = 'flex-shrink:0;background:#1e3a8a;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;';
-        bar.innerHTML = `
-          <span style="color:white;font-weight:bold;font-size:14px;">Vehicle History Report</span>
-          <button id="closeHistoryOverlay" style="background:#ef4444;color:white;border:none;padding:6px 14px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px;">✕ Close</button>`;
-        const iframe = document.createElement('iframe');
-        iframe.style.cssText = 'flex:1;border:none;width:100%;';
-        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
-        iframe.srcdoc = html;
-        overlay.appendChild(bar);
-        overlay.appendChild(iframe);
-        document.body.appendChild(overlay);
-        window.history.pushState({ reportOverlayOpen: true }, '');
-        bar.querySelector('#closeHistoryOverlay').addEventListener('click', () => window.history.back());
-      }
-
-      window.addEventListener('popstate', () => {
-        document.getElementById('reportOverlayPage')?.remove();
+function reflectVinGate() {
+  if (!f || !go) return;
+  const fd  = Object.fromEntries(new FormData(f).entries());
+  const vin = (fd.vin || '').trim().toUpperCase();
+  clearTimeout(vinDebounceTimer);
+  if (!vin && !hasPlateCombo(fd)) {
+    setVinHelp('Enter a 17-char VIN or Plate + State.');
+    go.disabled = true; return;
+  }
+  if (vin.length > 0) {
+    if (!looksVinBasic(vin))   { setVinHelp('VIN must be 17 chars (no I, O, Q).'); go.disabled = true; return; }
+    if (!vinCheckDigitOk(vin)) { setVinHelp('Invalid check digit — please verify VIN.'); go.disabled = true; return; }
+    setVinHelp('Looking up vehicle…', true);
+    go.disabled = false;
+    vinDebounceTimer = setTimeout(() => {
+      fetchCarDetails(vin).then(name => {
+        const current = (document.querySelector('input[name="vin"]')?.value || '').trim().toUpperCase();
+        if (current !== vin) return;
+        setVinHelp(name ? `✅ Verified: ${name}` : 'VIN valid (details not found).', true);
       });
+    }, 400);
+    return;
+  }
+  if (hasPlateCombo(fd)) { setVinHelp('Plate + State provided ✓', true); go.disabled = false; return; }
+  go.disabled = true;
+}
 
-      /* ============================================================
-         Email modal
-      ============================================================ */
-      let emailTarget = null;
+f?.addEventListener('input', reflectVinGate);
 
-      function openEmailModal(item) {
-        emailTarget = item;
-        const sess = getSession();
-        sess.then(({ user }) => {
-          if (user?.email) $id('emailTargetInput').value = user.email;
-        });
-        $id('emailModal')?.classList.remove('hidden');
-        $id('emailTargetInput')?.focus();
+/* ================================
+   Form submission
+   FIX-S2: resetFormUI() centralises go.disabled=false + loading hide.
+   All early-return paths (balance check, 401/402) now call it so the
+   spinner never gets stuck visible behind the buy modal.
+================================ */
+function resetFormUI() {
+  if (go) go.disabled = false;
+  loading?.classList.add('hidden');
+}
+
+f?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = Object.fromEntries(new FormData(f).entries());
+
+  const rawState = (fd.state || '').trim().replace(/[^A-Za-z0-9]/g, '');
+  const rawPlate = (fd.plate || '').trim().replace(/[^A-Za-z0-9]/g, '');
+
+  const data = {
+    vin:       (fd.vin || '').trim().toUpperCase(),
+    state:     rawState,
+    plate:     rawPlate,
+    type:      fd.type || 'carfax',
+    as:        'html',
+    allowLive: true,
+    amount:    6.00,
+  };
+  if (!data.vin && !(data.state && data.plate)) { showToast('Enter a VIN or Plate', 'error'); return; }
+
+  try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(data)); } catch {}
+
+  go.disabled = true;
+  loading?.classList.remove('hidden');
+
+  const headers   = { 'Content-Type': 'application/json' };
+  let currentUser = null;
+  await ensureBackendReady();
+
+  if (supabase) {
+    const sess  = await getSession();
+    currentUser = sess.user;
+    if (sess.token) headers['Authorization'] = `Bearer ${sess.token}`;
+  }
+
+  if (currentUser?.id) {
+    try {
+      const { balance = 0 } = await (await apiFetch(
+        API.credits(currentUser.id),
+        { headers: { Authorization: headers['Authorization'] } },
+        5000
+      )).json();
+      if (balance <= 0) {
+        localStorage.setItem(PENDING_KEY, JSON.stringify(data));
+        resetFormUI(); // FIX-S2: reset before early return
+        openBuyModal(data);
+        return;
       }
+    } catch {}
+  }
 
-      $id('closeEmailModal')?.addEventListener('click', () => {
-        $id('emailModal')?.classList.add('hidden');
-        emailTarget = null;
-      });
+  try {
+    if (!currentUser && stripeSessionId) data.oneTimeSession = stripeSessionId;
 
-      $id('sendEmailBtn')?.addEventListener('click', async () => {
-        const to = ($id('emailTargetInput')?.value || '').trim();
-        if (!to || !to.includes('@')) return showToast('Invalid email', 'error');
-        if (!emailTarget) return;
+    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
 
-        const isPlate = emailTarget.vin === '(from plate)';
-        const body = {
-          to,
-          type:  emailTarget.type || 'carfax',
-          vin:   isPlate ? ''                       : emailTarget.vin,
-          state: isPlate ? (emailTarget.state || '') : '',
-          plate: isPlate ? (emailTarget.plate || '') : '',
-        };
+    if (r.status === 401 || r.status === 402) {
+      localStorage.setItem(PENDING_KEY, JSON.stringify(data));
+      resetFormUI(); // FIX-S2: spinner was stuck behind modal without this
+      openBuyModal(data);
+      return;
+    }
+    if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
 
-        const restore = setBtnLoading($id('sendEmailBtn'), 'Sending…');
-        try {
-          const r = await apiFetch('/api/email-report', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          }, 15_000);
-          if (!r.ok) throw new Error(await r.text());
-          showToast(`Report sent to ${to}`, 'ok');
-          $id('emailModal')?.classList.add('hidden');
-          emailTarget = null;
-        } catch { showToast('Failed to send email', 'error'); }
-        finally { restore(); }
-      });
+    const html = await r.text();
+    openReport(html, data.vin || '');
+    showToast('Report fetched successfully!', 'ok');
+    addToHistory({ vin: data.vin || '(from plate)', type: data.type, ts: Date.now(), state: data.state, plate: data.plate });
+    renderHistory();
+    await refreshBalancePill();
+  } catch (err) {
+    showToast(err.message || 'Request failed', 'error');
+  } finally {
+    resetFormUI();
+  }
+});
 
-      /* ============================================================
-         Row actions
-      ============================================================ */
-      let reportLoading = false; // global flag — prevent double-clicks
+/* ================================
+   Forgot / Reset Password
+================================ */
+$id('forgotPasswordBtn')?.addEventListener('click', () => {
+  closeLogin();
+  $id('forgotModal')?.classList.remove('hidden');
+  $id('forgotEmail')?.focus();
+});
+$id('closeForgotModal')?.addEventListener('click', () => $id('forgotModal')?.classList.add('hidden'));
 
-      function showReportLoader() {
-        document.getElementById('reportLoaderOverlay')?.remove();
-        const el = document.createElement('div');
-        el.id = 'reportLoaderOverlay';
-        el.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(255,255,255,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
-        el.innerHTML = `
-          <div style="display:flex;flex-direction:column;align-items:center;gap:16px;">
-            <div style="width:48px;height:48px;border:4px solid #e2e8f0;border-top:4px solid #2563eb;border-radius:50%;animation:spin 0.9s linear infinite;"></div>
-            <div style="text-align:center;">
-              <p style="font-family:'Inter',sans-serif;font-weight:700;font-size:15px;color:#1e3a8a;margin:0;">Loading Report…</p>
-              <p style="font-family:'Inter',sans-serif;font-size:13px;color:#64748b;margin:4px 0 0;">This may take a few seconds</p>
-            </div>
-          </div>
-          <style>@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}</style>
-        `;
-        document.body.appendChild(el);
-      }
+$id('sendResetLinkBtn')?.addEventListener('click', async () => {
+  const btn   = $id('sendResetLinkBtn');
+  const email = ($id('forgotEmail').value || '').trim();
+  if (!email || !email.includes('@')) return showToast('Invalid email', 'error');
+  const restore = setBtnLoading(btn, 'Sending…');
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: location.origin });
+    if (error) throw error;
+    showToast('Recovery link sent! Check your email.', 'ok');
+    $id('forgotModal')?.classList.add('hidden');
+  } catch (e) { showToast(e.message, 'error'); }
+  finally { restore(); }
+});
 
-      function hideReportLoader() {
-        document.getElementById('reportLoaderOverlay')?.remove();
-      }
+if (supabase) {
+  supabase.auth.onAuthStateChange(async (event) => {
+    if (event === 'PASSWORD_RECOVERY') $id('updatePasswordModal')?.classList.remove('hidden');
+  });
+}
 
-      async function viewReport(item, triggerBtn) {
-        if (reportLoading) return; // block spam clicks
-        reportLoading = true;
+$id('saveNewPasswordBtn')?.addEventListener('click', async () => {
+  const btn = $id('saveNewPasswordBtn');
+  const pw  = $id('newPasswordInput').value;
+  if (pw.length < 6) return showToast('Password too short (min 6 chars)', 'error');
+  const restore = setBtnLoading(btn, 'Updating…');
+  try {
+    const { error } = await supabase.auth.updateUser({ password: pw });
+    if (error) throw error;
+    showToast('Password updated! You are now logged in.', 'ok');
+    $id('updatePasswordModal')?.classList.add('hidden');
+  } catch (e) { showToast(e.message, 'error'); }
+  finally { restore(); }
+});
 
-        // Disable the clicked button visually
-        if (triggerBtn) {
-          triggerBtn.disabled = true;
-          triggerBtn.style.opacity = '0.5';
-        }
-
-        showReportLoader();
-
-        const { token } = await getSession();
-        const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-
-        const data = {
-          vin:       item.vin !== '(from plate)' ? item.vin : '',
-          state:     item.state || '',
-          plate:     item.plate || '',
-          type:      item.type,
-          as:        'html',
-          allowLive: true,
-        };
-
-        try {
-          const r = await apiFetch('/api/report', { method: 'POST', headers, body: JSON.stringify(data) }, 60_000);
-          hideReportLoader();
-          if (!r.ok) {
-            showToast(await r.text() || `HTTP ${r.status}`, 'error');
-            return;
-          }
-          openReport(await r.text());
-        } catch (e) {
-          hideReportLoader();
-          showToast(e.message || 'Request failed', 'error');
-        } finally {
-          reportLoading = false;
-          if (triggerBtn) {
-            triggerBtn.disabled = false;
-            triggerBtn.style.opacity = '';
-          }
-        }
-      }
-
-      async function downloadPDF(item, btn) {
-        const restore = setBtnLoading(btn, '…');
-        showToast('Generating PDF…', 'ok');
-        const data = {
-          vin:       item.vin !== '(from plate)' ? item.vin : '',
-          state:     item.state || '',
-          plate:     item.plate || '',
-          type:      item.type,
-          as:        'pdf',
-          allowLive: true,  // re-fetch if cache missing, no charge (alreadyOwned)
-        };
-        const { token } = await getSession();
-        const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        try {
-          const r = await apiFetch('/api/report', { method: 'POST', headers, body: JSON.stringify(data) }, 60_000);
-          if (!r.ok) { showToast(await r.text() || `HTTP ${r.status}`, 'error'); return; }
-          if ((r.headers.get('content-type') || '').includes('text/html')) {
-            showToast('PDF service busy — opening web report instead.', 'ok');
-            openReport(await r.text());
-            return;
-          }
-          downloadBlob(await r.blob(), `${(data.vin || item.plate || 'report').replace(/\W+/g, '_')}_${item.type}.pdf`);
-          showToast('Download started!', 'ok');
-        } catch (e) { showToast(e.message || 'Request failed', 'error'); }
-        finally { restore(); }
-      }
-
-      async function copyShareLink(item) {
-        const vin = item.vin !== '(from plate)' ? item.vin : item.plate;
-        try {
-          const r = await apiFetch('/api/share', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vin, type: item.type }),
-          }, 10_000);
-          if (!r.ok) throw new Error(await r.text());
-          const { url } = await r.json();
-          await navigator.clipboard.writeText(url);
-          showToast('Share link copied!', 'ok');
-        } catch (e) { showToast(e.message || 'Could not create share link', 'error'); }
-      }
-
-      /* ============================================================
-         Render
-      ============================================================ */
-      let allItems = [];   // full merged list from local + server
-      let filteredItems = []; // after search/filter/sort
-
-      function applyFilters() {
-        const q     = ($id('searchInput')?.value  || '').trim().toUpperCase();
-        const type  = $id('typeFilter')?.value   || '';
-        const order = $id('sortOrder')?.value    || 'newest';
-
-        filteredItems = allItems.filter(item => {
-          if (q && !item.vin.toUpperCase().includes(q) &&
-              !(item.plate || '').toUpperCase().includes(q)) return false;
-          if (type && item.type !== type) return false;
-          return true;
-        });
-
-        filteredItems.sort((a, b) => {
-          if (order === 'oldest') return a.ts - b.ts;
-          if (order === 'vin')    return a.vin.localeCompare(b.vin);
-          return b.ts - a.ts; // newest
-        });
-
-        renderList();
-      }
-
-      function renderList() {
-        const container = $id('historyList');
-        const empty     = $id('emptyState');
-        const count     = $id('resultCount');
-        if (!container) return;
-
-        container.innerHTML = '';
-
-        if (!filteredItems.length) {
-          container.classList.add('hidden');
-          empty?.classList.remove('hidden');
-          const q = ($id('searchInput')?.value || '').trim();
-          if ($id('emptyMsg')) {
-            $id('emptyMsg').textContent = q
-              ? `No reports match "${q}".`
-              : 'You haven\'t run any reports yet.';
-          }
-          if (count) count.textContent = '';
-          return;
-        }
-
-        container.classList.remove('hidden');
-        empty?.classList.add('hidden');
-        if (count) count.textContent = `${filteredItems.length} report${filteredItems.length === 1 ? '' : 's'}`;
-
-        filteredItems.forEach((item, idx) => {
-          const isPlate = item.vin === '(from plate)';
-          const label   = isPlate
-            ? `<span class="font-mono font-bold">${item.plate || '—'}</span><span class="ml-1.5 text-xs text-gray-400 font-normal">(plate lookup)</span>`
-            : `<span class="font-mono font-bold">${item.vin}</span>`;
-
-          const typeTag = item.type === 'autocheck'
-            ? `<span class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-purple-100 text-purple-700 rounded-full">AutoCheck</span>`
-            : `<span class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-blue-100 text-blue-700 rounded-full">CARFAX</span>`;
-
-          const srcTag = item.source === 'server'
-            ? `<span class="px-2 py-0.5 text-[10px] font-medium text-blue-500 bg-blue-50 border border-blue-100 rounded-full flex items-center gap-1">
-                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-                Supabase
-              </span>`
-            : `<span class="px-2 py-0.5 text-[10px] font-medium text-gray-400 bg-gray-100 rounded-full">local</span>`
-
-          const row = document.createElement('div');
-          row.className = 'row-enter bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-all p-4 sm:p-5';
-          row.dataset.idx = idx;
-          row.innerHTML = `
-            <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-              <div class="flex-1 min-w-0">
-                <div class="flex flex-wrap items-center gap-2 mb-1">
-                  <span class="text-gray-900 text-sm">${label}</span>
-                  ${typeTag}
-                  ${srcTag}
-                </div>
-                <p class="text-xs text-gray-400">${formatTime(item.ts)}</p>
-              </div>
-              <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                <button data-action="view"
-                  class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-2 px-3 rounded-lg transition-colors">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                  View
-                </button>
-                <button data-action="pdf"
-                  class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-2 px-3 rounded-lg transition-colors">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                  PDF
-                </button>
-                <button data-action="email"
-                  class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-gray-50 hover:bg-gray-100 text-gray-600 text-xs font-bold py-2 px-3 rounded-lg transition-colors">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                  Email
-                </button>
-                <button data-action="share"
-                  class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-gray-50 hover:bg-gray-100 text-gray-600 text-xs font-bold py-2 px-3 rounded-lg transition-colors">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
-                  Link
-                </button>
-                <button data-action="del"
-                  class="flex items-center justify-center text-red-300 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                </button>
-              </div>
-            </div>`;
-
-          row.querySelectorAll('button[data-action]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-              const action = btn.dataset.action;
-              if (action === 'view')  await viewReport(item, btn);
-              if (action === 'pdf')   await downloadPDF(item, btn);
-              if (action === 'email') openEmailModal(item);
-              if (action === 'share') await copyShareLink(item);
-              if (action === 'del') {
-                // Remove from local storage only (server records stay)
-                const local = loadLocalHistory();
-                const newLocal = local.filter(l => !(l.vin === item.vin && l.type === item.type));
-                saveLocalHistory(newLocal);
-                allItems = allItems.filter((_, i) => i !== idx);
-                applyFilters();
-                showToast('Removed from local history', 'ok');
-              }
-            });
-          });
-
-          container.appendChild(row);
-        });
-      }
-
-      /* ============================================================
-         Init
-      ============================================================ */
-      async function init() {
-        // Auth
-        if (!supabase) return;
-        const { data } = await supabase.auth.getSession();
-        const session = data?.session || null;
-        reflectAuthNav(session?.user || null);
-
-        supabase.auth.onAuthStateChange((_e, s) => reflectAuthNav(s?.user || null));
-
-        // Show local history instantly while we wait for Supabase
-        const localRows = loadLocalHistory();
-
-        if (session?.user && session?.access_token) {
-          // Logged in: show loading state, fetch ALL Supabase records first
-          const syncEl = $id('syncStatus');
-          if (syncEl) { syncEl.classList.remove('hidden'); syncEl.style.display = 'flex'; }
-
-          // Show local as a placeholder while fetching
-          allItems = localRows;
-          applyFilters();
-
-          const serverRows = await fetchServerHistory(session.access_token);
-
-          // Supabase is source of truth — server rows first, local fills any gaps
-          allItems = mergeHistories(serverRows, localRows);
-          applyFilters();
-
-          if (syncEl) { syncEl.classList.add('hidden'); syncEl.style.display = 'none'; }
-        } else {
-          // Guest: localStorage only
-          allItems = localRows;
-          applyFilters();
-        }
-      }
-
-      /* ============================================================
-         Event listeners
-      ============================================================ */
-      $id('searchInput')?.addEventListener('input',  applyFilters);
-      $id('typeFilter')?.addEventListener('change',  applyFilters);
-      $id('sortOrder')?.addEventListener('change',   applyFilters);
-
-      $id('clearAllBtn')?.addEventListener('click', () => {
-        if (!confirm('Clear all local report history? Server-side records for your account will not be deleted.')) return;
-        localStorage.removeItem(HISTORY_KEY);
-        allItems = allItems.filter(i => i.source === 'server'); // keep server rows in view
-        applyFilters();
-        showToast('Local history cleared', 'ok');
-      });
-
-      $id('logoutBtn')?.addEventListener('click', async () => {
-        if (!supabase) return;
-        await supabase.auth.signOut();
-        showToast('Signed out', 'ok');
-        reflectAuthNav(null);
-        // Reload to drop server records from the merged list
-        window.location.reload();
-      });
-
-      init();
-    </script>
-  </body>
-</html>
+/* ================================
+   Init
+================================ */
+(async () => {
+  await refreshBalancePill();
+  renderHistory();
+  reflectVinGate();
+})();
