@@ -87,6 +87,39 @@ function trackPurchase(value = 6.00) {
   } catch {}
 }
 
+// Convert HTML string to PDF and download using html2pdf.js (CDN loaded on demand)
+async function convertHtmlToPdf(htmlContent, filename) {
+  // Load html2pdf.js from CDN if not already loaded
+  if (!window.html2pdf) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  // Create a hidden container, render the HTML inside it
+  const container = document.createElement('div');
+  container.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;background:white;';
+  container.innerHTML = htmlContent;
+  document.body.appendChild(container);
+
+  try {
+    await window.html2pdf(container, {
+      margin:      [8, 8, 8, 8],
+      filename:    filename,
+      image:       { type: 'jpeg', quality: 0.92 },
+      html2canvas: { scale: 1.5, useCORS: true, logging: false, allowTaint: true },
+      jsPDF:       { unit: 'mm', format: 'letter', orientation: 'portrait' },
+      pagebreak:   { mode: ['avoid-all', 'css', 'legacy'] },
+    });
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -173,7 +206,7 @@ function showReportOverlay(html, vin) {
   const iframe = document.createElement('iframe');
   iframe.style.cssText = 'flex:1;border:none;width:100%;';
   // FIX-S1: sandbox prevents top-level navigation while keeping the report functional
-  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
+  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms allow-modals');
   iframe.srcdoc = html;
 
   overlay.appendChild(bar);
@@ -194,12 +227,23 @@ function showReportOverlay(html, vin) {
     win.addEventListener('load', () => { setTimeout(() => win.print(), 500); });
   });
 
-  // Download — auto-downloads via /api/download-pdf or as HTML blob
-  overlay.querySelector('#overlayDownloadBtn')?.addEventListener('click', () => {
-    // Immediately download the HTML already in memory — no server call, no dialog
-    const blob = new Blob([html], { type: 'text/html' });
-    downloadBlob(blob, (vin || 'report') + '-vehicle-history.html');
-    showToast('Download started!', 'ok');
+  // Download — converts HTML to PDF client-side using html2pdf.js
+  overlay.querySelector('#overlayDownloadBtn')?.addEventListener('click', async () => {
+    const btn = overlay.querySelector('#overlayDownloadBtn');
+    const orig = btn.innerHTML;
+    btn.innerHTML = '⏳ Generating…';
+    btn.disabled = true;
+    showToast('Generating PDF…', 'ok');
+    try {
+      await convertHtmlToPdf(html, (vin || 'report') + '-vehicle-history.pdf');
+      showToast('PDF downloaded!', 'ok');
+    } catch(e) {
+      showToast('PDF failed, downloading HTML instead', 'error');
+      downloadBlob(new Blob([html], { type: 'text/html' }), (vin || 'report') + '-report.html');
+    } finally {
+      btn.innerHTML = orig;
+      btn.disabled = false;
+    }
   });
 
   function closeOverlay() {
@@ -591,12 +635,26 @@ async function checkOwnerAccess() {
     history.replaceState({}, '', url.pathname + url.search);
     if (!error) showToast('You\'re signed in!', 'ok');
   }
-  const { data } = await supabase.auth.getSession();
-  reflectAuthUI(data.session);
-  await refreshBalancePill();
-  supabase.auth.onAuthStateChange((_event, session) => {
-    reflectAuthUI(session);
-    refreshBalancePill();
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    // If refresh token is invalid/expired, sign out cleanly to clear stale state
+    if (error && (error.message?.includes('Refresh Token') || error.status === 400)) {
+      console.warn('[Auth] Stale session detected — signing out:', error.message);
+      await supabase.auth.signOut();
+      reflectAuthUI(null);
+    } else {
+      reflectAuthUI(data.session);
+      await refreshBalancePill();
+    }
+  } catch (authErr) {
+    console.warn('[Auth] Session init failed:', authErr.message);
+    reflectAuthUI(null);
+  }
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+      reflectAuthUI(session);
+      refreshBalancePill();
+    }
   });
 })();
 

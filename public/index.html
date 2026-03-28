@@ -111,7 +111,15 @@
 
   <body class="text-slate-800 antialiased flex flex-col min-h-screen pb-20 sm:pb-0">
 
-    <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+    <!-- ⚠️ MAINTENANCE BANNER — remove this block when done -->
+  <div id="maintenanceBanner" style="background:#f59e0b;color:#1c1917;padding:10px 16px;text-align:center;font-family:'Inter',sans-serif;font-size:13px;font-weight:600;position:sticky;top:0;z-index:9999;display:flex;align-items:center;justify-content:center;gap:10px;">
+    <svg style="width:16px;height:16px;flex-shrink:0;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+    <span>We're performing scheduled maintenance. Purchases are temporarily unavailable — reports will be back shortly. Thank you for your patience!</span>
+    <button onclick="document.getElementById('maintenanceBanner').style.display='none'" style="background:rgba(0,0,0,0.15);border:none;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:700;color:#1c1917;">✕</button>
+  </div>
+  <!-- END MAINTENANCE BANNER -->
+
+  <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
 
         <!-- Logo -->
@@ -854,7 +862,7 @@
               </summary>
               <div class="text-gray-600 text-sm mt-3">
                 If your payment went through but the report didn't load, don't worry — your purchase is safe. First, try refreshing the page or clearing your browser cache. If the report still doesn't appear, please contact our support team at
-                <a href="mailto:support@autovinreveal.com" class="text-blue-600 font-semibold hover:underline">support@autovinreveal.com</a>
+                <a href="/cdn-cgi/l/email-protection#93e0e6e3e3fce1e7d3f2e6e7fce5fafde1f6e5f6f2ffbdf0fcfe" class="text-blue-600 font-semibold hover:underline"><span class="__cf_email__" data-cfemail="6b181e1b1b04191f2b0a1e1f041d0205190e1d0e0a0745080406">[email&#160;protected]</span></a>
                 with your VIN (or license plate) and the email address used at checkout. We'll resolve it for you promptly.
               </div>
             </details>
@@ -884,7 +892,7 @@
           <div>
             <h4 class="font-bold text-slate-900 mb-3">Support</h4>
             <ul class="space-y-2 text-sm text-gray-500">
-              <li><a href="mailto:support@autovinreveal.com" class="hover:text-blue-600">Contact Us</a></li>
+              <li><a href="/cdn-cgi/l/email-protection#6d1e181d1d021f192d0c1819021b04031f081b080c01430e0200" class="hover:text-blue-600">Contact Us</a></li>
               <li><a href="#" onclick="document.querySelector('details').open = true" class="hover:text-blue-600">FAQ</a></li>
             </ul>
           </div>
@@ -1110,7 +1118,7 @@
       </div>
     </div>
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
     (function() {
       const LOCATIONS = [
         { city: 'New York',       state: 'NY', flag: 'US' },
@@ -1538,9 +1546,39 @@
       window.VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
       // ── Subscription price IDs — paste your Stripe price IDs here ──
       window.SUB_PRICE_STARTER  = "price_1TELrmFdyJCXbvqwHOFkNut5";   // $30/mo
-      window.SUB_PRICE_PRO      = "price_1TELtJFdyJCXbvqw8Pq2PvCl";       // $98/mo
+      window.SUB_PRICE_P      window.SUB_PRICE_PRO      = "price_1TELtJFdyJCXbvqw8Pq2PvCl";       // $98/mo
       window.SUB_PRICE_PREMIUM  = "price_1TELuzFdyJCXbvqwmU2ZJuW7";   // $160/mo
     </script>
+    <!-- ⚠️ MAINTENANCE: disable all purchase buttons — remove this block when done -->
+    <script>
+    (function() {
+      var BUY_IDS = [
+        'buy1Btn','buy5Btn','buy20Btn',
+        'pricingBuy1Btn','pricingBuy5Btn','pricingBuy20Btn',
+        'buy1Sidebar','buy5Sidebar','buy20Sidebar',
+        'subStarterBtn','subProBtn','subPremiumBtn',
+        'mobileViewPlans',
+      ];
+      function disableBuyBtns() {
+        BUY_IDS.forEach(function(id) {
+          var el = document.getElementById(id);
+          if (!el) return;
+          el.disabled = true;
+          el.style.opacity = '0.4';
+          el.style.cursor = 'not-allowed';
+          el.style.pointerEvents = 'none';
+          el.title = 'Purchases temporarily unavailable';
+        });
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', disableBuyBtns);
+      } else {
+        disableBuyBtns();
+      }
+    })();
+    </script>
+    <!-- END MAINTENANCE -->
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script type="module" src="/app.js"></script>
   </body>
