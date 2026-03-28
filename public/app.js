@@ -542,13 +542,14 @@ async function doLogout() {
 $id('doSignup')?.addEventListener('click', doSignup);
 $id('doLogin')?.addEventListener('click', doLogin);
 $id('googleLogin')?.addEventListener('click', async () => {
+  if (!supabase) return showToast('Auth not loaded — please refresh the page', 'error');
   try {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: location.origin },
     });
-    if (error) showToast(error.message);
-  } catch (e) { showToast(e.message); }
+    if (error) showToast(error.message, 'error');
+  } catch (e) { showToast(e.message || 'Google sign-in failed', 'error'); }
 });
 
 let currentSession = null;
