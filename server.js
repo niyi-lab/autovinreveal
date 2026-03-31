@@ -34,7 +34,7 @@
  *                report route and the shared link viewer.
  *
  *   EMAIL-PDF  — /api/email-report now generates a real PDF via the
- *                CarSimulcast /pdf endpoint (same as the download
+ *                CheapCARFAX API. Falls back to a link email if
  *                button) and attaches it. Falls back to a styled link
  *                email if PDF generation fails.
  ********************************************************************/
@@ -225,7 +225,6 @@ const CFC_KEY  = process.env.CFC_API_KEY || "cfc_79212d01b00f9569b37218eacfeca89
 const CFC_H    = { "X-API-Key": CFC_KEY };
 
 // CarSimulcast fallback — used automatically when CFC hits its daily limit
-const CS_BASE   = "https://connect.carsimulcast.com";
 
 // Daily limit tracker — resets at midnight UTC
 let cfcDailyCount = 0;
@@ -245,23 +244,7 @@ function incrementCfcDailyCount() {
   console.log(`[Provider] CFC daily count: ${cfcDailyCount}/${CFC_DAILY_LIMIT}`);
 }
 
-// CarSimulcast GET helper
-async function csGet(url) {
-  try {
-    const headers = { "API-KEY": process.env.API_KEY, "API-SECRET": process.env.API_SECRET };
-    const r = await axios.get(url, {
-      headers, responseType: "text", timeout: 30000,
-      validateStatus: () => true,
-    });
-    if (r.status >= 400) {
-      const hint = String(r.data || "").slice(0, 200).toLowerCase();
-      throw new Error(`CS_${r.status}:${hint}`);
-    }
-    return r.data;
-  } catch (err) {
-    throw new Error(`CS_ERROR:${String(err?.message || "cs-error")}`);
-  }
-}
+
 
 // GET /decode?vin=VIN — returns JSON with make/model/year etc.
 async function cfcDecode(vin) {
@@ -279,104 +262,131 @@ async function cfcDecode(vin) {
 
 /* ================================================================
    Smart Provider Switching
-   - Primary: CarfaxCheaper (CFC)
-   - Fallback: CarSimulcast
-   - Auto-switches if either provider fails or hits daily limit
-   - Alternates every successful batch to spread load
+   Active provider: CheapCARFAX (CCF). CarfaxCheaper kept for plate lookups only.
+   Auto-switches on daily limit, auth error, 3+ failures (5min cooldown)
 ================================================================ */
 
-// Track provider health
+// CheapCARFAX config (new primary provider)
+const CCF_BASE = "https://panel.cheapcarfax.net/api";
+// API key read lazily from env on every call
+
+// Track health for all 3 providers
 const providerState = {
+  ccf: { failures: 0, lastFailure: null, dailyCount: 0, dailyDate: "" },
   cfc: { failures: 0, lastFailure: null, dailyCount: 0, dailyDate: "" },
-  cs:  { failures: 0, lastFailure: null },
 };
+const CCF_DAILY_HARD_LIMIT = Number(process.env.CCF_DAILY_LIMIT || 20);
 const CFC_DAILY_HARD_LIMIT = Number(process.env.CFC_DAILY_LIMIT || 20);
-const COOLDOWN_MS           = 5 * 60 * 1000; // 5 min cooldown after failures
+const COOLDOWN_MS           = 5 * 60 * 1000;
+
+function ccfAvailable() {
+  if (!process.env.CHEAPCARFAX_API_KEY) return false;
+  const s     = providerState.ccf;
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== s.dailyDate) { s.dailyCount = 0; s.dailyDate = today; }
+  if (s.dailyCount >= CCF_DAILY_HARD_LIMIT) {
+    console.log(`[Provider] CheapCARFAX daily limit hit (${s.dailyCount}/${CCF_DAILY_HARD_LIMIT})`);
+    return false;
+  }
+  if (s.failures >= 3 && s.lastFailure && (Date.now() - s.lastFailure) < COOLDOWN_MS) {
+    console.log(`[Provider] CheapCARFAX in cooldown after ${s.failures} failures`);
+    return false;
+  }
+  return true;
+}
 
 function cfcAvailable() {
+  if (!process.env.CFC_API_KEY) return false;
   const s     = providerState.cfc;
   const today = new Date().toISOString().slice(0, 10);
-  if (today !== s.dailyDate) { s.dailyCount = 0; s.dailyDate = today; } // reset daily
+  if (today !== s.dailyDate) { s.dailyCount = 0; s.dailyDate = today; }
   if (s.dailyCount >= CFC_DAILY_HARD_LIMIT) {
-    console.log(`[Provider] CFC daily limit hit (${s.dailyCount}/${CFC_DAILY_HARD_LIMIT})`);
+    console.log(`[Provider] CarfaxCheaper daily limit hit (${s.dailyCount}/${CFC_DAILY_HARD_LIMIT})`);
     return false;
   }
   if (s.failures >= 3 && s.lastFailure && (Date.now() - s.lastFailure) < COOLDOWN_MS) {
-    console.log(`[Provider] CFC in cooldown after ${s.failures} failures`);
+    console.log(`[Provider] CarfaxCheaper in cooldown after ${s.failures} failures`);
     return false;
   }
   return true;
 }
 
-function csAvailable() {
-  // Read env vars lazily so they're always current
-  const key    = process.env.API_KEY;
-  const secret = process.env.API_SECRET;
-  if (!key || !secret) {
-    console.warn("[Provider] CarSimulcast not available — API_KEY or API_SECRET missing from env");
-    return false;
-  }
-  const s = providerState.cs;
-  if (s.failures >= 3 && s.lastFailure && (Date.now() - s.lastFailure) < COOLDOWN_MS) {
-    console.log(`[Provider] CarSimulcast in cooldown after ${s.failures} failures`);
-    return false;
-  }
-  return true;
-}
 
-// Main report fetch — tries both providers, picks the best available
+
+// Main report fetch — CheapCARFAX only (CarfaxCheaper kept but not used)
 async function cfcGetReport(vin) {
-  const tryProviders = [];
-
-  // Decide order: CFC first unless at daily limit, then CS
-  if (cfcAvailable()) tryProviders.push("cfc");
-  if (csAvailable())  tryProviders.push("cs");
-  if (!tryProviders.length) {
-    // Both in cooldown — reset and try CFC anyway
-    console.warn("[Provider] Both providers in cooldown — forcing CFC attempt");
-    tryProviders.push("cfc");
-    if (CS_KEY && CS_SECRET) tryProviders.push("cs");
+  if (!ccfAvailable()) {
+    // CCF in cooldown or unconfigured — reset failures and try anyway
+    console.warn("[Provider] CheapCARFAX unavailable — forcing attempt");
+    providerState.ccf.failures = 0;
   }
-
-  let lastError = null;
-  for (const provider of tryProviders) {
-    try {
-      const result = provider === "cfc"
-        ? await fetchFromCfc(vin)
-        : await fetchFromCs(vin);
-      // Reset failure count on success
-      providerState[provider].failures = 0;
-      if (provider === "cfc") providerState.cfc.dailyCount++;
-      console.log(`[Provider] ✓ ${provider === "cfc" ? "CarfaxCheaper" : "CarSimulcast"} — VIN: ${vin} (CFC today: ${providerState.cfc.dailyCount}/${CFC_DAILY_HARD_LIMIT})`);
-      return result;
-    } catch (err) {
-      lastError = err;
-      // Record failure
-      providerState[provider].failures++;
-      providerState[provider].lastFailure = Date.now();
-      // If it's a VIN-not-found error — no point trying other provider
-      if (err.message.includes("CS_404") || /invalid.*vin|vin.*not.*found/i.test(err.message)) {
-        throw err;
-      }
-      console.warn(`[Provider] ${provider} failed for ${vin}: ${err.message} — trying next provider`);
-    }
+  try {
+    const result = await fetchFromCcf(vin);
+    providerState.ccf.failures = 0;
+    providerState.ccf.dailyCount++;
+    console.log(`[Provider] ✓ CheapCARFAX — VIN: ${vin} (today: ${providerState.ccf.dailyCount}/${CCF_DAILY_HARD_LIMIT})`);
+    return result;
+  } catch (err) {
+    providerState.ccf.failures++;
+    providerState.ccf.lastFailure = Date.now();
+    console.error(`[Provider] CheapCARFAX failed for ${vin}: ${err.message}`);
+    throw err;
   }
-  throw lastError || new Error("CS_ERROR:all providers failed");
 }
 
-// Fetch from CarfaxCheaper
-async function fetchFromCfc(vin) {
-  const r = await axios.get(`${CFC_BASE}/report`, {
-    params:  { vin },
-    headers: CFC_H,
+// ── Fetch from CheapCARFAX (primary) ──────────────────────────
+async function fetchFromCcf(vin) {
+  const key = process.env.CHEAPCARFAX_API_KEY;
+  if (!key) throw new Error("CCF_ERROR:CHEAPCARFAX_API_KEY not set");
+
+  console.log(`[CheapCARFAX] Fetching ${vin}`);
+  const r = await axios.get(`${CCF_BASE}/carfax/vin/${vin}/html`, {
+    headers: { "x-api-key": key },
     timeout: 45000,
     validateStatus: () => true,
   });
 
-  console.log(`[CFC] Status: ${r.status} for ${vin}`);
+  // Check remaining daily quota from response header
+  const remaining = r.headers["x-api-limit"];
+  if (remaining !== undefined) {
+    console.log(`[CheapCARFAX] Daily quota remaining: ${remaining}`);
+    if (Number(remaining) <= 0) providerState.ccf.dailyCount = CCF_DAILY_HARD_LIMIT;
+  }
+
+  console.log(`[CheapCARFAX] Status: ${r.status} for ${vin}`);
+
+  if (r.status === 401) throw new Error("CCF_AUTH_ERROR:Invalid API key");
+  if (r.status === 400) {
+    const msg = r.data?.message || JSON.stringify(r.data);
+    if (/daily limit/i.test(msg))           { providerState.ccf.dailyCount = CCF_DAILY_HARD_LIMIT; throw new Error("CCF_LIMIT:daily"); }
+    if (/insufficient credits/i.test(msg))  { providerState.ccf.dailyCount = CCF_DAILY_HARD_LIMIT; throw new Error("CCF_LIMIT:credits"); }
+    if (/not found/i.test(msg))             throw new Error("CS_404:vin not found");
+    throw new Error(`CCF_400:${msg}`);
+  }
+  if (r.status >= 400) throw new Error(`CCF_${r.status}:${JSON.stringify(r.data).slice(0,100)}`);
+
+  const html = r.data?.html || "";
+  if (!html || html.trim().length < 200) throw new Error("CCF_EMPTY_RESPONSE");
+
+  console.log(`[CheapCARFAX] Got HTML: ${html.length} chars`);
+  return Buffer.from(html, "utf8").toString("base64");
+}
+
+// ── Fetch from CarfaxCheaper (secondary) ──────────────────────
+async function fetchFromCfc(vin) {
+  const key = process.env.CFC_API_KEY;
+  if (!key) throw new Error("CFC_ERROR:CFC_API_KEY not set");
+
+  const r = await axios.get(`${CFC_BASE}/report`, {
+    params:  { vin },
+    headers: { "X-API-Key": key },
+    timeout: 45000,
+    validateStatus: () => true,
+  });
+
+  console.log(`[CarfaxCheaper] Status: ${r.status} for ${vin}`);
 
   if (r.status === 429 || r.status === 402 || r.status === 403) {
-    // Rate/quota limit — mark daily limit as hit
     providerState.cfc.dailyCount = CFC_DAILY_HARD_LIMIT;
     throw new Error(`CFC_LIMIT:${r.status}`);
   }
@@ -394,64 +404,54 @@ async function fetchFromCfc(vin) {
   }
 
   const data = json.data || {};
-  console.log(`[CFC] html_content: ${(data.html_content||"").trim().length} chars, has_pdf: ${data.has_pdf}`);
-
   if (data.html_content && data.html_content.trim().length > 200) {
     return Buffer.from(data.html_content, "utf8").toString("base64");
   }
   if (data.has_pdf && data.pdf_endpoint) {
     const pdfUrl = data.pdf_endpoint.startsWith("http")
-      ? data.pdf_endpoint
-      : `https://carfaxcheaper.com${data.pdf_endpoint}`;
-    const pdfRes = await axios.get(pdfUrl, { headers: CFC_H, responseType: "arraybuffer", timeout: 30000 });
+      ? data.pdf_endpoint : `https://carfaxcheaper.com${data.pdf_endpoint}`;
+    const pdfRes = await axios.get(pdfUrl, { headers: { "X-API-Key": key }, responseType: "arraybuffer", timeout: 30000 });
     return Buffer.from(pdfRes.data).toString("base64");
   }
-
   const html = buildReportHtml(data, vin);
   if (html.length < 500) throw new Error("CFC_INSUFFICIENT_DATA");
   return Buffer.from(html, "utf8").toString("base64");
 }
 
-// Fetch from CarSimulcast
-async function fetchFromCs(vin) {
-  const key    = process.env.API_KEY;
-  const secret = process.env.API_SECRET;
-  if (!key || !secret) throw new Error("CS_ERROR:CarSimulcast credentials not set");
-  console.log(`[CarSimulcast] Fetching ${vin}`);
-  const raw = await csGet(`${CS_BASE}/getrecord/carfax/${vin}`);
-  if (!raw || raw.length < 50) throw new Error("CS_EMPTY_RESPONSE");
-  const check = decodeReportBase64(raw);
-  if (check.kind === "unknown") throw new Error("CS_INVALID_FORMAT");
-  console.log(`[CarSimulcast] Success for ${vin}`);
-  return raw;
-}
+// CarSimulcast removed — CheapCARFAX is the sole active provider
 
-// Plate lookup — tries CFC then CarSimulcast
+// ── Plate lookup — CFC only (CCF has no plate endpoint) ────────
 async function cfcPlateLookup(plate, state) {
-  // Try CFC first
-  if (cfcAvailable()) {
+  const key = process.env.CFC_API_KEY;
+  if (key) {
     try {
       const r = await axios.get(`${CFC_BASE}/plate`, {
-        params: { plate, state }, headers: CFC_H, timeout: 15000,
+        params: { plate, state }, headers: { "X-API-Key": key }, timeout: 15000,
         validateStatus: () => true,
       });
       if (r.status === 200) {
         const vin = r.data?.vin || r.data?.data?.vin || null;
         if (vin) { console.log(`[CFC Plate] Found VIN: ${vin}`); return vin.toUpperCase(); }
       }
-    } catch (e) {
-      console.warn("[CFC Plate] failed:", e.message);
-    }
+      console.warn(`[CFC Plate] status=${r.status}, no VIN returned`);
+    } catch (e) { console.warn("[CFC Plate] failed:", e.message); }
   }
-  // Fallback: CarSimulcast
-  if (csAvailable()) {
-    console.log(`[CS Plate] Looking up ${plate}/${state}`);
-    const txt = await csGet(`${CS_BASE}/checkplate/${state}/${plate}`);
-    const m   = txt.match(/[A-HJ-NPR-Z0-9]{17}/);
-    if (m) return m[0];
-  }
-  throw new Error("CFC_PLATE_ERROR:plate lookup failed on all providers");
+  throw new Error("CFC_PLATE_ERROR:plate lookup failed — CFC_API_KEY required for plate lookups");
 }
+
+// ── CheapCARFAX limits check (for cfc-dashboard) ───────────────
+async function getCcfLimits() {
+  const key = process.env.CHEAPCARFAX_API_KEY;
+  if (!key) return null;
+  try {
+    const r = await axios.get(`${CCF_BASE}/user/limits`, {
+      headers: { "x-api-key": key }, timeout: 10000, validateStatus: () => true,
+    });
+    if (r.status === 200) return r.data;
+    return null;
+  } catch { return null; }
+}
+
 
 
 // Build a clean styled HTML report from the CFC structured JSON response
@@ -1101,9 +1101,9 @@ async function verifyPaypalCapture(captureId) {
 reconcileStalePendingCharges();
 
 // Log provider configuration on startup
-console.log(`[Provider] CFC configured: ${!!process.env.CFC_API_KEY}`);
-console.log(`[Provider] CarSimulcast configured: ${!!(process.env.API_KEY && process.env.API_SECRET)}`);
-console.log(`[Provider] CFC daily limit: ${CFC_DAILY_HARD_LIMIT} reports/day`);
+console.log(`[Provider] CheapCARFAX configured: ${!!process.env.CHEAPCARFAX_API_KEY}`);
+console.log(`[Provider] CarfaxCheaper configured (plate lookup only): ${!!process.env.CFC_API_KEY}`);
+console.log(`[Provider] Daily limit: ${CCF_DAILY_HARD_LIMIT} reports/day`);
 
 /* ================================================================
    Stripe Checkout
@@ -1579,7 +1579,7 @@ app.post("/api/report", async (req, res) => {
 
 /* ================================================================
    Email Report — EMAIL-PDF FIX
-   Uses the CarSimulcast /pdf endpoint (same as the download button)
+   Emails the report as a link (PDF attachment not available server-side)
    to generate a real PDF attachment. Falls back to a styled link
    email if PDF generation fails.
 ================================================================ */
@@ -1988,8 +1988,11 @@ app.get("/api/cfc-dashboard", async (req, res) => {
       return res.status(403).json({ error: "forbidden" });
     }
 
-    // Credits remaining
-    const credits = await getCfcCredits();
+    // Credits: pull live limits from CheapCARFAX + local counter for CFC
+    const [ccfLimits, cfcCredits] = await Promise.all([getCcfLimits(), getCfcCredits()]);
+    const credits = ccfLimits !== null ? ccfLimits.credits : cfcCredits;
+    const ccfDailyLeft = ccfLimits?.carfax_reports_left_today ?? null;
+    const ccfDailyLimit = ccfLimits?.daily_limit ?? CCF_DAILY_HARD_LIMIT;
 
     // All-time report stats
     const { data: allReports } = await supabaseService
@@ -2019,11 +2022,13 @@ app.get("/api/cfc-dashboard", async (req, res) => {
 
     res.json({
       ok: true,
-      credits_remaining: credits,
-      total_reports:     rows.length,
-      this_month:        monthly[thisMonthKey] || 0,
+      credits_remaining:  credits,
+      ccf_daily_left:     ccfDailyLeft,
+      ccf_daily_limit:    ccfDailyLimit,
+      total_reports:      rows.length,
+      this_month:         monthly[thisMonthKey] || 0,
       monthly,
-      recent:            rows.slice(0, 20),
+      recent:             rows.slice(0, 20),
     });
   } catch (err) {
     console.error("CFC dashboard error:", err.message);
