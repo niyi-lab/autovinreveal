@@ -116,6 +116,16 @@ app.use((_req, res, next) => {
 
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
+// TEMP — find outbound IP, delete after getting it
+app.get("/api/myip", async (_req, res) => {
+  try {
+    const r = await axios.get("https://api.ipify.org?format=json", { timeout: 5000 });
+    res.json(r.data);
+  } catch (e) {
+    res.json({ error: e.message });
+  }
+});
+
 /* ================================================================
    Stripe
 ================================================================ */
@@ -313,25 +323,41 @@ function cfcAvailable() {
 
 
 
-// Main report fetch — CheapCARFAX only (CarfaxCheaper kept but not used)
+// Main report fetch — tries CheapCARFAX first, falls back to CarfaxCheaper
 async function cfcGetReport(vin) {
-  if (!ccfAvailable()) {
-    // CCF in cooldown or unconfigured — reset failures and try anyway
-    console.warn("[Provider] CheapCARFAX unavailable — forcing attempt");
-    providerState.ccf.failures = 0;
+  const tryProviders = [];
+  if (ccfAvailable()) tryProviders.push("ccf");
+  if (cfcAvailable()) tryProviders.push("cfc");
+
+  if (!tryProviders.length) {
+    console.warn("[Provider] All providers unavailable — forcing CFC attempt");
+    tryProviders.push("cfc");
   }
-  try {
-    const result = await fetchFromCcf(vin);
-    providerState.ccf.failures = 0;
-    providerState.ccf.dailyCount++;
-    console.log(`[Provider] ✓ CheapCARFAX — VIN: ${vin} (today: ${providerState.ccf.dailyCount}/${CCF_DAILY_HARD_LIMIT})`);
-    return result;
-  } catch (err) {
-    providerState.ccf.failures++;
-    providerState.ccf.lastFailure = Date.now();
-    console.error(`[Provider] CheapCARFAX failed for ${vin}: ${err.message}`);
-    throw err;
+
+  let lastError = null;
+  for (const provider of tryProviders) {
+    try {
+      const result = provider === "ccf"
+        ? await fetchFromCcf(vin)
+        : await fetchFromCfc(vin);
+      providerState[provider].failures = 0;
+      if (provider === "ccf") providerState.ccf.dailyCount++;
+      if (provider === "cfc") providerState.cfc.dailyCount++;
+      const name = provider === "ccf" ? "CheapCARFAX" : "CarfaxCheaper";
+      console.log(`[Provider] ✓ ${name} — VIN: ${vin}`);
+      return result;
+    } catch (err) {
+      lastError = err;
+      providerState[provider].failures++;
+      providerState[provider].lastFailure = Date.now();
+      if (err.message.includes("CS_404") || /vin.*not.*found|not.*found.*vin/i.test(err.message)) {
+        throw err;
+      }
+      const name = provider === "ccf" ? "CheapCARFAX" : "CarfaxCheaper";
+      console.warn(`[Provider] ${name} failed for ${vin}: ${err.message} — trying next`);
+    }
   }
+  throw lastError || new Error("all providers failed");
 }
 
 // ── Fetch from CheapCARFAX (primary) ──────────────────────────
