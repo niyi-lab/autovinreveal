@@ -226,53 +226,16 @@ if (SMTP_USER && SMTP_PASS) {
 }
 
 /* ================================================================
-   CarfaxCheaper API
+   CarfaxCheaper removed — CheapCARFAX is the sole provider
 ================================================================ */
-const CFC_BASE       = "https://carfaxcheaper.com/api/v1";
-const CFC_OWNER_EMAIL = process.env.CFC_OWNER_EMAIL || ""; // email of special user who can see credit dashboard
-const CFC_CREDITS_KEY = "cfc_credits_remaining";           // key in Supabase app_settings table
-const CFC_KEY  = process.env.CFC_API_KEY || "cfc_79212d01b00f9569b37218eacfeca89d2f03ac01ba2f78fa9ad82c088b16e2f1";
-const CFC_H    = { "X-API-Key": CFC_KEY };
+const CFC_OWNER_EMAIL = process.env.CFC_OWNER_EMAIL || "";
+const CFC_CREDITS_KEY = "cfc_credits_remaining";
 
-// CarSimulcast fallback — used automatically when CFC hits its daily limit
-
-// Daily limit tracker — resets at midnight UTC
-let cfcDailyCount = 0;
-let cfcDailyDate  = new Date().toISOString().slice(0, 10);
-const CFC_DAILY_LIMIT = Number(process.env.CFC_DAILY_LIMIT || 20);
-
-function cfcDailyLimitReached() {
-  const today = new Date().toISOString().slice(0, 10);
-  if (today !== cfcDailyDate) { cfcDailyCount = 0; cfcDailyDate = today; }
-  return cfcDailyCount >= CFC_DAILY_LIMIT;
-}
-
-function incrementCfcDailyCount() {
-  const today = new Date().toISOString().slice(0, 10);
-  if (today !== cfcDailyDate) { cfcDailyCount = 0; cfcDailyDate = today; }
-  cfcDailyCount++;
-  console.log(`[Provider] CFC daily count: ${cfcDailyCount}/${CFC_DAILY_LIMIT}`);
-}
-
-
-
-// GET /decode?vin=VIN — returns JSON with make/model/year etc.
-async function cfcDecode(vin) {
-  try {
-    const r = await axios.get(`${CFC_BASE}/decode`, {
-      params:  { vin },
-      headers: CFC_H,
-      timeout: 15000,
-    });
-    return r.data;
-  } catch (err) {
-    throw new Error(`CFC_DECODE_ERROR:${err?.response?.status || err?.message}`);
-  }
 }
 
 /* ================================================================
    Smart Provider Switching
-   Active provider: CheapCARFAX (CCF). CarfaxCheaper kept for plate lookups only.
+   Active provider: CheapCARFAX (CCF) only.
    Auto-switches on daily limit, auth error, 3+ failures (5min cooldown)
 ================================================================ */
 
@@ -283,11 +246,9 @@ const CCF_BASE = "https://panel.cheapcarfax.net/api";
 // Track health for all 3 providers
 const providerState = {
   ccf: { failures: 0, lastFailure: null, dailyCount: 0, dailyDate: "" },
-  cfc: { failures: 0, lastFailure: null, dailyCount: 0, dailyDate: "" },
 };
 const CCF_DAILY_HARD_LIMIT = Number(process.env.CCF_DAILY_LIMIT || 20);
-const CFC_DAILY_HARD_LIMIT = Number(process.env.CFC_DAILY_LIMIT || 20);
-const COOLDOWN_MS           = 5 * 60 * 1000;
+const COOLDOWN_MS           = 30 * 1000; // 30s cooldown during IP whitelist testing
 
 function ccfAvailable() {
   if (!process.env.CHEAPCARFAX_API_KEY) return false;
@@ -305,11 +266,6 @@ function ccfAvailable() {
   return true;
 }
 
-function cfcAvailable() {
-  if (!process.env.CFC_API_KEY) return false;
-  const s     = providerState.cfc;
-  const today = new Date().toISOString().slice(0, 10);
-  if (today !== s.dailyDate) { s.dailyCount = 0; s.dailyDate = today; }
   if (s.dailyCount >= CFC_DAILY_HARD_LIMIT) {
     console.log(`[Provider] CarfaxCheaper daily limit hit (${s.dailyCount}/${CFC_DAILY_HARD_LIMIT})`);
     return false;
@@ -323,41 +279,24 @@ function cfcAvailable() {
 
 
 
-// Main report fetch — tries CheapCARFAX first, falls back to CarfaxCheaper
+// Main report fetch — CheapCARFAX only
 async function cfcGetReport(vin) {
-  const tryProviders = [];
-  if (ccfAvailable()) tryProviders.push("ccf");
-  if (cfcAvailable()) tryProviders.push("cfc");
-
-  if (!tryProviders.length) {
-    console.warn("[Provider] All providers unavailable — forcing CFC attempt");
-    tryProviders.push("cfc");
+  if (!ccfAvailable()) {
+    providerState.ccf.failures = 0; // reset and force try
+    console.warn("[Provider] CheapCARFAX in cooldown — forcing attempt");
   }
-
-  let lastError = null;
-  for (const provider of tryProviders) {
-    try {
-      const result = provider === "ccf"
-        ? await fetchFromCcf(vin)
-        : await fetchFromCfc(vin);
-      providerState[provider].failures = 0;
-      if (provider === "ccf") providerState.ccf.dailyCount++;
-      if (provider === "cfc") providerState.cfc.dailyCount++;
-      const name = provider === "ccf" ? "CheapCARFAX" : "CarfaxCheaper";
-      console.log(`[Provider] ✓ ${name} — VIN: ${vin}`);
-      return result;
-    } catch (err) {
-      lastError = err;
-      providerState[provider].failures++;
-      providerState[provider].lastFailure = Date.now();
-      if (err.message.includes("CS_404") || /vin.*not.*found|not.*found.*vin/i.test(err.message)) {
-        throw err;
-      }
-      const name = provider === "ccf" ? "CheapCARFAX" : "CarfaxCheaper";
-      console.warn(`[Provider] ${name} failed for ${vin}: ${err.message} — trying next`);
-    }
+  try {
+    const result = await fetchFromCcf(vin);
+    providerState.ccf.failures = 0;
+    providerState.ccf.dailyCount++;
+    console.log(`[Provider] ✓ CheapCARFAX — VIN: ${vin} (today: ${providerState.ccf.dailyCount}/${CCF_DAILY_HARD_LIMIT})`);
+    return result;
+  } catch (err) {
+    providerState.ccf.failures++;
+    providerState.ccf.lastFailure = Date.now();
+    console.error(`[Provider] CheapCARFAX failed for ${vin}: ${err.message}`);
+    throw err;
   }
-  throw lastError || new Error("all providers failed");
 }
 
 // ── Fetch from CheapCARFAX (primary) ──────────────────────────
@@ -398,72 +337,10 @@ async function fetchFromCcf(vin) {
   return Buffer.from(html, "utf8").toString("base64");
 }
 
-// ── Fetch from CarfaxCheaper (secondary) ──────────────────────
-async function fetchFromCfc(vin) {
-  const key = process.env.CFC_API_KEY;
-  if (!key) throw new Error("CFC_ERROR:CFC_API_KEY not set");
 
-  const r = await axios.get(`${CFC_BASE}/report`, {
-    params:  { vin },
-    headers: { "X-API-Key": key },
-    timeout: 45000,
-    validateStatus: () => true,
-  });
-
-  console.log(`[CarfaxCheaper] Status: ${r.status} for ${vin}`);
-
-  if (r.status === 429 || r.status === 402 || r.status === 403) {
-    providerState.cfc.dailyCount = CFC_DAILY_HARD_LIMIT;
-    throw new Error(`CFC_LIMIT:${r.status}`);
-  }
-  if (r.status === 401) throw new Error("CFC_AUTH_ERROR:Invalid API key");
-  if (r.status === 404) throw new Error("CS_404:vin not found");
-  if (r.status >= 400)  throw new Error(`CFC_${r.status}:${JSON.stringify(r.data).slice(0,100)}`);
-
-  const json = r.data;
-  if (!json?.success) {
-    const msg = JSON.stringify(json).toLowerCase();
-    if (msg.includes("limit") || msg.includes("quota") || msg.includes("daily")) {
-      providerState.cfc.dailyCount = CFC_DAILY_HARD_LIMIT;
-    }
-    throw new Error(`CFC_API_ERROR:${JSON.stringify(json).slice(0,100)}`);
-  }
-
-  const data = json.data || {};
-  if (data.html_content && data.html_content.trim().length > 200) {
-    return Buffer.from(data.html_content, "utf8").toString("base64");
-  }
-  if (data.has_pdf && data.pdf_endpoint) {
-    const pdfUrl = data.pdf_endpoint.startsWith("http")
-      ? data.pdf_endpoint : `https://carfaxcheaper.com${data.pdf_endpoint}`;
-    const pdfRes = await axios.get(pdfUrl, { headers: { "X-API-Key": key }, responseType: "arraybuffer", timeout: 30000 });
-    return Buffer.from(pdfRes.data).toString("base64");
-  }
-  const html = buildReportHtml(data, vin);
-  if (html.length < 500) throw new Error("CFC_INSUFFICIENT_DATA");
-  return Buffer.from(html, "utf8").toString("base64");
-}
 
 // CarSimulcast removed — CheapCARFAX is the sole active provider
 
-// ── Plate lookup — CFC only (CCF has no plate endpoint) ────────
-async function cfcPlateLookup(plate, state) {
-  const key = process.env.CFC_API_KEY;
-  if (key) {
-    try {
-      const r = await axios.get(`${CFC_BASE}/plate`, {
-        params: { plate, state }, headers: { "X-API-Key": key }, timeout: 15000,
-        validateStatus: () => true,
-      });
-      if (r.status === 200) {
-        const vin = r.data?.vin || r.data?.data?.vin || null;
-        if (vin) { console.log(`[CFC Plate] Found VIN: ${vin}`); return vin.toUpperCase(); }
-      }
-      console.warn(`[CFC Plate] status=${r.status}, no VIN returned`);
-    } catch (e) { console.warn("[CFC Plate] failed:", e.message); }
-  }
-  throw new Error("CFC_PLATE_ERROR:plate lookup failed — CFC_API_KEY required for plate lookups");
-}
 
 // ── CheapCARFAX limits check (for cfc-dashboard) ───────────────
 async function getCcfLimits() {
@@ -1128,7 +1005,6 @@ reconcileStalePendingCharges();
 
 // Log provider configuration on startup
 console.log(`[Provider] CheapCARFAX configured: ${!!process.env.CHEAPCARFAX_API_KEY}`);
-console.log(`[Provider] CarfaxCheaper configured (plate lookup only): ${!!process.env.CFC_API_KEY}`);
 console.log(`[Provider] Daily limit: ${CCF_DAILY_HARD_LIMIT} reports/day`);
 
 /* ================================================================
@@ -1275,7 +1151,7 @@ app.get("/api/credits/:user_id", async (req, res) => {
 ================================================================ */
 app.post("/api/paypal/create-order", paypalCaptureLimiter, async (req, res) => {
   try {
-    const { package: pkgKey, vin, state, plate, user_id } = req.body;
+    const { package: pkgKey, vin, user_id } = req.body;
 
     let customIdentifier = "";
     let description      = "";
@@ -1285,15 +1161,7 @@ app.post("/api/paypal/create-order", paypalCaptureLimiter, async (req, res) => {
       if (!v.ok) return res.status(422).json({ error: "invalid_vin", reason: v.code, message: v.msg });
       customIdentifier = v.vin;
       description      = `Vehicle History Report (VIN: ${customIdentifier})`;
-    } else if (state && plate) {
-      const safeState  = state.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      const safePlate  = plate.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      customIdentifier = `PLATE:${safePlate}:${safeState}`;
-      description      = `Vehicle History Report (Plate: ${safePlate}, ${safeState})`;
     } else {
-      if (!user_id && pkgKey === "single") {
-        return res.status(400).json({ error: "missing_vehicle", message: "A VIN or License Plate is required." });
-      }
       customIdentifier = user_id ? `USER:${user_id}` : "GUEST_BUNDLE";
       description      = "AutoVINReveal Credits";
     }
@@ -1388,7 +1256,7 @@ app.post("/api/report", async (req, res) => {
 
   try {
     const {
-      vin, state, plate,
+      vin,
       type:           reqType,
       as:             as          = "html",
       allowLive:      allowLiveRaw,
@@ -1401,13 +1269,6 @@ app.post("/api/report", async (req, res) => {
 
     // 1. Resolve VIN
     targetVin = (vin || "").trim().toUpperCase();
-    if (!targetVin && state && plate) {
-      const safeState = state.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      const safePlate = plate.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      try {
-        targetVin = await cfcPlateLookup(safePlate, safeState);
-      } catch { return res.status(400).json({ error: "plate_lookup_failed" }); }
-    }
     if (!targetVin) return res.status(400).json({ error: "vin_required" });
 
     // 2. Validate VIN
@@ -1531,30 +1392,8 @@ app.post("/api/report", async (req, res) => {
         return res.send(decoded.buffer);
       }
 
-      // Step 2: fetch PDF from CFC (no extra credit cost)
+      // No PDF endpoint available — serve HTML with print dialog
       if (decoded.kind === "html") {
-        try {
-          const pdfRes = await axios.get(CFC_BASE + "/report/pdf", {
-            params:         { vin: targetVin },
-            headers:        CFC_H,
-            responseType:   "arraybuffer",
-            timeout:        30000,
-            validateStatus: () => true,
-          });
-          console.log("[PDF] CFC status=" + pdfRes.status + " bytes=" + (pdfRes.data && pdfRes.data.byteLength));
-          if (pdfRes.status === 200 && pdfRes.data && pdfRes.data.byteLength > 200) {
-            const buf = Buffer.from(pdfRes.data);
-            if (buf.slice(0, 4).toString() === "%PDF") {
-              res.setHeader("Content-Type", "application/pdf");
-              res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-report.pdf"`);
-              return res.send(buf);
-            }
-          }
-        } catch (pdfErr) {
-          console.error("[PDF] CFC fetch failed:", pdfErr.message);
-        }
-
-        // Step 3: fallback — open HTML with print dialog
         const tag = "<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},600);});</script>";
         const printHtml = injectReportChrome(decoded.html).replace("</body>", tag + "</body>");
         res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -1612,15 +1451,10 @@ app.post("/api/report", async (req, res) => {
 app.post("/api/email-report", async (req, res) => {
   try {
     if (!mailer) return res.status(500).json({ error: "email_not_configured" });
-    const { to, vin, state, plate, type = "carfax" } = req.body || {};
+    const { to, vin, type = "carfax" } = req.body || {};
     if (!to || !String(to).includes("@")) return res.status(400).json({ error: "invalid_to" });
 
-    let targetVin = (vin || "").trim().toUpperCase();
-    if (!targetVin && state && plate) {
-      const safeState = state.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      const safePlate = plate.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      targetVin = await cfcPlateLookup(safePlate, safeState);
-    }
+    const targetVin = (vin || "").trim().toUpperCase();
     if (!targetVin) return res.status(400).json({ error: "vin_required" });
 
     const raw = await getReportData(targetVin, type);
@@ -1923,37 +1757,8 @@ app.get("/api/download-pdf", async (req, res) => {
       return res.status(403).json({ error: "report_not_owned" });
     }
 
-    console.log(`[PDF] Fetching PDF from CFC for VIN ${vin}`);
-
-    // Call CFC PDF endpoint directly
-    const pdfRes = await axios.get(`${CFC_BASE}/report/pdf`, {
-      params:         { vin },
-      headers:        CFC_H,
-      responseType:   "arraybuffer",
-      timeout:        45000,
-      validateStatus: () => true,
-    });
-
-    console.log(`[PDF] CFC response: status=${pdfRes.status} bytes=${pdfRes.data?.byteLength} content-type=${pdfRes.headers["content-type"]}`);
-
-    // Check if we got a real PDF
-    if (pdfRes.status === 200 && pdfRes.data?.byteLength > 100) {
-      const buf  = Buffer.from(pdfRes.data);
-      const isPdf = buf.slice(0, 4).toString() === "%PDF";
-
-      if (isPdf) {
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${vin}-report.pdf"`);
-        res.setHeader("Content-Length", buf.length);
-        return res.send(buf);
-      }
-
-      // CFC returned 200 but not a PDF — log what we got
-      console.warn(`[PDF] CFC 200 but not a PDF. First bytes: ${buf.slice(0, 80).toString()}`);
-    }
-
-    // Fallback: get the HTML report and inject print trigger
-    console.log(`[PDF] CFC has no PDF for ${vin} — falling back to print-dialog HTML`);
+    // No PDF endpoint — serve HTML with print dialog
+    console.log(`[PDF] Serving print-dialog HTML for ${vin}`);
     const raw = await getReportData(vin, "carfax");
     if (!raw) return res.status(404).json({ error: "report_not_cached" });
 

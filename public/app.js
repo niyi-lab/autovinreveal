@@ -415,13 +415,7 @@ async function resumePendingPurchase() {
     openReport(html);
     trackPurchase(pending.amount || 6.00);
     showToast('Report ready!', 'ok');
-    addToHistory({
-      vin:   pending.vin || '(from plate)',
-      type:  pending.type || 'carfax',
-      ts:    Date.now(),
-      state: pending.state || '',
-      plate: pending.plate || '',
-    });
+    addToHistory({ vin: pending.vin, type: pending.type || 'carfax', ts: Date.now() });
     renderHistory();
   } catch (e) {
     showToast(e.message || 'Failed to resume purchase', 'error');
@@ -962,8 +956,6 @@ const f       = $id('f');
 const go      = $id('go');
 const loading = $id('loading');
 
-function hasPlateCombo(fd) { return !!(fd.state?.trim() && fd.plate?.trim()); }
-
 let vinDebounceTimer = null;
 async function fetchCarDetails(vin) {
   try {
@@ -980,8 +972,8 @@ function reflectVinGate() {
   const fd  = Object.fromEntries(new FormData(f).entries());
   const vin = (fd.vin || '').trim().toUpperCase();
   clearTimeout(vinDebounceTimer);
-  if (!vin && !hasPlateCombo(fd)) {
-    setVinHelp('Enter a 17-char VIN or Plate + State.');
+  if (!vin) {
+    setVinHelp('Enter a 17-character VIN.');
     go.disabled = true; return;
   }
   if (vin.length > 0) {
@@ -998,7 +990,7 @@ function reflectVinGate() {
     }, 400);
     return;
   }
-  if (hasPlateCombo(fd)) { setVinHelp('Plate + State provided ✓', true); go.disabled = false; return; }
+
   go.disabled = true;
 }
 
@@ -1019,19 +1011,14 @@ f?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = Object.fromEntries(new FormData(f).entries());
 
-  const rawState = (fd.state || '').trim().replace(/[^A-Za-z0-9]/g, '');
-  const rawPlate = (fd.plate || '').trim().replace(/[^A-Za-z0-9]/g, '');
-
   const data = {
     vin:       (fd.vin || '').trim().toUpperCase(),
-    state:     rawState,
-    plate:     rawPlate,
     type:      fd.type || 'carfax',
     as:        'html',
     allowLive: true,
     amount:    6.00,
   };
-  if (!data.vin && !(data.state && data.plate)) { showToast('Enter a VIN or Plate', 'error'); return; }
+  if (!data.vin) { showToast('Enter a VIN', 'error'); return; }
 
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(data)); } catch {}
 
@@ -1080,7 +1067,7 @@ f?.addEventListener('submit', async (e) => {
     const html = await r.text();
     openReport(html, data.vin || '');
     showToast('Report fetched successfully!', 'ok');
-    addToHistory({ vin: data.vin || '(from plate)', type: data.type, ts: Date.now(), state: data.state, plate: data.plate });
+    addToHistory({ vin: data.vin, type: data.type, ts: Date.now() });
     renderHistory();
     await refreshBalancePill();
   } catch (err) {

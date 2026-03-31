@@ -307,7 +307,7 @@
 
           <div class="p-4 sm:p-6 md:p-10 bg-white">
             <form id="f" class="space-y-8">
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+              <div class="grid grid-cols-1 gap-6 items-start">
                 <div class="space-y-2 group">
                   <label class="block text-sm font-bold text-gray-700 flex justify-between">
                     <span>Search by VIN</span>
@@ -322,26 +322,7 @@
                     <input name="vin" maxlength="17" placeholder="VIN (17 CHARS)" class="flex-1 bg-transparent outline-none text-gray-900 placeholder-gray-400 font-mono font-medium uppercase sm:tracking-wider text-sm sm:text-base sm:text-lg min-w-0" autocomplete="off" />
                   </div>
                 </div>
-                <div class="space-y-2">
-                  <label class="block text-sm font-bold text-gray-700">Search by Plate</label>
-                  <div class="grid grid-cols-[1fr_auto] gap-2">
-                    <div class="relative min-w-0 flex items-center rounded-xl border border-gray-300 focus-within:border-blue-600 focus-within:ring-4 focus-within:ring-blue-600/10 transition-all bg-gray-50 h-14">
-                      <div class="pl-4 pr-3 text-gray-400 font-serif font-bold">A</div>
-                      <input name="plate" placeholder="PLATE #" class="flex-1 bg-transparent outline-none text-gray-900 placeholder-gray-400 font-mono font-medium uppercase text-sm sm:text-base sm:text-lg min-w-0" autocomplete="off" />
-                    </div>
-                    <div class="relative w-20 sm:w-28">
-                      <select name="state" class="w-full h-14 rounded-xl border border-gray-300 bg-gray-50 focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10 outline-none appearance-none pl-2 pr-6 sm:pl-3 sm:pr-8 font-bold text-gray-700 cursor-pointer transition-all hover:bg-white text-sm sm:text-base">
-                        <option value="">State</option>
-                        <option value="AL">AL</option><option value="AK">AK</option><option value="AZ">AZ</option><option value="AR">AR</option><option value="CA">CA</option><option value="CO">CO</option><option value="CT">CT</option><option value="DE">DE</option><option value="FL">FL</option><option value="GA">GA</option><option value="HI">HI</option><option value="ID">ID</option><option value="IL">IL</option><option value="IN">IN</option><option value="IA">IA</option><option value="KS">KS</option><option value="KY">KY</option><option value="LA">LA</option><option value="ME">ME</option><option value="MD">MD</option><option value="MA">MA</option><option value="MI">MI</option><option value="MN">MN</option><option value="MS">MS</option><option value="MO">MO</option><option value="MT">MT</option><option value="NE">NE</option><option value="NV">NV</option><option value="NH">NH</option><option value="NJ">NJ</option><option value="NM">NM</option><option value="NY">NY</option><option value="NC">NC</option><option value="ND">ND</option><option value="OH">OH</option><option value="OK">OK</option><option value="OR">OR</option><option value="PA">PA</option><option value="RI">RI</option><option value="SC">SC</option><option value="SD">SD</option><option value="TN">TN</option><option value="TX">TX</option><option value="UT">UT</option><option value="VT">VT</option><option value="VA">VA</option><option value="WA">WA</option><option value="WV">WV</option><option value="WI">WI</option><option value="WY">WY</option>
-                      </select>
-                      <div class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                        </svg>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+
               </div>
 
               <div id="typeGroup" class="hidden">
@@ -506,6 +487,8 @@
 
           </div>
           <p class="sm:hidden text-center text-xs text-gray-400 mt-3" id="swipeHint">← Swipe to see all plans →</p>
+        </section>
+
         <section class="mt-16">
           <div class="flex items-center gap-3 mb-6">
             <div class="flex-1 h-px bg-gray-200"></div>
@@ -651,10 +634,10 @@
             </details>
             <details class="group bg-white rounded-lg border border-gray-200 p-4 cursor-pointer">
               <summary class="flex justify-between items-center font-medium list-none">
-                <span>Can I check a license plate instead of VIN?</span>
+                <span>Where can I find my VIN?</span>
                 <span class="transition group-open:rotate-180"><svg fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg></span>
               </summary>
-              <div class="text-gray-600 text-sm mt-3">Yes! If you don't have the VIN, enter the License Plate and State. We will automatically decode the VIN and run the report for that specific vehicle.</div>
+              <div class="text-gray-600 text-sm mt-3">Your VIN is a 17-character code found on your dashboard near the windshield, on the driver's door jamb sticker, or on your registration and insurance documents.</div>
             </details>
             <details class="group bg-white rounded-lg border border-gray-200 p-4 cursor-pointer">
               <summary class="flex justify-between items-center font-medium list-none">
