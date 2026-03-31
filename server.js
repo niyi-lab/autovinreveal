@@ -231,7 +231,6 @@ if (SMTP_USER && SMTP_PASS) {
 const CFC_OWNER_EMAIL = process.env.CFC_OWNER_EMAIL || "";
 const CFC_CREDITS_KEY = "cfc_credits_remaining";
 
-}
 
 /* ================================================================
    Smart Provider Switching
@@ -266,16 +265,6 @@ function ccfAvailable() {
   return true;
 }
 
-  if (s.dailyCount >= CFC_DAILY_HARD_LIMIT) {
-    console.log(`[Provider] CarfaxCheaper daily limit hit (${s.dailyCount}/${CFC_DAILY_HARD_LIMIT})`);
-    return false;
-  }
-  if (s.failures >= 3 && s.lastFailure && (Date.now() - s.lastFailure) < COOLDOWN_MS) {
-    console.log(`[Provider] CarfaxCheaper in cooldown after ${s.failures} failures`);
-    return false;
-  }
-  return true;
-}
 
 
 
