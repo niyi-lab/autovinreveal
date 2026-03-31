@@ -2005,7 +2005,7 @@ app.post("/api/chat-escalate", async (req, res) => {
     await mailer.sendMail({
       from:    SMTP_FROM,
       to:      SMTP_USER,
-      replyTo: email || SMTP_USER,
+      replyTo: email || SMTP_USER,}
       subject: "AutoVINReveal: Customer needs help" + (email ? " — " + email : ""),
       html,
     });
@@ -2032,5 +2032,5 @@ app.listen(Number(PORT), HOST, () => {
   console.log(`-------------------------------------------`);
   console.log(`➡️  Local:   http://localhost:${PORT}`);
   console.log(`➡️  Network: http://127.0.0.1:${PORT}`);
-  console.log(`-------------------------------------------\n`);
+  console.log(`-------------------------------------------\n`); 
 });
