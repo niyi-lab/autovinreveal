@@ -579,6 +579,7 @@ function reflectAuthUI(session) {
 
     // Check if this is the owner — show credits dashboard button if so
     checkOwnerAccess();
+    renderRecentChecksBar();
 
   } else {
     // Desktop
@@ -871,7 +872,112 @@ function renderHistory() {
     });
   });
 }
-$id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(HISTORY_KEY); renderHistory(); });
+$id('clearHistory')?.addEventListener('click', () => { localStorage.removeItem(HISTORY_KEY); renderHistory(); renderRecentChecksBar(); });
+
+function recentChecksRowHTML(vin, type, ago) {
+  return `<div class="py-2.5 border-b border-gray-100 last:border-0">
+    <div class="flex items-center justify-between gap-2 mb-2">
+      <div class="flex items-center gap-2 min-w-0">
+        <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse flex-shrink-0"></div>
+        <span class="font-mono text-xs font-semibold text-gray-800 truncate">${vin}</span>
+        <span class="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-semibold uppercase flex-shrink-0">${type}</span>
+      </div>
+      <span class="text-[11px] text-gray-400 flex-shrink-0">${ago}</span>
+    </div>
+    <div class="flex gap-1.5 flex-wrap">
+      <button data-vin="${vin}" data-type="${type}" data-action="view"
+        class="flex items-center gap-1 text-[11px] font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-100 px-2.5 py-1 rounded-lg transition-colors">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+        View
+      </button>
+      <button data-vin="${vin}" data-type="${type}" data-action="savepdf"
+        class="flex items-center gap-1 text-[11px] font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-lg transition-colors">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+        Save PDF
+      </button>
+      <button data-vin="${vin}" data-type="${type}" data-action="download"
+        class="flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-50 hover:bg-green-100 border border-green-100 px-2.5 py-1 rounded-lg transition-colors">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        Download
+      </button>
+      <button data-vin="${vin}" data-type="${type}" data-action="email"
+        class="flex items-center gap-1 text-[11px] font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-lg transition-colors">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+        Email
+      </button>
+    </div>
+  </div>`;
+}
+
+function bindRecentChecksBtns() {
+  const list = $id('recentChecksList');
+  if (!list) return;
+  list.querySelectorAll('button[data-action]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const vin    = btn.dataset.vin;
+      const type   = btn.dataset.type || 'carfax';
+      const action = btn.dataset.action;
+      const item   = { vin, type, ts: Date.now() };
+      if (action === 'view')     openHistoryHTML(item);
+      if (action === 'savepdf') {
+        const win = window.open('', '_blank');
+        const headers = { 'Content-Type': 'application/json' };
+        const { token } = await getSession();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify({ vin, type, as: 'html', allowLive: false }) });
+        if (r.ok) { const html = await r.text(); if (win) { win.document.write(html); win.document.close(); win.addEventListener('load', () => setTimeout(() => win.print(), 500)); } }
+        else { win?.close(); showToast('Could not load report', 'error'); }
+      }
+      if (action === 'download') downloadHistoryPDF(item, btn);
+      if (action === 'email')    openEmailModal(item);
+    });
+  });
+}
+
+async function renderRecentChecksBar() {
+  const bar  = $id('recentChecksBar');
+  const list = $id('recentChecksList');
+  if (!bar || !list) return;
+
+  const { user, token } = await getSession();
+
+  if (user && token) {
+    try {
+      const r = await apiFetch('/api/history', { headers: { Authorization: `Bearer ${token}` } }, 8000);
+      if (r.ok) {
+        const { rows } = await r.json();
+        if (!rows?.length) { bar.classList.add('hidden'); return; }
+        bar.classList.remove('hidden');
+        list.innerHTML = rows.slice(0, 5).map(row => {
+          const ago = timeAgo(new Date(row.created_at).getTime());
+          return recentChecksRowHTML(row.vin, row.type || 'carfax', ago);
+        }).join('');
+        bindRecentChecksBtns();
+        return;
+      }
+    } catch {}
+  }
+
+  // Guest: localStorage
+  const history = loadHistory().slice(0, 5);
+  if (!history.length) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  list.innerHTML = history.map(item => {
+    return recentChecksRowHTML(item.vin || '—', item.type || 'carfax', timeAgo(item.ts));
+  }).join('');
+  bindRecentChecksBtns();
+}
+
+function timeAgo(ts) {
+  const diff = Date.now() - ts;
+  const m = Math.floor(diff / 60000);
+  const h = Math.floor(diff / 3600000);
+  const d = Math.floor(diff / 86400000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m} min ago`;
+  if (h < 24) return `${h}h ago`;
+  return `${d}d ago`;
+}
 
 /* ================================
    Buy Credits Modal
@@ -1127,5 +1233,6 @@ $id('saveNewPasswordBtn')?.addEventListener('click', async () => {
 (async () => {
   await refreshBalancePill();
   renderHistory();
+  renderRecentChecksBar();
   reflectVinGate();
 })();
