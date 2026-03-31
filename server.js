@@ -1373,33 +1373,7 @@ app.post("/api/report", async (req, res) => {
     // 6. Deliver
     const decoded = decodeReportBase64(raw);
 
-    if (as === "pdf") {
-      // Step 1: already a real PDF buffer
-      if (decoded.kind === "pdf") {
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${targetVin}-report.pdf"`);
-        return res.send(decoded.buffer);
-      }
-
-      // No PDF endpoint available — serve HTML with print dialog
-      if (decoded.kind === "html") {
-        const tag = "<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},600);});</script>";
-        const printHtml = injectReportChrome(decoded.html).replace("</body>", tag + "</body>");
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-        return res.send(printHtml);
-      }
-    }
-
-
-        // Fallback: return HTML with auto-print script so browser opens print dialog
-        if (decoded.kind === "html") {
-          const printHtml = injectReportChrome(decoded.html).replace(
-            "</body>",
-            `<script>window.onload = function(){ window.print(); }<\/script></body>`
-          );
-          res.setHeader("Content-Type", "text/html; charset=utf-8");
-          return res.send(printHtml);
-        }
+    // PDF handled client-side via html2pdf.js — no server-side PDF generation needed
 
     if (decoded.kind === "html") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -2033,4 +2007,4 @@ app.listen(Number(PORT), HOST, () => {
   console.log(`➡️  Local:   http://localhost:${PORT}`);
   console.log(`➡️  Network: http://127.0.0.1:${PORT}`);
   console.log(`-------------------------------------------\n`);
-}); 
+});
