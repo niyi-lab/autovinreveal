@@ -163,7 +163,7 @@ async function apiFetch(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
    FIX-S1: iframe now has sandbox attribute so report scripts cannot
    call window.top.location and navigate the parent app away.
      allow-scripts     — needed for the React SPA to run
-     allow-same-origin — needed for webpack chunk loading
+     allow-same-origin — REMOVED: causes CARFAX scripts to navigate iframe away (blank page)
      allow-popups      — needed for "open in new tab" report links
      allow-forms       — needed for any forms inside the report
    Top-level navigation is NOT in the list — the report cannot escape.
@@ -206,7 +206,7 @@ function showReportOverlay(html, vin) {
   const iframe = document.createElement('iframe');
   iframe.style.cssText = 'flex:1;border:none;width:100%;';
   // FIX-S1: sandbox prevents top-level navigation while keeping the report functional
-  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms allow-modals');
+  iframe.setAttribute('sandbox', 'allow-scripts allow-popups allow-forms allow-modals');
   iframe.srcdoc = html;
 
   overlay.appendChild(bar);
@@ -715,11 +715,9 @@ function formatTime(ts) { return new Date(ts).toLocaleString(); }
 async function openHistoryHTML(item) {
   const data = {
     vin:       item.vin !== '(from plate)' ? item.vin : '',
-    state:     item.state || '',
-    plate:     item.plate || '',
     type:      item.type,
     as:        'html',
-    allowLive: false,
+    allowLive: true,  // re-fetch if cache empty; server skips credit for owned reports
   };
   const headers = { 'Content-Type': 'application/json' };
   const { token } = await getSession();
@@ -924,7 +922,7 @@ function bindRecentChecksBtns() {
         const headers = { 'Content-Type': 'application/json' };
         const { token } = await getSession();
         if (token) headers['Authorization'] = `Bearer ${token}`;
-        const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify({ vin, type, as: 'html', allowLive: false }) });
+        const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify({ vin, type, as: 'html', allowLive: true }) });
         if (r.ok) { const html = await r.text(); if (win) { win.document.write(html); win.document.close(); win.addEventListener('load', () => setTimeout(() => win.print(), 500)); } }
         else { win?.close(); showToast('Could not load report', 'error'); }
       }

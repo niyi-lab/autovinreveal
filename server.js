@@ -76,7 +76,7 @@ const HOST = "0.0.0.0";
 ================================================================ */
 const SITE_URL       = process.env.SITE_URL      || `http://localhost:${PORT}`;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || SITE_URL;
-const FORCE_WWW      = process.env.FORCE_WWW === "0";
+const FORCE_WWW      = process.env.FORCE_WWW === "1";
 
 const APP_SECRET     = process.env.APP_SECRET    || "change_me_in_env_file";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
@@ -608,15 +608,26 @@ function injectReportChrome(html) {
   // 3. Strip meta refresh
   out = out.replace(/<meta\b[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, "");
 
-  // 4. Nav guard as first child of <head>
+  // 4. Nav guard — block ALL navigations from within the iframe.
+  // CARFAX scripts attempt to redirect to carfax.com or blank pages after DTM strips.
+  // We block every navigation vector: href setter, assign, replace, and beforeunload.
   const guardLines = [
     "<script>",
     "(function(){",
+    "  var ALLOWED = location.href; // remember the srcdoc blob origin",
+    "  function blockNav(v){",
+    "    if(typeof v!=='string') return true;",
+    "    // block undefined, external domains, and blank navigations",
+    "    if(v.indexOf('undefined')!==-1) return true;",
+    "    if(/^https?:\/\//i.test(v)) return true;",
+    "    if(v==='about:blank') return true;",
+    "    return false;",
+    "  }",
     "  try{",
     "    var _lp=Object.getOwnPropertyDescriptor(Location.prototype,'href');",
     "    if(_lp&&_lp.set){",
     "      Object.defineProperty(Location.prototype,'href',{",
-    "        set:function(v){if(typeof v==='string'&&v.indexOf('undefined')!==-1)return;_lp.set.call(this,v);},",
+    "        set:function(v){if(blockNav(v))return;_lp.set.call(this,v);},",
     "        get:function(){return _lp.get.call(this);},",
     "        configurable:true",
     "      });",
@@ -624,8 +635,10 @@ function injectReportChrome(html) {
     "  }catch(e){}",
     "  ['assign','replace'].forEach(function(m){",
     "    var orig=window.location[m];",
-    "    try{window.location[m]=function(v){if(typeof v==='string'&&v.indexOf('undefined')!==-1)return;orig.call(window.location,v);};}catch(e){}",
+    "    try{window.location[m]=function(v){if(blockNav(v))return;orig.call(window.location,v);};}catch(e){}",
     "  });",
+    "  // Block any attempt to overwrite window.location entirely",
+    "  try{Object.defineProperty(window,'location',{get:function(){return location;},set:function(){},configurable:false});}catch(e){}",
     "})();",
     "<\/script>",
   ];
@@ -2007,4 +2020,4 @@ app.listen(Number(PORT), HOST, () => {
   console.log(`➡️  Local:   http://localhost:${PORT}`);
   console.log(`➡️  Network: http://127.0.0.1:${PORT}`);
   console.log(`-------------------------------------------\n`);
-}); 
+});
