@@ -76,7 +76,7 @@ const HOST = "0.0.0.0";
 ================================================================ */
 const SITE_URL       = process.env.SITE_URL      || `http://localhost:${PORT}`;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || SITE_URL;
-const FORCE_WWW      = process.env.FORCE_WWW === "1";
+const FORCE_WWW      = process.env.FORCE_WWW === "0";
 
 const APP_SECRET     = process.env.APP_SECRET    || "change_me_in_env_file";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
