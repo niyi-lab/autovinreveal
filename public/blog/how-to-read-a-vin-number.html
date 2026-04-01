@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>How to Read a VIN Number: Decode Every Character | AutoVINReveal</title>
+  <meta name="description" content="A VIN is a 17-character code that tells you everything about a vehicle. Learn how to decode each position yourself — make, model, year, plant, and more." />
+  <link rel="canonical" href="https://autovinreveal.com/blog/how-to-read-a-vin-number.html" />
+  <meta property="og:title" content="How to Read a VIN Number: Decode Every Character" />
+  <meta property="og:description" content="A VIN is a 17-character code that tells you everything about a vehicle. Learn how to decode each position yourself." />
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="https://autovinreveal.com/blog/how-to-read-a-vin-number.html" />
+  <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32" />
+  <meta name="theme-color" content="#1e3a8a" />
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"Article","headline":"How to Read a VIN Number: Decode Every Character","description":"A VIN is a 17-character code that tells you everything about a vehicle. Learn how to decode each position yourself.","author":{"@type":"Organization","name":"AutoVINReveal"},"publisher":{"@type":"Organization","name":"AutoVINReveal","url":"https://autovinreveal.com"},"datePublished":"2026-02-01","dateModified":"2026-02-01"}
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' };</script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #f8fafc; }
+    .brand-font { font-family: 'Poppins', sans-serif; }
+    .prose-body { font-family: 'Lora', Georgia, serif; font-size: 17px; line-height: 1.85; color: #1e293b; }
+    .prose-body h2 { font-family: 'Poppins', sans-serif; font-size: 1.5rem; font-weight: 800; color: #0f172a; margin: 2.5rem 0 1rem; }
+    .prose-body h3 { font-family: 'Poppins', sans-serif; font-size: 1.15rem; font-weight: 700; color: #1e293b; margin: 2rem 0 0.75rem; }
+    .prose-body p { margin-bottom: 1.4rem; }
+    .prose-body ul { margin: 1rem 0 1.4rem 1.5rem; list-style: disc; }
+    .prose-body ul li { margin-bottom: 0.5rem; }
+    .prose-body strong { font-weight: 700; color: #0f172a; }
+    .prose-body a { color: #2563eb; text-decoration: underline; text-underline-offset: 3px; }
+    .callout { border-left: 4px solid #2563eb; background: #eff6ff; padding: 1rem 1.25rem; border-radius: 0 8px 8px 0; margin: 1.5rem 0; }
+    .warning { border-left: 4px solid #ef4444; background: #fef2f2; padding: 1rem 1.25rem; border-radius: 0 8px 8px 0; margin: 1.5rem 0; }
+    .tip { border-left: 4px solid #16a34a; background: #f0fdf4; padding: 1rem 1.25rem; border-radius: 0 8px 8px 0; margin: 1.5rem 0; }
+    .hero-bg { background: radial-gradient(circle at top right, #0891b2 0%, #164e63 100%); }
+    .vin-char { display: inline-flex; flex-direction: column; align-items: center; min-width: 40px; }
+  </style>
+</head>
+<body class="text-slate-800 antialiased">
+  <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2">
+        <div class="w-9 h-9 bg-blue-700 rounded-lg flex items-center justify-center text-white font-extrabold text-xl">A</div>
+        <span class="text-xl font-bold text-slate-900 brand-font">AutoVIN<span class="text-blue-600">Reveal</span></span>
+      </a>
+      <div class="flex items-center gap-4">
+        <a href="/blog/" class="text-sm font-semibold text-gray-600 hover:text-blue-600">← Blog</a>
+        <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2 rounded-lg">Check a VIN — $6</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero-bg py-16 px-4">
+    <div class="max-w-2xl mx-auto text-center">
+      <div class="flex items-center justify-center gap-3 mb-4 text-xs font-semibold text-cyan-200">
+        <a href="/blog/" class="hover:text-white">Blog</a><span>›</span>
+        <span class="bg-cyan-600 text-white px-2.5 py-1 rounded-full">VIN Guide</span>
+      </div>
+      <h1 class="text-3xl sm:text-4xl font-black text-white leading-tight mb-4" style="font-family:'Poppins',sans-serif;">How to Read a VIN Number: Decode Every Character</h1>
+      <p class="text-cyan-100 text-base max-w-xl mx-auto leading-relaxed">Every car has a unique 17-character fingerprint. Here's exactly what each position means — and what it can tell you before you spend a dollar.</p>
+      <div class="flex items-center justify-center gap-4 mt-6 text-xs text-cyan-300">
+        <span>📅 February 2026</span><span>·</span><span>⏱ 6 min read</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-2xl mx-auto px-4 py-12">
+    <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8 flex items-center justify-between gap-4 flex-wrap">
+      <p class="text-sm font-semibold text-amber-900">🔍 A VIN tells you what the car <em>is</em>. A CARFAX report tells you what <em>happened</em> to it.</p>
+      <a href="/" class="shrink-0 bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-lg">Check VIN — $6</a>
+    </div>
+
+    <article class="prose-body">
+      <p>The Vehicle Identification Number — VIN — is a 17-character code assigned to every car manufactured after 1981. It's stamped into the chassis, printed on the door jamb, and recorded with every sale, inspection, and insurance event for the life of the vehicle. Once you know how to read it, a VIN reveals the car's country of origin, manufacturer, vehicle type, model year, assembly plant, and production sequence — before you even look at the car.</p>
+
+      <h2>Where to Find the VIN</h2>
+      <ul>
+        <li><strong>Dashboard (driver's side):</strong> Look through the windshield at the lower left corner of the dash. This is the most common location.</li>
+        <li><strong>Driver's door jamb:</strong> A sticker on the door frame or B-pillar lists the VIN alongside tire pressure and weight ratings.</li>
+        <li><strong>Engine bay:</strong> Often stamped on the firewall or engine block — useful for verifying the number hasn't been swapped.</li>
+        <li><strong>Registration and insurance documents:</strong> Your paperwork will always list the VIN.</li>
+        <li><strong>Insurance card:</strong> Usually printed in full.</li>
+      </ul>
+
+      <div class="callout">
+        <p class="text-sm font-bold text-blue-800 mb-1">🔎 Pro Tip: Check Multiple Locations</p>
+        <p class="text-sm text-blue-900">On a legitimate car, the VIN stamped on the dash, door jamb, and engine block should all match. Mismatched VINs are a serious red flag — it may indicate the car was rebuilt from parts of multiple vehicles ("frankencar") or has a swapped identity.</p>
+      </div>
+
+      <h2>The VIN Breakdown: Position by Position</h2>
+      <p>Let's use a sample VIN: <strong class="font-mono">1HGCM82633A004352</strong> (a 2003 Honda Accord)</p>
+
+      <!-- Visual VIN diagram -->
+      <div class="not-prose my-6 overflow-x-auto">
+        <div class="min-w-[600px]">
+          <div class="flex gap-1 mb-2">
+            <div class="w-10 h-10 bg-blue-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">1</div>
+            <div class="w-10 h-10 bg-blue-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">H</div>
+            <div class="w-10 h-10 bg-blue-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">G</div>
+            <div class="w-10 h-10 bg-purple-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">C</div>
+            <div class="w-10 h-10 bg-purple-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">M</div>
+            <div class="w-10 h-10 bg-purple-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">8</div>
+            <div class="w-10 h-10 bg-purple-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">2</div>
+            <div class="w-10 h-10 bg-purple-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">6</div>
+            <div class="w-10 h-10 bg-slate-500 rounded flex items-center justify-center text-white font-black font-mono text-sm">3</div>
+            <div class="w-10 h-10 bg-green-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">3</div>
+            <div class="w-10 h-10 bg-orange-500 rounded flex items-center justify-center text-white font-black font-mono text-sm">A</div>
+            <div class="w-10 h-10 bg-rose-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">0</div>
+            <div class="w-10 h-10 bg-rose-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">0</div>
+            <div class="w-10 h-10 bg-rose-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">4</div>
+            <div class="w-10 h-10 bg-rose-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">3</div>
+            <div class="w-10 h-10 bg-rose-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">5</div>
+            <div class="w-10 h-10 bg-rose-600 rounded flex items-center justify-center text-white font-black font-mono text-sm">2</div>
+          </div>
+          <div class="flex gap-1 text-[10px] font-bold text-center">
+            <div class="w-10 text-blue-600">WMI</div>
+            <div class="w-10 text-blue-600">WMI</div>
+            <div class="w-10 text-blue-600">WMI</div>
+            <div class="w-10 text-purple-600">VDS</div>
+            <div class="w-10 text-purple-600">VDS</div>
+            <div class="w-10 text-purple-600">VDS</div>
+            <div class="w-10 text-purple-600">VDS</div>
+            <div class="w-10 text-purple-600">VDS</div>
+            <div class="w-10 text-slate-500">CHK</div>
+            <div class="w-10 text-green-600">YEAR</div>
+            <div class="w-10 text-orange-500">PLANT</div>
+            <div class="w-10 text-rose-600">SEQ</div>
+            <div class="w-10 text-rose-600">SEQ</div>
+            <div class="w-10 text-rose-600">SEQ</div>
+            <div class="w-10 text-rose-600">SEQ</div>
+            <div class="w-10 text-rose-600">SEQ</div>
+            <div class="w-10 text-rose-600">SEQ</div>
+          </div>
+          <div class="flex gap-4 mt-3 flex-wrap text-xs">
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-600 inline-block"></span> Positions 1–3: WMI (Who made it)</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-purple-600 inline-block"></span> Positions 4–8: VDS (What it is)</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-slate-500 inline-block"></span> Position 9: Check digit</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-green-600 inline-block"></span> Position 10: Model year</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-orange-500 inline-block"></span> Position 11: Assembly plant</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-rose-600 inline-block"></span> Positions 12–17: Serial number</span>
+          </div>
+        </div>
+      </div>
+
+      <h3>Positions 1–3: World Manufacturer Identifier (WMI)</h3>
+      <p>The first three characters identify who built the car and where. The first character is the country of origin: <strong>1, 4, or 5</strong> = United States; <strong>2</strong> = Canada; <strong>3</strong> = Mexico; <strong>J</strong> = Japan; <strong>K</strong> = South Korea; <strong>W</strong> = Germany. The second and third characters narrow it down to the specific manufacturer. <strong>1HG</strong> = Honda manufactured in the USA. <strong>JTD</strong> = Toyota manufactured in Japan.</p>
+
+      <h3>Positions 4–8: Vehicle Descriptor Section (VDS)</h3>
+      <p>These five characters describe the specific vehicle — body style, engine type, model line, restraint systems, and GVWR (weight class). Each manufacturer uses these positions differently, which is why a VIN decoder needs manufacturer-specific data to fully interpret them. This section is why two cars with the same make and year can have very different VINs.</p>
+
+      <h3>Position 9: The Check Digit</h3>
+      <p>This single character is calculated mathematically from the other 16 characters using a weighted formula defined by the NHTSA. Its only purpose is to detect transcription errors and forged VINs. If the check digit doesn't match the formula result, the VIN is either mistyped or fraudulent. This is why our VIN lookup validates the check digit before running a report.</p>
+
+      <h3>Position 10: Model Year</h3>
+      <p>A single letter or number encodes the model year. The sequence skips I, O, Q, U, and Z to avoid confusion with numbers. Key references: <strong>A=1980, B=1981…Y=2000, 1=2001…9=2009, A=2010</strong> (the cycle repeats). So position 10 = <strong>3</strong> means 2003.</p>
+
+      <h3>Position 11: Assembly Plant</h3>
+      <p>Identifies which factory assembled the vehicle. Each manufacturer assigns their own codes — <strong>A</strong> from Honda might mean Marysville, Ohio; from Toyota it means a different plant entirely. This matters when recalls are plant-specific.</p>
+
+      <h3>Positions 12–17: Vehicle Serial Number</h3>
+      <p>The final six digits are the production sequence number — essentially the car's serial number off the assembly line. Lower numbers from early in the model year sometimes indicate pre-production builds with minor spec differences.</p>
+
+      <h2>What a VIN Can't Tell You</h2>
+      <p>Decoding a VIN tells you what the car was built as — make, model, engine, year, factory. It tells you nothing about what happened to it afterward. It won't show accidents, title brands, odometer readings, ownership history, open recalls, or whether the car was ever a rental, fleet vehicle, or lemon buyback. For that, you need a full vehicle history report against the VIN.</p>
+
+      <div class="tip">
+        <p class="text-sm font-bold text-green-800 mb-1">✅ Two-Step Check</p>
+        <p class="text-sm text-green-900">Step 1: Decode the VIN to confirm the car matches what the seller is advertising (year, make, model, country of origin). Step 2: Run a CARFAX report on that VIN to see the full history. Both together take under 2 minutes.</p>
+      </div>
+
+      <h2>Quick Reference: Common First Characters</h2>
+    </article>
+
+    <!-- Country table -->
+    <div class="not-prose overflow-hidden rounded-xl border border-gray-200 my-6">
+      <div class="bg-gray-50 px-4 py-3 border-b border-gray-200"><p class="text-xs font-bold text-gray-500 uppercase tracking-wider">VIN Position 1 — Country of Origin</p></div>
+      <div class="divide-y divide-gray-100 text-sm">
+        <div class="px-4 py-2.5 flex justify-between"><span class="font-mono font-bold text-slate-900">1, 4, 5</span><span class="text-gray-600">United States</span></div>
+        <div class="px-4 py-2.5 flex justify-between"><span class="font-mono font-bold text-slate-900">2</span><span class="text-gray-600">Canada</span></div>
+        <div class="px-4 py-2.5 flex justify-between"><span class="font-mono font-bold text-slate-900">3</span><span class="text-gray-600">Mexico</span></div>
+        <div class="px-4 py-2.5 flex justify-between"><span class="font-mono font-bold text-slate-900">J</span><span class="text-gray-600">Japan</span></div>
+        <div class="px-4 py-2.5 flex justify-between"><span class="font-mono font-bold text-slate-900">K</span><span class="text-gray-600">South Korea</span></div>
+        <div class="px-4 py-2.5 flex justify-between"><span class="font-mono font-bold text-slate-900">L</span><span class="text-gray-600">China</span></div>
+        <div class="px-4 py-2.5 flex justify-between"><span class="font-mono font-bold text-slate-900">S</span><span class="text-gray-600">United Kingdom</span></div>
+        <div class="px-4 py-2.5 flex justify-between"><span class="font-mono font-bold text-slate-900">V</span><span class="text-gray-600">France / Spain</span></div>
+        <div class="px-4 py-2.5 flex justify-between"><span class="font-mono font-bold text-slate-900">W</span><span class="text-gray-600">Germany</span></div>
+        <div class="px-4 py-2.5 flex justify-between"><span class="font-mono font-bold text-slate-900">Y</span><span class="text-gray-600">Sweden / Finland</span></div>
+        <div class="px-4 py-2.5 flex justify-between"><span class="font-mono font-bold text-slate-900">Z</span><span class="text-gray-600">Italy</span></div>
+      </div>
+    </div>
+
+    <article class="prose-body">
+      <p>Knowing the country of origin matters when buying — some buyers specifically want North American-assembled vehicles for parts availability, warranty service, or resale reasons. A car sold as "American made" with a VIN starting in J or K was assembled overseas, regardless of the brand name on the hood.</p>
+    </article>
+
+    <div class="mt-12 bg-gradient-to-r from-blue-600 to-blue-800 rounded-2xl p-8 text-white text-center">
+      <div class="text-4xl mb-3">🔍</div>
+      <h2 class="text-2xl font-black mb-2" style="font-family:'Poppins',sans-serif;">Now check what happened to the car</h2>
+      <p class="text-blue-100 mb-6 text-sm max-w-md mx-auto">Decoding the VIN tells you what it is. A CARFAX report tells you its full history — accidents, title, mileage, owners.</p>
+      <a href="/" class="inline-flex items-center gap-2 bg-white text-blue-700 font-bold px-6 py-3 rounded-xl hover:bg-blue-50 transition-colors shadow-lg">Run a VIN Check — $6 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg></a>
+    </div>
+
+    <section class="mt-12 space-y-3">
+      <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">More Guides</h3>
+      <a href="/blog/how-to-spot-odometer-fraud.html" class="flex items-center gap-4 bg-white rounded-xl border border-gray-200 p-4 hover:border-blue-300 transition-colors group">
+        <div class="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center text-2xl flex-shrink-0">🔢</div>
+        <div><p class="text-xs text-red-500 font-bold mb-0.5">Fraud Prevention</p><p class="font-bold text-slate-900 text-sm group-hover:text-blue-600">How to Spot Odometer Fraud Before Buying</p></div>
+        <svg class="w-4 h-4 text-gray-300 ml-auto group-hover:text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </a>
+      <a href="/blog/salvage-title-explained.html" class="flex items-center gap-4 bg-white rounded-xl border border-gray-200 p-4 hover:border-blue-300 transition-colors group">
+        <div class="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center text-2xl flex-shrink-0">📋</div>
+        <div><p class="text-xs text-amber-600 font-bold mb-0.5">Title Explained</p><p class="font-bold text-slate-900 text-sm group-hover:text-blue-600">Salvage Title: What It Means and When to Walk Away</p></div>
+        <svg class="w-4 h-4 text-gray-300 ml-auto group-hover:text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </a>
+    </section>
+  </main>
+
+  <footer class="bg-slate-900 text-slate-400 mt-8 pt-10 pb-6">
+    <div class="max-w-5xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm">
+      <a href="/" class="font-bold text-white brand-font">AutoVIN<span class="text-blue-400">Reveal</span></a>
+      <div class="flex gap-6 text-xs"><a href="/" class="hover:text-white">Home</a><a href="/blog/" class="hover:text-white">Blog</a><a href="/terms.html" class="hover:text-white">Terms</a><a href="/privacy.html" class="hover:text-white">Privacy</a><a href="mailto:support@autovinreveal.com" class="hover:text-white">Support</a></div>
+      <p class="text-xs text-slate-600">© 2026 AutoVINReveal</p>
+    </div>
+  </footer>
+</body>
+</html>
