@@ -238,115 +238,78 @@ const CFC_CREDITS_KEY = "cfc_credits_remaining";
    Auto-switches on daily limit, auth error, 3+ failures (5min cooldown)
 ================================================================ */
 
-// CheapCARFAX config (new primary provider)
-const CCF_BASE = "https://panel.cheapcarfax.net/api";
-// API key read lazily from env on every call
+// CarfaxCheaper config (primary provider)
+const CFC_BASE = "https://carfaxcheaper.com/api/v1";
 
-// Track health for all 3 providers
 const providerState = {
-  ccf: { failures: 0, lastFailure: null, dailyCount: 0, dailyDate: "" },
+  cfc: { failures: 0, lastFailure: null },
 };
-const CCF_DAILY_HARD_LIMIT = Number(process.env.CCF_DAILY_LIMIT || 20);
-const COOLDOWN_MS           = 30 * 1000; // 30s cooldown during IP whitelist testing
+const COOLDOWN_MS = 5 * 60 * 1000; // 5 min cooldown after 3 failures
 
-function ccfAvailable() {
-  if (!process.env.CHEAPCARFAX_API_KEY) return false;
-  const s     = providerState.ccf;
-  const today = new Date().toISOString().slice(0, 10);
-  if (today !== s.dailyDate) { s.dailyCount = 0; s.dailyDate = today; }
-  if (s.dailyCount >= CCF_DAILY_HARD_LIMIT) {
-    console.log(`[Provider] CheapCARFAX daily limit hit (${s.dailyCount}/${CCF_DAILY_HARD_LIMIT})`);
-    return false;
-  }
+function cfcAvailable() {
+  if (!process.env.CFC_API_KEY) return false;
+  const s = providerState.cfc;
   if (s.failures >= 3 && s.lastFailure && (Date.now() - s.lastFailure) < COOLDOWN_MS) {
-    console.log(`[Provider] CheapCARFAX in cooldown after ${s.failures} failures`);
+    console.log(`[Provider] CarfaxCheaper in cooldown after ${s.failures} failures`);
     return false;
   }
   return true;
 }
 
-
-
-
-// Main report fetch — CheapCARFAX only
+// Main report fetch entry point
 async function cfcGetReport(vin) {
-  if (!ccfAvailable()) {
-    providerState.ccf.failures = 0; // reset and force try
-    console.warn("[Provider] CheapCARFAX in cooldown — forcing attempt");
-  }
   try {
-    const result = await fetchFromCcf(vin);
-    providerState.ccf.failures = 0;
-    providerState.ccf.dailyCount++;
-    console.log(`[Provider] ✓ CheapCARFAX — VIN: ${vin} (today: ${providerState.ccf.dailyCount}/${CCF_DAILY_HARD_LIMIT})`);
+    const result = await fetchFromCfc(vin);
+    providerState.cfc.failures = 0;
+    console.log(`[Provider] ✓ CarfaxCheaper — VIN: ${vin}`);
     return result;
   } catch (err) {
-    providerState.ccf.failures++;
-    providerState.ccf.lastFailure = Date.now();
-    console.error(`[Provider] CheapCARFAX failed for ${vin}: ${err.message}`);
+    providerState.cfc.failures++;
+    providerState.cfc.lastFailure = Date.now();
+    console.error(`[Provider] CarfaxCheaper failed for ${vin}: ${err.message}`);
     throw err;
   }
 }
 
-// ── Fetch from CheapCARFAX (primary) ──────────────────────────
-async function fetchFromCcf(vin) {
-  const key = process.env.CHEAPCARFAX_API_KEY;
-  if (!key) throw new Error("CCF_ERROR:CHEAPCARFAX_API_KEY not set");
+// ── Fetch from CarfaxCheaper ─────────────────────────────────────────────────
+async function fetchFromCfc(vin) {
+  const key = process.env.CFC_API_KEY;
+  if (!key) throw new Error("CFC_ERROR:CFC_API_KEY not set");
 
-  console.log(`[CheapCARFAX] Fetching ${vin}`);
-  const r = await axios.get(`${CCF_BASE}/carfax/vin/${vin}/html`, {
-    headers: { "x-api-key": key },
+  // DEBUG — remove after confirming auth works
+  console.log(`[CarfaxCheaper] Key loaded: ${key ? key.slice(0,12) + "..." : "MISSING"} (len=${key?.length})`);
+  console.log(`[CarfaxCheaper] Fetching ${vin}`);
+  const r = await axios.get(`${CFC_BASE}/report`, {
+    params: { vin },
+    headers: { "X-API-Key": key },
     timeout: 45000,
     validateStatus: () => true,
   });
 
-  // Check remaining daily quota from response header
-  const remaining = r.headers["x-api-limit"];
-  if (remaining !== undefined) {
-    console.log(`[CheapCARFAX] Daily quota remaining: ${remaining}`);
-    if (Number(remaining) <= 0) providerState.ccf.dailyCount = CCF_DAILY_HARD_LIMIT;
-  }
+  console.log(`[CarfaxCheaper] Status: ${r.status} for ${vin}`);
+  if (r.status >= 400) console.log(`[CarfaxCheaper] Error body:`, JSON.stringify(r.data).slice(0, 300));
 
-  console.log(`[CheapCARFAX] Status: ${r.status} for ${vin}`);
+  if (r.status === 401) throw new Error("CFC_AUTH_ERROR:Invalid API key");
+  if (r.status === 402) throw new Error("CFC_LIMIT:Insufficient credits");
+  if (r.status === 404) throw new Error("CS_404:VIN not found");
+  if (r.status === 429) throw new Error("CFC_RATELIMIT:Rate limit exceeded");
+  if (r.status >= 400)  throw new Error(`CFC_${r.status}:${JSON.stringify(r.data).slice(0,100)}`);
 
-  if (r.status === 401) throw new Error("CCF_AUTH_ERROR:Invalid API key");
-  if (r.status === 400) {
-    const msg = r.data?.message || JSON.stringify(r.data);
-    if (/daily limit/i.test(msg))           { providerState.ccf.dailyCount = CCF_DAILY_HARD_LIMIT; throw new Error("CCF_LIMIT:daily"); }
-    if (/insufficient credits/i.test(msg))  { providerState.ccf.dailyCount = CCF_DAILY_HARD_LIMIT; throw new Error("CCF_LIMIT:credits"); }
-    if (/not found/i.test(msg))             throw new Error("CS_404:vin not found");
-    throw new Error(`CCF_400:${msg}`);
-  }
-  if (r.status >= 400) throw new Error(`CCF_${r.status}:${JSON.stringify(r.data).slice(0,100)}`);
+  if (!r.data?.success) throw new Error(`CFC_ERROR:${r.data?.message || "Unknown error"}`);
 
-  const html = r.data?.html || "";
-  if (!html || html.trim().length < 200) throw new Error("CCF_EMPTY_RESPONSE");
+  const data = r.data.data;
+  if (!data || !data.vin) throw new Error("CFC_EMPTY_RESPONSE");
 
-  console.log(`[CheapCARFAX] Got HTML: ${html.length} chars`);
+  // Log credits remaining
+  const credits = r.data.meta?.credits_remaining;
+  if (credits !== undefined) console.log(`[CarfaxCheaper] Credits remaining: ${credits}`);
+
+  // Build self-contained HTML from the structured JSON — no CDN dependencies
+  const html = buildReportHtml(data, vin);
   return Buffer.from(html, "utf8").toString("base64");
 }
 
 
-
-// CarSimulcast removed — CheapCARFAX is the sole active provider
-
-
-// ── CheapCARFAX limits check (for cfc-dashboard) ───────────────
-async function getCcfLimits() {
-  const key = process.env.CHEAPCARFAX_API_KEY;
-  if (!key) return null;
-  try {
-    const r = await axios.get(`${CCF_BASE}/user/limits`, {
-      headers: { "x-api-key": key }, timeout: 10000, validateStatus: () => true,
-    });
-    if (r.status === 200) return r.data;
-    return null;
-  } catch { return null; }
-}
-
-
-
-// Build a clean styled HTML report from the CFC structured JSON response
 function buildReportHtml(data, vin) {
   const safe = (v, fallback = "N/A") => v != null ? String(v) : fallback;
   const yn   = (v) => v ? "Yes" : "No";
@@ -587,16 +550,15 @@ function injectReportChrome(html) {
   out = out.replace(/<script\b[^>]*assets\.adobedtm[^>]*><\/script>/gi, "");
   out = out.replace(/<script\b[^>]*adobedtm[^>]*\/?>/gi, "");
 
-  // CarSimulcast/CARFAX external scripts — these make cross-origin requests
-  // that get CORS-blocked in the browser and cause console errors + broken chunks
+  // Only strip connect.carsimulcast.com (auth/tracking API endpoint).
+  // DO NOT strip static.carsimulcast.com or general carsimulcast.com scripts —
+  // those host the CARFAX React bundle that renders the report body from __INITIAL__DATA__.
+  // Stripping them = empty <body>, blank report.
   out = out.replace(/<script\b[^>]*connect\.carsimulcast\.com[^>]*>[\s\S]*?<\/script>/gi, "");
   out = out.replace(/<script\b[^>]*connect\.carsimulcast\.com[^>]*\/?>/gi, "");
-  out = out.replace(/<script\b[^>]*carsimulcast\.com[^>]*>[\s\S]*?<\/script>/gi, "");
-  out = out.replace(/<script\b[^>]*carsimulcast\.com[^>]*\/?>/gi, "");
   out = out.replace(/<link\b[^>]*connect\.carsimulcast\.com[^>]*>/gi, "");
-  // Strip any launch/chunk scripts (CarSimulcast loads JS chunks from their CDN)
-  out = out.replace(/<script\b[^>]*\/report_assets\/carfax[^>]*>[\s\S]*?<\/script>/gi, "");
-  out = out.replace(/<script\b[^>]*\/report_assets\/carfax[^>]*\/?>/gi, "");
+  // NOTE: /report_assets/carfax scripts are KEPT — they are the CARFAX React app
+  // that renders the report body from __INITIAL__DATA__. Stripping them = blank page.
   // Strip Facebook pixel (blocked by ad blockers, causes noise)
   out = out.replace(/<script\b[^>]*connect\.facebook\.net[^>]*>[\s\S]*?<\/script>/gi, "");
   out = out.replace(/<script\b[^>]*fbevents[^>]*>[\s\S]*?<\/script>/gi, "");
@@ -614,12 +576,11 @@ function injectReportChrome(html) {
   const guardLines = [
     "<script>",
     "(function(){",
-    "  var ALLOWED = location.href; // remember the srcdoc blob origin",
     "  function blockNav(v){",
-    "    if(typeof v!=='string') return true;",
-    "    // block undefined, external domains, and blank navigations",
+    "    if(typeof v!=='string') return false;",
     "    if(v.indexOf('undefined')!==-1) return true;",
-    "    if(/^https?:\/\//i.test(v)) return true;",
+    "    if(v.indexOf('http://')===0) return true;",
+    "    if(v.indexOf('https://')===0) return true;",
     "    if(v==='about:blank') return true;",
     "    return false;",
     "  }",
@@ -637,8 +598,6 @@ function injectReportChrome(html) {
     "    var orig=window.location[m];",
     "    try{window.location[m]=function(v){if(blockNav(v))return;orig.call(window.location,v);};}catch(e){}",
     "  });",
-    "  // Block any attempt to overwrite window.location entirely",
-    "  try{Object.defineProperty(window,'location',{get:function(){return location;},set:function(){},configurable:false});}catch(e){}",
     "})();",
     "<\/script>",
   ];
@@ -1006,8 +965,8 @@ async function verifyPaypalCapture(captureId) {
 reconcileStalePendingCharges();
 
 // Log provider configuration on startup
-console.log(`[Provider] CheapCARFAX configured: ${!!process.env.CHEAPCARFAX_API_KEY}`);
-console.log(`[Provider] Daily limit: ${CCF_DAILY_HARD_LIMIT} reports/day`);
+console.log(`[Provider] CarfaxCheaper configured: ${!!process.env.CFC_API_KEY}`);
+console.log(`[Provider] CarfaxCheaper ready — credits tracked per API response`);
 
 /* ================================================================
    Stripe Checkout
@@ -1342,15 +1301,30 @@ app.post("/api/report", async (req, res) => {
         writeCache(targetVin, type, raw);
 
         if (currentUser) {
-          const upsertResult = await supabaseService.from("vin_queries").upsert({
-            user_id:     currentUser.id,
-            vin:         targetVin,
-            type:        type,
-            report_data: raw,
-            success:     true,
-          }, { onConflict: "user_id,vin,type" });
-          if (upsertResult.error) {
-            console.error("[Upsert] vin_queries upsert failed:", upsertResult.error.message);
+          // Try to update existing row first (if any), then insert
+          const { data: existing } = await supabaseService
+            .from("vin_queries")
+            .select("id")
+            .eq("user_id", currentUser.id)
+            .eq("vin", targetVin)
+            .eq("type", type)
+            .maybeSingle();
+
+          if (existing?.id) {
+            // Update the existing row with fresh report data
+            const { error: updErr } = await supabaseService
+              .from("vin_queries")
+              .update({ report_data: raw, success: true })
+              .eq("id", existing.id);
+            if (updErr) console.error("[DB] Update report_data failed:", updErr.message);
+            else console.log("[DB] report_data updated for", targetVin);
+          } else {
+            // Insert new row
+            const { error: insErr } = await supabaseService
+              .from("vin_queries")
+              .insert({ user_id: currentUser.id, vin: targetVin, type, report_data: raw, success: true });
+            if (insErr) console.error("[DB] Insert report failed:", insErr.message);
+            else console.log("[DB] report_data stored for", targetVin);
           }
         }
 
@@ -1381,7 +1355,17 @@ app.post("/api/report", async (req, res) => {
       }
     }
 
-    if (!raw) return res.status(404).json({ error: "not_found", message: "No report found." });
+    if (!raw) {
+      if (alreadyOwned) {
+        return res.status(404).json({
+          error: "report_not_cached",
+          message: "This report is no longer in our cache. Please search the VIN again — you won't be charged as you already own it.",
+          vin: targetVin,
+          can_refetch: true,
+        });
+      }
+      return res.status(404).json({ error: "not_found", message: "No report found." });
+    }
 
     // 6. Deliver
     const decoded = decodeReportBase64(raw);
@@ -1520,6 +1504,76 @@ app.get("/api/history", async (req, res) => {
     }
     res.json({ ok: true, rows: data || [] });
   } catch { res.status(500).json({ error: "Server error" }); }
+});
+
+/* ================================================================
+   Dashboard — stats, recent reports, chart data for dashboard.html
+================================================================ */
+app.get("/api/dashboard", async (req, res) => {
+  try {
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "unauthorized" });
+
+    // Run all queries in parallel
+    const [queriesRes, creditsRes] = await Promise.all([
+      supabaseService
+        .from("vin_queries")
+        .select("vin, type, created_at")
+        .eq("user_id", user.id)
+        .eq("success", true)
+        .order("created_at", { ascending: false })
+        .limit(500),
+      supabaseService
+        .from("credits")
+        .select("balance, plan")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+    ]);
+
+    const rows    = queriesRes.data  || [];
+    const credits = creditsRes.data  || {};
+
+    // Stats
+    const now       = new Date();
+    const thisMonth = rows.filter(r => {
+      const d = new Date(r.created_at);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    }).length;
+
+    // Monthly breakdown (last 6 months) — { "2026-04": 3, ... }
+    const monthly = {};
+    for (let i = 5; i >= 0; i--) {
+      const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      monthly[key] = 0;
+    }
+    rows.forEach(r => {
+      const d   = new Date(r.created_at);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (key in monthly) monthly[key]++;
+    });
+
+    // Top VINs
+    const vinCounts = {};
+    rows.forEach(r => { vinCounts[r.vin] = (vinCounts[r.vin] || 0) + 1; });
+    const topVins = Object.entries(vinCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([vin, count]) => ({ vin, count }));
+
+    res.json({
+      balance:       credits.balance     ?? 0,
+      plan:          credits.plan        || null,
+      totalReports:  rows.length,
+      thisMonth,
+      monthly,
+      topVins,
+      recentReports: rows.slice(0, 20),
+    });
+  } catch (err) {
+    console.error("[/api/dashboard]", err);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 /* ================================================================
@@ -1796,10 +1850,10 @@ app.get("/api/cfc-dashboard", async (req, res) => {
     }
 
     // Credits: pull live limits from CheapCARFAX + local counter for CFC
-    const [ccfLimits, cfcCredits] = await Promise.all([getCcfLimits(), getCfcCredits()]);
+    const [ccfLimits, cfcCredits] = await Promise.all([getCfcApiLimits(), getCfcCredits()]);
     const credits = ccfLimits !== null ? ccfLimits.credits : cfcCredits;
     const ccfDailyLeft = ccfLimits?.carfax_reports_left_today ?? null;
-    const ccfDailyLimit = ccfLimits?.daily_limit ?? CCF_DAILY_HARD_LIMIT;
+    const ccfDailyLimit = ccfLimits?.daily_limit ?? 100;
 
     // All-time report stats
     const { data: allReports } = await supabaseService

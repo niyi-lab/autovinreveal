@@ -17,13 +17,13 @@
     <title>CARFAX Reports for $6 | Instant VIN Check & Vehicle History | AutoVINReveal</title>
     <meta name="description" content="Get a full official CARFAX vehicle history report for just $6 — same data as the dealership. Instant VIN check. Accident history, odometer rollbacks, title brands, service records. No subscription needed." />
     <meta name="keywords" content="cheap carfax report, carfax $6, vin check, vehicle history report, vin lookup, car history check, accident history, odometer rollback, salvage title check, used car history" />
-    <link rel="canonical" href="https://www.autovinreveal.com" />
+    <link rel="canonical" href="https://autovinreveal.com/" />
 
     <meta property="og:title" content="CARFAX Vehicle History Reports for $6 — Instant VIN Check" />
     <meta property="og:description" content="Don't pay $40 at the dealership. Get the exact same CARFAX vehicle history report for just $6. Instant access. No subscription. Check accidents, title, mileage and more." />
-    <meta property="og:image" content="https://www.autovinreveal.com/og-image.png" />
+    <meta property="og:image" content="https://autovinreveal.com/og-image.png" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://www.autovinreveal.com" />
+    <meta property="og:url" content="https://autovinreveal.com" />
     <meta name="twitter:card" content="summary_large_image" />
 
     <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32" />
@@ -141,14 +141,6 @@
 
   <body class="text-slate-800 antialiased flex flex-col min-h-screen pb-20 sm:pb-0">
 
-    <!-- ✅ BACK OPEN BANNER — remove after a day or two -->
-  <div id="backOpenBanner" style="background:#16a34a;color:white;padding:10px 16px;text-align:center;font-family:'Inter',sans-serif;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;position:sticky;top:0;z-index:9999;">
-    <svg style="width:16px;height:16px;flex-shrink:0;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-    <span>✅ We're back online! Reports and purchases are fully available. Thank you for your patience.</span>
-    <button onclick="this.parentElement.style.display='none'" style="background:rgba(0,0,0,0.2);border:none;color:white;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:700;margin-left:4px;">✕</button>
-  </div>
-  <!-- END BACK OPEN BANNER -->
-
   <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
 
@@ -160,6 +152,7 @@
 
         <!-- Desktop nav (sm+) -->
         <div class="hidden sm:flex items-center gap-3">
+          <a href="/blog/" class="text-sm font-semibold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors">Blog</a>
           <a id="historyNavLink" href="/history.html"
             style="display:none"
             class="text-sm font-semibold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors flex items-center gap-1.5">
@@ -194,6 +187,7 @@
             <span id="userEmail" class="text-sm font-medium text-gray-600"></span>
             <button id="logoutBtn" class="text-xs text-red-500 hover:text-red-700 font-medium">Sign out</button>
           </div>
+          
           <button id="loginBtn" class="text-sm font-bold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors">Log in</button>
         </div>
 
@@ -221,6 +215,7 @@
       <div id="mobileMenu" style="display:none"
         class="sm:hidden border-t border-gray-100 bg-white px-4 pt-2 pb-4 shadow-lg space-y-1">
         <p id="mobileUserEmail" class="text-xs text-gray-400 px-2 pb-1 truncate"></p>
+        <a href="/blog/" class="flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors">📝 Blog</a>
         <a id="historyNavLinkMobile" href="/history.html"
           class="flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -410,15 +405,26 @@
             <p class="text-gray-500 mt-2 text-sm max-w-xl mx-auto">A full CARFAX® Vehicle History Report delivered in seconds. Accident history, ownership records, service history, title checks — everything.</p>
           </div>
 
+<!-- Mini recent reports strip -->
+          <div id="recentChecksBar" class="hidden mt-4 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+            <div class="flex items-center justify-between mb-3">
+              <h3 id="recentChecksTitle" class="text-sm font-bold text-gray-700">Your Recent Reports</h3>
+              <a href="/history.html" class="text-xs text-blue-600 hover:underline font-semibold">View all →</a>
+            </div>
+            <div id="recentChecksList" class="space-y-2"></div>
+          </div>
+
+
+
           <div class="relative rounded-2xl overflow-hidden shadow-2xl shadow-blue-900/15 border border-gray-200 bg-white">
             <!-- Top label bar -->
             <div class="bg-blue-600 text-white text-xs font-bold px-4 py-2 flex items-center justify-between">
-              <span>📋 Sample CARFAX Report — 2017 Lexus RC 350</span>
+              <span>📋 Sample CARFAX Report — 2020 Lexus RX 350L</span>
               <span class="bg-white/20 px-2 py-0.5 rounded text-[11px]">Actual report from our system</span>
             </div>
 
             <!-- Blurred sample — click to open PDF -->
-            <a href="/images/sample-report.pdf" target="_blank" rel="noopener"
+            <a href="/images/autovinreveal-sample.pdf" target="_blank" rel="noopener"
               class="block group cursor-pointer max-w-sm mx-auto mt-4 mb-6">
               <div class="relative rounded-xl overflow-hidden border border-gray-200 shadow-sm">
                 <!-- Blurred mock -->
@@ -427,8 +433,8 @@
                     <span style="font-family:Arial Black,sans-serif;font-size:10px;" class="bg-white text-[#0057a8] font-black px-1.5 py-0.5 rounded">CARFAX</span>
                     <span class="text-white font-bold text-[10px]">Vehicle History Report™</span>
                   </div>
-                  <div class="font-black text-gray-900 text-sm">2017 Lexus RC 350</div>
-                  <div class="text-gray-400 font-mono text-[10px]">VIN: JTHSE5BC8H5007726</div>
+                  <div class="font-black text-gray-900 text-sm">2020 Lexus RX 350L</div>
+                  <div class="text-gray-400 font-mono text-[10px]">VIN: JTJHZKEA4L2014561</div>
                   <span class="inline-block bg-green-600 text-white font-bold px-2 py-0.5 rounded-full text-[10px]">✓ NO ACCIDENTS REPORTED</span>
                   <div class="border border-gray-200 rounded overflow-hidden">
                     <div class="bg-[#0057a8] px-2 py-1 flex justify-between"><span class="text-white font-bold text-[10px]">Additional History</span><span class="text-blue-200 text-[10px]">Summary</span></div>
@@ -449,15 +455,6 @@
                 </div>
               </div>
             </a>
-
-                    <!-- Mini recent reports strip -->
-          <div id="recentChecksBar" class="hidden mt-4 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-            <div class="flex items-center justify-between mb-3">
-              <h3 id="recentChecksTitle" class="text-sm font-bold text-gray-700">Your Recent Reports</h3>
-              <a href="/history.html" class="text-xs text-blue-600 hover:underline font-semibold">View all →</a>
-            </div>
-            <div id="recentChecksList" class="space-y-2"></div>
-          </div>
         </section>
 
         <section class="mt-16 text-center">
@@ -773,6 +770,7 @@
               <li><a href="/" class="hover:text-white transition-colors">Single Report — $6</a></li>
               <li><a href="/#pricing" class="hover:text-white transition-colors">5-Pack — $20</a></li>
               <li><a href="/#pricing" class="hover:text-white transition-colors">20-Pack — $58</a></li>
+              <li><a href="/blog/" class="hover:text-white transition-colors">Blog</a></li>
               <li><a href="/history.html" class="hover:text-white transition-colors">My Reports</a></li>
               <li><a href="/dashboard.html" class="hover:text-white transition-colors">Dashboard</a></li>
             </ul>
@@ -784,7 +782,7 @@
               <li><a href="/terms.html" class="hover:text-white transition-colors">Terms of Service</a></li>
               <li><a href="/privacy.html" class="hover:text-white transition-colors">Privacy Policy</a></li>
               <li><a href="/#pricing" class="hover:text-white transition-colors">Pricing</a></li>
-              <li><a href="mailto:support@autovinreveal.com" class="hover:text-white transition-colors">Contact Support</a></li>
+              <li><a href="/cdn-cgi/l/email-protection#62111712120d1016220317160d140b0c10071407030e4c010d0f" class="hover:text-white transition-colors">Contact Support</a></li>
               <li><a href="/#faq" onclick="document.querySelector('details').open=true" class="hover:text-white transition-colors">FAQ</a></li>
             </ul>
           </div>
@@ -906,7 +904,7 @@
 
     <div id="loginModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
       role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
-      <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 relative">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
         <button id="closeLoginModal" class="absolute top-4 right-4 text-gray-300 hover:text-gray-600 text-xl" aria-label="Close">✕</button>
         <div class="text-center mb-6">
           <h2 id="loginModalTitle" class="text-2xl font-bold text-gray-900">Welcome Back</h2>

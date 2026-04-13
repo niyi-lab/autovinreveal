@@ -87,37 +87,47 @@ function trackPurchase(value = 6.00) {
   } catch {}
 }
 
-// Convert HTML string to PDF and download using html2pdf.js (CDN loaded on demand)
+// Convert HTML string to PDF and trigger an immediate download — no print dialog.
+// Strategy: open a tiny offscreen window so the browser fully renders the document
+// (all CSS, fonts, images load), then inject html2pdf.js into THAT window's JS
+// context and run it there. html2canvas operates on the live DOM of the same
+// window, so it captures a fully-styled page instead of a blank one.
 async function convertHtmlToPdf(htmlContent, filename) {
-  // Load html2pdf.js from CDN if not already loaded
-  if (!window.html2pdf) {
-    await new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-      s.onload = resolve;
-      s.onerror = reject;
-      document.head.appendChild(s);
-    });
-  }
+  const win = window.open('', '_blank', 'width=900,height=700,top=-3000,left=-3000');
+  if (!win) throw new Error('Pop-up blocked — please allow pop-ups and try again');
 
-  // Create a hidden container, render the HTML inside it
-  const container = document.createElement('div');
-  container.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;background:white;';
-  container.innerHTML = htmlContent;
-  document.body.appendChild(container);
+  win.document.open();
+  win.document.write(htmlContent);
+  win.document.close();
 
-  try {
-    await window.html2pdf(container, {
-      margin:      [8, 8, 8, 8],
-      filename:    filename,
-      image:       { type: 'jpeg', quality: 0.92 },
-      html2canvas: { scale: 1.5, useCORS: true, logging: false, allowTaint: true },
-      jsPDF:       { unit: 'mm', format: 'letter', orientation: 'portrait' },
-      pagebreak:   { mode: ['avoid-all', 'css', 'legacy'] },
-    });
-  } finally {
-    document.body.removeChild(container);
-  }
+  // Wait for DOMContentLoaded inside the new window
+  await new Promise(r => {
+    if (win.document.readyState === 'complete') { r(); return; }
+    win.addEventListener('load', r, { once: true });
+  });
+  // Extra time for web-fonts and images to finish rendering
+  await new Promise(r => setTimeout(r, 1500));
+
+  // Inject html2pdf.js into the new window's context
+  await new Promise((resolve, reject) => {
+    const s = win.document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    s.onload = resolve;
+    s.onerror = reject;
+    win.document.head.appendChild(s);
+  });
+
+  // Run conversion from within that window — html2canvas sees the full styled DOM
+  await win.html2pdf(win.document.body, {
+    margin:      [8, 8, 8, 8],
+    filename,
+    image:       { type: 'jpeg', quality: 0.92 },
+    html2canvas: { scale: 1.5, useCORS: true, logging: false, allowTaint: true },
+    jsPDF:       { unit: 'mm', format: 'letter', orientation: 'portrait' },
+    pagebreak:   { mode: ['avoid-all', 'css', 'legacy'] },
+  });
+
+  win.close();
 }
 
 function downloadBlob(blob, filename) {
@@ -189,12 +199,12 @@ function showReportOverlay(html, vin) {
       <button id="overlayPrintBtn"
         style="background:transparent;color:white;border:1px solid rgba(255,255,255,0.4);padding:5px 12px;border-radius:6px;
                font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
-        🖨 Save as PDF
+        🖨 Print / PDF
       </button>
       <button id="overlayDownloadBtn"
-        style="background:#2563eb;color:white;border:none;padding:5px 12px;border-radius:6px;
+        style="background:#16a34a;color:white;border:none;padding:5px 12px;border-radius:6px;
                font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
-        ⬇ Download
+        ⬇ Download PDF
       </button>
       <button id="closeReportOverlay"
         style="background:#ef4444;color:white;border:none;padding:5px 14px;border-radius:6px;
@@ -205,9 +215,12 @@ function showReportOverlay(html, vin) {
 
   const iframe = document.createElement('iframe');
   iframe.style.cssText = 'flex:1;border:none;width:100%;';
-  // FIX-S1: sandbox prevents top-level navigation while keeping the report functional
-  iframe.setAttribute('sandbox', 'allow-scripts allow-popups allow-forms allow-modals');
-  iframe.srcdoc = html;
+  // Use blob URL instead of srcdoc — Chrome blocks many things in srcdoc context
+  const _blob = new Blob([html], { type: 'text/html' });
+  const _blobUrl = URL.createObjectURL(_blob);
+  iframe.src = _blobUrl;
+  // Revoke after load to free memory
+  iframe.addEventListener('load', () => setTimeout(() => URL.revokeObjectURL(_blobUrl), 60000), { once: true });
 
   overlay.appendChild(bar);
   overlay.appendChild(iframe);
@@ -227,7 +240,7 @@ function showReportOverlay(html, vin) {
     win.addEventListener('load', () => { setTimeout(() => win.print(), 500); });
   });
 
-  // Download — converts HTML to PDF client-side using html2pdf.js
+  // Download — render report in offscreen window, convert with html2pdf (no print dialog)
   overlay.querySelector('#overlayDownloadBtn')?.addEventListener('click', async () => {
     const btn = overlay.querySelector('#overlayDownloadBtn');
     const orig = btn.innerHTML;
@@ -237,9 +250,8 @@ function showReportOverlay(html, vin) {
     try {
       await convertHtmlToPdf(html, (vin || 'report') + '-vehicle-history.pdf');
       showToast('PDF downloaded!', 'ok');
-    } catch(e) {
-      showToast('PDF failed, downloading HTML instead', 'error');
-      downloadBlob(new Blob([html], { type: 'text/html' }), (vin || 'report') + '-report.html');
+    } catch (e) {
+      showToast(e.message || 'Download failed', 'error');
     } finally {
       btn.innerHTML = orig;
       btn.disabled = false;
@@ -713,21 +725,50 @@ function addToHistory(item) { const list = loadHistory(); list.unshift(item); sa
 function formatTime(ts) { return new Date(ts).toLocaleString(); }
 
 async function openHistoryHTML(item) {
-  const data = {
-    vin:       item.vin !== '(from plate)' ? item.vin : '',
-    type:      item.type,
-    as:        'html',
-    allowLive: true,  // re-fetch if cache empty; server skips credit for owned reports
-  };
+  const vin  = item.vin !== '(from plate)' ? item.vin : '';
+  const type = item.type || 'carfax';
+  if (!vin) { showToast('No VIN available for this report', 'error'); return; }
+
   const headers = { 'Content-Type': 'application/json' };
   const { token } = await getSession();
   if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  showToast('Loading report…', 'ok');
   try {
     await ensureBackendReady();
-    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
-    if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
+    const r = await apiFetch(API.report, {
+      method: 'POST', headers,
+      // allowLive: false — serve from Supabase cache only, never charge a credit
+      body: JSON.stringify({ vin, type, as: 'html', allowLive: false }),
+    });
+
+    if (r.status === 404) {
+      const json = await r.json().catch(() => ({}));
+      if (json.can_refetch) {
+        // Report owned but not cached — offer to re-run for free
+        const go = confirm(
+          'This report is no longer in our cache.\n\n' +
+          'Click OK to re-fetch it for free (you already own it).'
+        );
+        if (go) {
+          // Re-run with allowLive — server will skip credit since alreadyOwned
+          const r2 = await apiFetch(API.report, {
+            method: 'POST', headers,
+            body: JSON.stringify({ vin, type, as: 'html', allowLive: true }),
+          });
+          if (!r2.ok) { showToast('Re-fetch failed — ' + r2.status, 'error'); return; }
+          const html2 = await r2.text();
+          openReport(html2, vin);
+        }
+        return;
+      }
+      showToast('Report not found.', 'error'); return;
+    }
+
+    if (!r.ok) { showToast('Could not load report — ' + r.status, 'error'); return; }
+
     const html = await r.text();
-    openReport(html, data.vin || '');
+    openReport(html, vin);
   } catch (e) { showToast(e.message || 'Request failed', 'error'); }
 }
 
@@ -893,15 +934,15 @@ function recentChecksRowHTML(vin, type, ago) {
         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
         Save PDF
       </button>
-      <button data-vin="${vin}" data-type="${type}" data-action="download"
-        class="flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-50 hover:bg-green-100 border border-green-100 px-2.5 py-1 rounded-lg transition-colors">
-        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-        Download
-      </button>
       <button data-vin="${vin}" data-type="${type}" data-action="email"
         class="flex items-center gap-1 text-[11px] font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-lg transition-colors">
         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
         Email
+      </button>
+      <button data-vin="${vin}" data-type="${type}" data-action="copy"
+        class="flex items-center gap-1 text-[11px] font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-100 px-2.5 py-1 rounded-lg transition-colors">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        Copy Link
       </button>
     </div>
   </div>`;
@@ -916,18 +957,20 @@ function bindRecentChecksBtns() {
       const type   = btn.dataset.type || 'carfax';
       const action = btn.dataset.action;
       const item   = { vin, type, ts: Date.now() };
-      if (action === 'view')     openHistoryHTML(item);
+      if (action === 'view')     openHistoryHTML({ vin, type });
       if (action === 'savepdf') {
-        const win = window.open('', '_blank');
         const headers = { 'Content-Type': 'application/json' };
         const { token } = await getSession();
         if (token) headers['Authorization'] = `Bearer ${token}`;
-        const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify({ vin, type, as: 'html', allowLive: true }) });
-        if (r.ok) { const html = await r.text(); if (win) { win.document.write(html); win.document.close(); win.addEventListener('load', () => setTimeout(() => win.print(), 500)); } }
-        else { win?.close(); showToast('Could not load report', 'error'); }
+        const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify({ vin, type, as: 'html', allowLive: false }) });
+        if (r.ok) {
+          const html = await r.text();
+          const win = window.open('', '_blank');
+          if (win) { win.document.open(); win.document.write(html); win.document.close(); win.addEventListener('load', () => setTimeout(() => win.print(), 600)); }
+        } else { showToast('Could not load report', 'error'); }
       }
-      if (action === 'download') downloadHistoryPDF(item, btn);
-      if (action === 'email')    openEmailModal(item);
+      if (action === 'copy')  copyShareLink(vin, type);
+      if (action === 'email') openEmailModal(item);
     });
   });
 }

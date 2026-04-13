@@ -288,25 +288,83 @@
       /* ============================================================
          Report rendering
       ============================================================ */
-      function openReport(html) {
-        // Open in overlay on the same page — identical to app.js approach
+      function openReport(html, vin) {
         document.getElementById('reportOverlayPage')?.remove();
         const overlay = document.createElement('div');
         overlay.id = 'reportOverlayPage';
         overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#fff;display:flex;flex-direction:column;';
+
         const bar = document.createElement('div');
-        bar.style.cssText = 'flex-shrink:0;background:#1e3a8a;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;';
+        bar.style.cssText = 'flex-shrink:0;background:#1e3a8a;padding:8px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;';
         bar.innerHTML = `
-          <span style="color:white;font-weight:bold;font-size:14px;">Vehicle History Report</span>
-          <button id="closeHistoryOverlay" style="background:#ef4444;color:white;border:none;padding:6px 14px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px;">✕ Close</button>`;
+          <span style="color:white;font-weight:bold;font-size:14px;flex-shrink:0;">Vehicle History Report</span>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button id="overlayPrintBtn"
+              style="background:transparent;color:white;border:1px solid rgba(255,255,255,0.4);padding:5px 12px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
+              🖨 Save as PDF
+            </button>
+            <button id="overlayDownloadBtn"
+              style="background:#2563eb;color:white;border:none;padding:5px 12px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
+              ⬇ Download
+            </button>
+            <button id="closeHistoryOverlay"
+              style="background:#ef4444;color:white;border:none;padding:5px 14px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px;">
+              ✕ Close
+            </button>
+          </div>`;
+
         const iframe = document.createElement('iframe');
         iframe.style.cssText = 'flex:1;border:none;width:100%;';
-        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
-        iframe.srcdoc = html;
+        // Use blob URL — avoids about:srcdoc ERR_INVALID_URL in Chrome
+        const blob = new Blob([html], { type: 'text/html' });
+        const blobUrl = URL.createObjectURL(blob);
+        iframe.src = blobUrl;
+        iframe.addEventListener('load', () => setTimeout(() => URL.revokeObjectURL(blobUrl), 60000), { once: true });
+
         overlay.appendChild(bar);
         overlay.appendChild(iframe);
         document.body.appendChild(overlay);
         window.history.pushState({ reportOverlayOpen: true }, '');
+
+        // Save as PDF — opens new tab and triggers print
+        bar.querySelector('#overlayPrintBtn').addEventListener('click', () => {
+          const win = window.open('', '_blank');
+          if (!win) { alert('Pop-ups blocked. Please allow pop-ups.'); return; }
+          win.document.open(); win.document.write(html); win.document.close();
+          win.addEventListener('load', () => setTimeout(() => win.print(), 500));
+        });
+
+        // Download — html2pdf if available, else download HTML
+        bar.querySelector('#overlayDownloadBtn').addEventListener('click', async () => {
+          const btn = bar.querySelector('#overlayDownloadBtn');
+          const orig = btn.innerHTML; btn.innerHTML = '⏳ Generating…'; btn.disabled = true;
+          try {
+            if (!window.html2pdf) {
+              await new Promise((res, rej) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+                s.onload = res; s.onerror = rej; document.head.appendChild(s);
+              });
+            }
+            const container = document.createElement('div');
+            container.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;background:white;';
+            container.innerHTML = html; document.body.appendChild(container);
+            await window.html2pdf(container, {
+              margin: [8,8,8,8], filename: (vin || 'report') + '-vehicle-history.pdf',
+              image: { type: 'jpeg', quality: 0.92 },
+              html2canvas: { scale: 1.5, useCORS: true, logging: false },
+              jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' },
+            });
+            document.body.removeChild(container);
+          } catch(e) {
+            // Fallback: download as HTML
+            const b = new Blob([html], { type: 'text/html' });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(b);
+            a.download = (vin || 'report') + '-report.html';
+            a.click(); URL.revokeObjectURL(a.href);
+          } finally { btn.innerHTML = orig; btn.disabled = false; }
+        });
+
         bar.querySelector('#closeHistoryOverlay').addEventListener('click', () => window.history.back());
       }
 
@@ -406,23 +464,42 @@
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = `Bearer ${token}`;
 
+        const vin = item.vin !== '(from plate)' ? item.vin : '';
         const data = {
-          vin:       item.vin !== '(from plate)' ? item.vin : '',
-          state:     item.state || '',
-          plate:     item.plate || '',
+          vin,
           type:      item.type,
           as:        'html',
-          allowLive: true,
+          allowLive: false,  // serve from Supabase only — never charge a credit
         };
 
         try {
           const r = await apiFetch('/api/report', { method: 'POST', headers, body: JSON.stringify(data) }, 60_000);
           hideReportLoader();
+
+          if (r.status === 404) {
+            const json = await r.json().catch(() => ({}));
+            if (json.can_refetch && vin) {
+              const go = confirm('This report is no longer in our cache.\n\nClick OK to re-fetch it for free (you already own it).');
+              if (go) {
+                showReportLoader();
+                const r2 = await apiFetch('/api/report', {
+                  method: 'POST', headers,
+                  body: JSON.stringify({ vin, type: item.type, as: 'html', allowLive: false }),
+                }, 60_000);
+                hideReportLoader();
+                if (!r2.ok) { showToast('Re-fetch failed', 'error'); return; }
+                openReport(await r2.text(), vin);
+              }
+              return;
+            }
+            showToast('Report not found in cache.', 'error'); return;
+          }
+
           if (!r.ok) {
             showToast(await r.text() || `HTTP ${r.status}`, 'error');
             return;
           }
-          openReport(await r.text());
+          openReport(await r.text(), vin);
         } catch (e) {
           hideReportLoader();
           showToast(e.message || 'Request failed', 'error');
@@ -463,9 +540,21 @@
         finally { restore(); }
       }
 
-      // Auto-download — fetches HTML report and downloads immediately
+      // Load html2pdf.js on demand
+      async function loadHtml2Pdf() {
+        if (window.html2pdf) return;
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+          s.onload = resolve; s.onerror = reject;
+          document.head.appendChild(s);
+        });
+      }
+
+      // Auto-download — fetches HTML and converts to PDF client-side
       async function downloadPDFDirect(item, btn) {
-        const restore = setBtnLoading(btn, '…');
+        const restore = setBtnLoading(btn, '⏳…');
+        showToast('Generating PDF…', 'ok');
         const vin = item.vin !== '(from plate)' ? item.vin : '';
         if (!vin) { showToast('No VIN available.', 'error'); restore(); return; }
         const { token } = await getSession();
@@ -476,16 +565,33 @@
           const r = await apiFetch('/api/report', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ vin, type: item.type, as: 'html', allowLive: true }),
+            body: JSON.stringify({ vin, type: item.type, as: 'html', allowLive: false }),
           }, 45_000);
           if (!r.ok) { showToast('Failed to fetch report', 'error'); return; }
           const reportHtml = await r.text();
-          // Immediately download — no dialog
-          const blob = new Blob([reportHtml], { type: 'text/html' });
-          downloadBlob(blob, vin + '-vehicle-history.html');
-          showToast('Download started!', 'ok');
-        } catch (e) { showToast(e.message || 'Failed', 'error'); }
-        finally { restore(); }
+
+          // Convert to PDF client-side
+          await loadHtml2Pdf();
+          const container = document.createElement('div');
+          container.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;background:white;';
+          container.innerHTML = reportHtml;
+          document.body.appendChild(container);
+          try {
+            await window.html2pdf(container, {
+              margin:      [8, 8, 8, 8],
+              filename:    vin + '-vehicle-history.pdf',
+              image:       { type: 'jpeg', quality: 0.92 },
+              html2canvas: { scale: 1.5, useCORS: true, logging: false, allowTaint: true },
+              jsPDF:       { unit: 'mm', format: 'letter', orientation: 'portrait' },
+              pagebreak:   { mode: ['avoid-all', 'css', 'legacy'] },
+            });
+            showToast('PDF downloaded!', 'ok');
+          } finally {
+            document.body.removeChild(container);
+          }
+        } catch (e) {
+          showToast(e.message || 'Failed', 'error');
+        } finally { restore(); }
       }
 
       async function copyShareLink(item) {
