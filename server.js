@@ -990,7 +990,11 @@ app.post("/api/create-checkout-session", async (req, res) => {
       const verifyRes = await axios.post(
         "https://challenges.cloudflare.com/turnstile/v0/siteverify",
         verifyParams.toString(),
-        { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+        {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          validateStatus: () => true,
+          timeout: 8000,
+        }
       );
       if (!verifyRes.data?.success) {
         console.warn(`[Turnstile] Failed verification from ${req.ip}. Errors: ${JSON.stringify(verifyRes.data?.["error-codes"])}`);
