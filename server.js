@@ -478,6 +478,15 @@ function injectReportChrome(html) {
   // 3. Strip meta refresh
   out = out.replace(/<meta\b[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, "");
 
+  // 3b. Disable Trusted Types enforcement — CARFAX React uses innerHTML/eval
+  // which Chrome blocks under Trusted Types policy, leaving body empty.
+  // We inject a meta CSP that opts out of Trusted Types for this document.
+  out = out.replace(/<meta\b[^>]*http-equiv=["']?Content-Security-Policy["']?[^>]*>/gi, "");
+  const trustedTypesBypass = `<meta http-equiv="Content-Security-Policy" content="trusted-types *; require-trusted-types-for 'script'" data-avr="bypass">`;
+  // Actually we want to REMOVE any Trusted Types enforcement, not add it.
+  // Just strip any existing CSP meta that enforces trusted-types.
+  out = out.replace(/<meta\b[^>]*trusted-types[^>]*>/gi, "");
+
   // 4. Nav guard — block ALL navigations from within the iframe.
   // CARFAX scripts attempt to redirect to carfax.com or blank pages after DTM strips.
   // We block every navigation vector: href setter, assign, replace, and beforeunload.
@@ -974,11 +983,15 @@ app.post("/api/create-checkout-session", async (req, res) => {
       if (!turnstileToken) {
         return res.status(403).json({ error: "captcha_required", message: "Please complete the verification." });
       }
-      const verifyRes = await axios.post("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-        secret:   process.env.TURNSTILE_SECRET_KEY,
-        response: turnstileToken,
-        remoteip: req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip,
-      });
+      const verifyParams = new URLSearchParams();
+      verifyParams.append("secret",   process.env.TURNSTILE_SECRET_KEY);
+      verifyParams.append("response", turnstileToken);
+      verifyParams.append("remoteip", req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || "");
+      const verifyRes = await axios.post(
+        "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+        verifyParams.toString(),
+        { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+      );
       if (!verifyRes.data?.success) {
         console.warn(`[Turnstile] Failed verification from ${req.ip}. Errors: ${JSON.stringify(verifyRes.data?.["error-codes"])}`);
         return res.status(403).json({ error: "captcha_failed", message: "Verification failed. Please try again." });

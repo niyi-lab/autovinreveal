@@ -1058,9 +1058,13 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
     // Get Turnstile token if widget is present
     const turnstileEl = document.querySelector('.cf-turnstile');
     if (turnstileEl) {
-      const token = window.turnstile?.getResponse();
+      // Wait up to 3s for turnstile to be ready
+      let token = window.turnstile?.getResponse();
+      if (!token) {
+        await new Promise(r => setTimeout(r, 1500));
+        token = window.turnstile?.getResponse();
+      }
       if (token) body.turnstile_token = token;
-      // Reset for next use
       window.turnstile?.reset();
     }
 
@@ -1069,7 +1073,12 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
       10_000
     );
-    if (!r.ok) throw new Error(await r.text() || 'Stripe error');
+    if (!r.ok) {
+      let errMsg = 'Stripe error';
+      try { const j = await r.json(); errMsg = j.message || j.error || errMsg; }
+      catch { errMsg = await r.text() || errMsg; }
+      throw new Error(errMsg);
+    }
     window.location.href = (await r.json()).url;
   } catch (e) { showToast(e.message || 'Failed to start checkout', 'error'); }
 }
