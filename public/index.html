@@ -137,6 +137,8 @@
         .pricing-col { min-width: 0; }
       }
     </style>
+  <!-- Cloudflare Turnstile — bot protection -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   </head>
 
   <body class="text-slate-800 antialiased flex flex-col min-h-screen pb-20 sm:pb-0">
@@ -187,7 +189,7 @@
             <span id="userEmail" class="text-sm font-medium text-gray-600"></span>
             <button id="logoutBtn" class="text-xs text-red-500 hover:text-red-700 font-medium">Sign out</button>
           </div>
-          
+          <a href="/blog/" class="text-sm font-semibold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors">Blog</a>
           <button id="loginBtn" class="text-sm font-bold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors">Log in</button>
         </div>
 
@@ -419,12 +421,12 @@
           <div class="relative rounded-2xl overflow-hidden shadow-2xl shadow-blue-900/15 border border-gray-200 bg-white">
             <!-- Top label bar -->
             <div class="bg-blue-600 text-white text-xs font-bold px-4 py-2 flex items-center justify-between">
-              <span>📋 Sample CARFAX Report — 2020 Lexus RX 350L</span>
+              <span>📋 Sample CARFAX Report — 2017 Lexus RC 350</span>
               <span class="bg-white/20 px-2 py-0.5 rounded text-[11px]">Actual report from our system</span>
             </div>
 
             <!-- Blurred sample — click to open PDF -->
-            <a href="/images/autovinreveal-sample.pdf" target="_blank" rel="noopener"
+            <a href="/images/sample-report.pdf" target="_blank" rel="noopener"
               class="block group cursor-pointer max-w-sm mx-auto mt-4 mb-6">
               <div class="relative rounded-xl overflow-hidden border border-gray-200 shadow-sm">
                 <!-- Blurred mock -->
@@ -433,8 +435,8 @@
                     <span style="font-family:Arial Black,sans-serif;font-size:10px;" class="bg-white text-[#0057a8] font-black px-1.5 py-0.5 rounded">CARFAX</span>
                     <span class="text-white font-bold text-[10px]">Vehicle History Report™</span>
                   </div>
-                  <div class="font-black text-gray-900 text-sm">2020 Lexus RX 350L</div>
-                  <div class="text-gray-400 font-mono text-[10px]">VIN: JTJHZKEA4L2014561</div>
+                  <div class="font-black text-gray-900 text-sm">2017 Lexus RC 350</div>
+                  <div class="text-gray-400 font-mono text-[10px]">VIN: JTHSE5BC8H5007726</div>
                   <span class="inline-block bg-green-600 text-white font-bold px-2 py-0.5 rounded-full text-[10px]">✓ NO ACCIDENTS REPORTED</span>
                   <div class="border border-gray-200 rounded overflow-hidden">
                     <div class="bg-[#0057a8] px-2 py-1 flex justify-between"><span class="text-white font-bold text-[10px]">Additional History</span><span class="text-blue-200 text-[10px]">Summary</span></div>
@@ -831,6 +833,12 @@
                 </div>
                 <p class="hidden sm:block text-xs text-gray-500 mt-1">One-time check. No account needed.</p>
               </div>
+              <!-- Cloudflare Turnstile — invisible bot check before payment -->
+              <div class="cf-turnstile mb-3" 
+                data-sitekey="0x4AAAAAADFQrzxC7-PNSl1X"
+                data-theme="light"
+                data-size="normal"></div>
+
               <button id="buy1Btn"
                 class="w-full flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
@@ -904,8 +912,7 @@
 
     <div id="loginModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
       role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
-      <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
-        <button id="closeLoginModal" class="absolute top-4 right-4 text-gray-300 hover:text-gray-600 text-xl" aria-label="Close">✕</button>
+      <div class="bg-white rounded-2xl shadow-xl w-fullseLoginModal" class="absolute top-4 right-4 text-gray-300 hover:text-gray-600 text-xl" aria-label="Close">✕</button>
         <div class="text-center mb-6">
           <h2 id="loginModalTitle" class="text-2xl font-bold text-gray-900">Welcome Back</h2>
           <p class="text-sm text-gray-500 mt-1">Access your report history</p>

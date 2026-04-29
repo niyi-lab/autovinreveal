@@ -116,6 +116,22 @@ app.use((_req, res, next) => {
 
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
+// ── Honeypot endpoints — real users never hit these ───────────────────────
+// Anyone hitting /api/bulk, /api/batch, /api/vin-list etc is a scraper
+["/api/bulk", "/api/batch", "/api/vin-list", "/api/reports", "/api/export", "/api/download-all"].forEach(path => {
+  app.all(path, (req, res) => {
+    const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip;
+    console.warn(`[Honeypot] Hit by ${ip} — ${req.method} ${path} UA: ${(req.headers["user-agent"] || "").slice(0,80)}`);
+    // Permanently block this IP
+    const entry = suspiciousIps.get(ip) || { count: 0, vins: new Set(), firstSeen: Date.now() };
+    entry.blocked = true;
+    entry.count += 100; // poison the count
+    suspiciousIps.set(ip, entry);
+    // Return a fake 200 to confuse the scraper
+    return res.status(200).json({ success: true, data: [] });
+  });
+});
+
 // TEMP — find outbound IP, delete after getting it
 app.get("/api/myip", async (_req, res) => {
   try {
@@ -238,8 +254,8 @@ const CFC_CREDITS_KEY = "cfc_credits_remaining";
    Auto-switches on daily limit, auth error, 3+ failures (5min cooldown)
 ================================================================ */
 
-// CheapCARFAX (panel.cheapcarfax.net) — sole provider
-const CCF_BASE = "https://panel.cheapcarfax.net/api";
+// CarfaxCheaper config (primary provider)
+const CFC_BASE = "https://carfaxcheaper.com/api/v1";
 
 const providerState = {
   cfc: { failures: 0, lastFailure: null },
@@ -247,89 +263,177 @@ const providerState = {
 const COOLDOWN_MS = 5 * 60 * 1000; // 5 min cooldown after 3 failures
 
 function cfcAvailable() {
-  if (!process.env.CHEAPCARFAX_API_KEY) return false;
+  if (!process.env.CFC_API_KEY) return false;
   const s = providerState.cfc;
   if (s.failures >= 3 && s.lastFailure && (Date.now() - s.lastFailure) < COOLDOWN_MS) {
-    console.log(`[Provider] CheapCARFAX in cooldown after ${s.failures} failures`);
+    console.log(`[Provider] CarfaxCheaper in cooldown after ${s.failures} failures`);
     return false;
   }
   return true;
 }
 
-// Main report fetch entry point — type: "carfax" | "autocheck"
-async function cfcGetReport(vin, type = "carfax") {
+// Main report fetch entry point
+async function cfcGetReport(vin) {
   try {
-    const result = await fetchFromCfc(vin, type);
+    const result = await fetchFromCfc(vin);
     providerState.cfc.failures = 0;
-    console.log(`[Provider] ✓ CheapCARFAX ${type} — VIN: ${vin}`);
+    console.log(`[Provider] ✓ CarfaxCheaper — VIN: ${vin}`);
     return result;
   } catch (err) {
     providerState.cfc.failures++;
     providerState.cfc.lastFailure = Date.now();
-    console.error(`[Provider] CheapCARFAX failed for ${vin}: ${err.message}`);
+    console.error(`[Provider] CarfaxCheaper failed for ${vin}: ${err.message}`);
     throw err;
   }
 }
 
-// ── Fetch from panel.cheapcarfax.net ─────────────────────────────────────────
-async function fetchFromCfc(vin, type = "carfax") {
-  const key = process.env.CHEAPCARFAX_API_KEY;
-  if (!key) throw new Error("CCF_ERROR:CHEAPCARFAX_API_KEY not set");
+// ── Fetch from CarfaxCheaper ─────────────────────────────────────────────────
+async function fetchFromCfc(vin) {
+  const key = process.env.CFC_API_KEY;
+  if (!key) throw new Error("CFC_ERROR:CFC_API_KEY not set");
 
-  const endpoint = type === "autocheck"
-    ? `${CCF_BASE}/autocheck/vin/${vin}/html`
-    : `${CCF_BASE}/carfax/vin/${vin}/html`;
-
-  console.log(`[CheapCARFAX] Fetching ${type} for ${vin}`);
-  const r = await axios.get(endpoint, {
-    headers: { "x-api-key": key },
+  // DEBUG — remove after confirming auth works
+  console.log(`[CarfaxCheaper] Key loaded: ${key ? key.slice(0,12) + "..." : "MISSING"} (len=${key?.length})`);
+  console.log(`[CarfaxCheaper] Fetching ${vin}`);
+  const r = await axios.get(`${CFC_BASE}/report`, {
+    params: { vin },
+    headers: {
+      "X-API-Key": key,
+      "Authorization": `Bearer ${key}`,
+    },
     timeout: 45000,
     validateStatus: () => true,
   });
 
-  console.log(`[CheapCARFAX] Status: ${r.status} for ${vin}`);
-  if (r.status >= 400) console.log(`[CheapCARFAX] Error:`, JSON.stringify(r.data).slice(0, 300));
+  console.log(`[CarfaxCheaper] Status: ${r.status} for ${vin}`);
+  if (r.status >= 400) console.log(`[CarfaxCheaper] Error body:`, JSON.stringify(r.data).slice(0, 300));
 
-  if (r.status === 401) throw new Error("CCF_AUTH_ERROR:Invalid API key");
-  if (r.status === 429) throw new Error("CCF_RATELIMIT:Rate limit exceeded");
-  if (r.status === 400) {
-    const msg = r.data?.message || "";
-    if (/daily limit/i.test(msg))          throw new Error("CCF_DAILY_LIMIT:" + msg);
-    if (/insufficient credits/i.test(msg)) throw new Error("CCF_LIMIT:Insufficient credits");
-    if (/not found/i.test(msg))            throw new Error("CS_404:VIN not found");
-    throw new Error("CCF_400:" + msg);
-  }
-  if (r.status >= 400) throw new Error(`CCF_${r.status}:${JSON.stringify(r.data).slice(0, 100)}`);
+  if (r.status === 401) throw new Error("CFC_AUTH_ERROR:Invalid API key");
+  if (r.status === 402) throw new Error("CFC_LIMIT:Insufficient credits");
+  if (r.status === 404) throw new Error("CS_404:VIN not found");
+  if (r.status === 429) throw new Error("CFC_RATELIMIT:Rate limit exceeded");
+  if (r.status >= 400)  throw new Error(`CFC_${r.status}:${JSON.stringify(r.data).slice(0,100)}`);
 
-  const html = r.data?.html;
-  if (!html) throw new Error("CCF_EMPTY_RESPONSE");
+  if (!r.data?.success) throw new Error(`CFC_ERROR:${r.data?.message || "Unknown error"}`);
 
-  console.log(`[CheapCARFAX] ✓ HTML report for ${vin} (${html.length} chars)`);
+  const data = r.data.data;
+  if (!data || !data.vin) throw new Error("CFC_EMPTY_RESPONSE");
+
+  // Log credits remaining
+  const credits = r.data.meta?.credits_remaining;
+  if (credits !== undefined) console.log(`[CarfaxCheaper] Credits remaining: ${credits}`);
+
+  // Build self-contained HTML from the structured JSON — no CDN dependencies
+  const html = buildReportHtml(data, vin);
   return Buffer.from(html, "utf8").toString("base64");
 }
 
 
+function buildReportHtml(data, vin) {
+  const safe = (v, fallback = "N/A") => v != null ? String(v) : fallback;
+  const yn   = (v) => v ? "Yes" : "No";
 
-/* ================================================================
-   CheapCARFAX API Limits — fetches live credit/limit info from provider
-   Returns null if not available (cfc-dashboard falls back to getCfcCredits)
-================================================================ */
-async function getCfcApiLimits() {
-  try {
-    const key = process.env.CHEAPCARFAX_API_KEY || process.env.CFC_API_KEY;
-    if (!key) return null;
-    const r = await axios.get(`${CCF_BASE}/limits`, {
-      headers: { "x-api-key": key },
-      timeout: 8000,
-      validateStatus: () => true,
-    });
-    if (r.status !== 200 || !r.data) return null;
-    return {
-      credits:                   r.data.credits_remaining ?? r.data.credits ?? null,
-      carfax_reports_left_today: r.data.daily_remaining   ?? r.data.carfax_reports_left_today ?? null,
-      daily_limit:               r.data.daily_limit       ?? 100,
-    };
-  } catch { return null; }
+  const accidents = Array.isArray(data.accident_history) ? data.accident_history : [];
+  const services  = Array.isArray(data.service_history)  ? data.service_history  : [];
+  const owners    = Array.isArray(data.ownership_history)? data.ownership_history : [];
+  const title     = data.title_info || {};
+
+  const accidentRows = accidents.length === 0
+    ? "<tr><td colspan='3' style='text-align:center;color:#16a34a;padding:12px;'>No accidents reported ✓</td></tr>"
+    : accidents.map(a => `<tr>
+        <td>${safe(a.date)}</td>
+        <td>${safe(a.type || a.description)}</td>
+        <td>${safe(a.state || a.location)}</td>
+      </tr>`).join("");
+
+  const serviceRows = services.length === 0
+    ? "<tr><td colspan='3' style='text-align:center;color:#6b7280;padding:12px;'>No service records on file</td></tr>"
+    : services.map(s => `<tr>
+        <td>${safe(s.date)}</td>
+        <td>${safe(s.description || s.type)}</td>
+        <td>${safe(s.mileage ? s.mileage.toLocaleString() + " mi" : null)}</td>
+      </tr>`).join("");
+
+  const ownerRows = owners.length === 0
+    ? "<tr><td colspan='3' style='text-align:center;color:#6b7280;padding:12px;'>Ownership data not available</td></tr>"
+    : owners.map((o, i) => `<tr>
+        <td>Owner ${i + 1}</td>
+        <td>${safe(o.state || o.location)}</td>
+        <td>${safe(o.date_obtained || o.from)} – ${safe(o.date_sold || o.to, "Present")}</td>
+      </tr>`).join("");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Vehicle History Report — ${vin}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;padding:24px;}
+  .header{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:white;padding:24px 32px;border-radius:12px;margin-bottom:24px;}
+  .header h1{font-size:22px;font-weight:800;margin-bottom:4px;}
+  .header p{font-size:13px;opacity:0.8;}
+  .badges{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;}
+  .badge{background:rgba(255,255,255,0.15);padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;}
+  .badge.clean{background:#16a34a;color:white;}
+  .badge.issue{background:#dc2626;color:white;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px;}
+  .stat{background:white;border:1px solid #e2e8f0;border-radius:10px;padding:16px;}
+  .stat-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:4px;}
+  .stat-value{font-size:22px;font-weight:800;color:#1e3a8a;}
+  .section{background:white;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:20px;overflow:hidden;}
+  .section-header{background:#f1f5f9;padding:14px 20px;font-weight:700;font-size:14px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:8px;}
+  table{width:100%;border-collapse:collapse;}
+  th{text-align:left;padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#64748b;background:#f8fafc;border-bottom:1px solid #e2e8f0;}
+  td{padding:10px 16px;font-size:13px;border-bottom:1px solid #f1f5f9;}
+  tr:last-child td{border-bottom:none;}
+  .footer{text-align:center;font-size:11px;color:#94a3b8;margin-top:24px;}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Vehicle History Report</h1>
+  <p>VIN: ${vin} &nbsp;·&nbsp; Generated ${new Date().toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"})}</p>
+  <div class="badges">
+    <span class="badge ${accidents.length === 0 ? "clean" : "issue"}">${accidents.length === 0 ? "✓ No Accidents" : accidents.length + " Accident(s)"}</span>
+    <span class="badge ${title.branded ? "issue" : "clean"}">${title.branded ? "⚠ Branded Title" : "✓ Clean Title"}</span>
+    <span class="badge">${owners.length || "?"} Owner${owners.length !== 1 ? "s" : ""}</span>
+    ${data.mileage ? `<span class="badge">${Number(data.mileage).toLocaleString()} mi</span>` : ""}
+  </div>
+</div>
+
+<div class="grid">
+  <div class="stat"><div class="stat-label">Year</div><div class="stat-value">${safe(data.year)}</div></div>
+  <div class="stat"><div class="stat-label">Make</div><div class="stat-value">${safe(data.make)}</div></div>
+  <div class="stat"><div class="stat-label">Model</div><div class="stat-value">${safe(data.model)}</div></div>
+  <div class="stat"><div class="stat-label">Trim</div><div class="stat-value">${safe(data.trim, "—")}</div></div>
+  <div class="stat"><div class="stat-label">Mileage</div><div class="stat-value">${data.mileage ? Number(data.mileage).toLocaleString() : "—"}</div></div>
+  <div class="stat"><div class="stat-label">Title</div><div class="stat-value" style="font-size:16px;color:${title.branded ? "#dc2626" : "#16a34a"}">${safe(title.status, "Clean")}</div></div>
+</div>
+
+<div class="section">
+  <div class="section-header">🚗 Accident History</div>
+  <table><thead><tr><th>Date</th><th>Type</th><th>State</th></tr></thead>
+  <tbody>${accidentRows}</tbody></table>
+</div>
+
+<div class="section">
+  <div class="section-header">👤 Ownership History</div>
+  <table><thead><tr><th>Owner</th><th>Location</th><th>Period</th></tr></thead>
+  <tbody>${ownerRows}</tbody></table>
+</div>
+
+<div class="section">
+  <div class="section-header">🔧 Service History</div>
+  <table><thead><tr><th>Date</th><th>Service</th><th>Mileage</th></tr></thead>
+  <tbody>${serviceRows}</tbody></table>
+</div>
+
+<div class="footer">Report provided by AutoVINReveal · Data sourced from national vehicle history database · VIN: ${vin}</div>
+</body>
+</html>`;
 }
 
 /* ================================================================
@@ -857,7 +961,93 @@ app.use(cookieParser());
 app.use(cors({ origin: ALLOWED_ORIGIN, credentials: false }));
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+// General API rate limit
 app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
+
+// ── Anti-scraping: strict per-IP limit on /api/report ──────────────────────
+// Legitimate users run 1-5 reports. Scrapers run hundreds.
+const reportRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,   // 1 hour window
+  max: 10,                     // max 10 report requests per IP per hour
+  keyGenerator: (req) => {
+    // Use forwarded IP (Render passes real IP in x-forwarded-for)
+    return req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip;
+  },
+  message: { error: "rate_limited", message: "Too many requests. Please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // Don't rate limit Render health checks
+    return req.path === "/health";
+  },
+});
+
+// ── Track suspicious VIN patterns across requests ─────────────────────────
+const suspiciousIps = new Map(); // ip → { count, firstSeen, blocked }
+
+function trackSuspicion(ip, vin) {
+  const now = Date.now();
+  const entry = suspiciousIps.get(ip) || { count: 0, vins: new Set(), firstSeen: now, blocked: false };
+  entry.count++;
+  entry.vins.add(vin);
+  entry.lastSeen = now;
+
+  // Auto-block if: 20+ unique VINs in 1 hour from same IP
+  if (entry.vins.size >= 20 && (now - entry.firstSeen) < 60 * 60 * 1000) {
+    entry.blocked = true;
+    console.warn(`[AntiScrape] BLOCKED IP ${ip} — ${entry.vins.size} unique VINs in ${Math.round((now - entry.firstSeen)/60000)}min`);
+  }
+  suspiciousIps.set(ip, entry);
+  return entry.blocked;
+}
+
+// ── Manually blocked IPs (add from your Render logs when you spot investigators)
+// To block an IP: add it to your .env as BLOCKED_IPS=1.2.3.4,5.6.7.8
+const BLOCKED_EMAIL_DOMAINS = [
+  "carfax.com",
+  "spglobal.com",
+  "ihsmarkit.com",
+  "experian.com",
+];
+
+function getBlockedIps() {
+  return (process.env.BLOCKED_IPS || "").split(",").map(s => s.trim()).filter(Boolean);
+}
+
+function isBlockedIp(ip) {
+  return getBlockedIps().some(blocked => ip.startsWith(blocked));
+}
+
+function isBlockedEmail(email) {
+  if (!email) return false;
+  const domain = email.split("@")[1]?.toLowerCase() || "";
+  return BLOCKED_EMAIL_DOMAINS.includes(domain);
+}
+
+// ── Log every guest report purchase with full fingerprint ─────────────────
+// This is how you identify CARFAX investigators:
+// same IP buying single reports across multiple days, always different VINs
+const guestPurchaseLog = new Map(); // ip → [{ vin, ts, email, ua }]
+
+function logGuestPurchase(ip, vin, email, ua) {
+  const log = guestPurchaseLog.get(ip) || [];
+  log.push({ vin, ts: Date.now(), email: email || "", ua: (ua||"").slice(0,100) });
+  guestPurchaseLog.set(ip, log);
+
+  // Flag if same IP bought 3+ reports across sessions (even as guest)
+  if (log.length >= 3) {
+    const uniqueVins = new Set(log.map(l => l.vin));
+    console.warn(`[InvestigatorFlag] IP ${ip} has run ${uniqueVins.size} unique VINs as guest. Emails: ${[...new Set(log.map(l=>l.email))].join(", ")}`);
+  }
+}
+
+// Clean up old entries every hour
+setInterval(() => {
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+  for (const [ip, entry] of suspiciousIps) {
+    if (entry.lastSeen < cutoff) suspiciousIps.delete(ip);
+  }
+}, 60 * 60 * 1000);
 
 const paypalCaptureLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: "Too many PayPal requests" });
 
@@ -880,14 +1070,31 @@ async function verifyPaypalCapture(captureId) {
 reconcileStalePendingCharges();
 
 // Log provider configuration on startup
-console.log(`[Provider] CheapCarfax.net configured: ${!!process.env.CHEAPCARFAX_API_KEY}`);
-console.log(`[Provider] CheapCarfax.net ready — credits tracked per API response`);
+console.log(`[Provider] CarfaxCheaper configured: ${!!process.env.CFC_API_KEY}`);
+console.log(`[Provider] CarfaxCheaper ready — credits tracked per API response`);
 
 /* ================================================================
    Stripe Checkout
 ================================================================ */
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
+    // ── Cloudflare Turnstile verification ──────────────────────────────────
+    // Blocks headless bots before they can reach Stripe
+    const turnstileToken = req.body?.turnstile_token;
+    if (process.env.TURNSTILE_SECRET_KEY) {
+      if (!turnstileToken) {
+        return res.status(403).json({ error: "captcha_required", message: "Please complete the verification." });
+      }
+      const verifyRes = await axios.post("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+        secret:   process.env.TURNSTILE_SECRET_KEY,
+        response: turnstileToken,
+        remoteip: req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip,
+      });
+      if (!verifyRes.data?.success) {
+        console.warn(`[Turnstile] Failed verification from ${req.ip}. Errors: ${JSON.stringify(verifyRes.data?.["error-codes"])}`);
+        return res.status(403).json({ error: "captcha_failed", message: "Verification failed. Please try again." });
+      }
+    }
     const { user_id: userIdFromBody, price_id, vin, report_type } = req.body || {};
 
     if (vin) {
@@ -930,8 +1137,18 @@ app.post("/api/create-checkout-session", async (req, res) => {
         ...(vin         ? { vin }              : {}),
         ...(report_type ? { report_type }      : {}),
         intent,
+        // Fingerprint every checkout so guest investigators are traceable
+        client_ip: req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || "",
+        client_ua: (req.headers["user-agent"] || "").slice(0, 200),
       },
     });
+
+    // Log guest purchases for investigator detection
+    if (!userId && vin) {
+      const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip;
+      logGuestPurchase(ip, vin, "", req.headers["user-agent"]);
+      console.log(`[GuestPurchase] IP: ${ip} VIN: ${vin} UA: ${(req.headers["user-agent"]||"").slice(0,80)}`);
+    }
 
     res.json({ url: session.url });
   } catch (err) {
@@ -1122,7 +1339,7 @@ app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => 
 /* ================================================================
    Main Report Logic
 ================================================================ */
-app.post("/api/report", async (req, res) => {
+app.post("/api/report", reportRateLimit, async (req, res) => {
   let targetVin       = "";
   let type            = "carfax";
   let currentUser     = null;
@@ -1151,6 +1368,37 @@ app.post("/api/report", async (req, res) => {
     const v = validateVin(targetVin);
     if (!v.ok) return res.status(422).json({ error: "invalid_vin", reason: v.code, message: v.msg });
     targetVin = v.vin;
+
+    // 2b. Anti-scraping checks
+    const clientIp = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip;
+    const ua = req.headers["user-agent"] || "";
+
+    // Block missing or bot-like User-Agents
+    const suspiciousUA = !ua ||
+      /python-requests|curl|wget|scrapy|go-http|java\/|libwww|axios\/[0-9]|node-fetch|bot|spider|crawl/i.test(ua);
+    if (suspiciousUA) {
+      console.warn(`[AntiScrape] Blocked suspicious UA from ${clientIp}: "${ua.slice(0, 80)}"`);
+      return res.status(403).json({ error: "forbidden", message: "Access denied." });
+    }
+
+    // Block if this IP has been auto-blocked for scraping
+    if (trackSuspicion(clientIp, targetVin)) {
+      return res.status(429).json({ error: "rate_limited", message: "Too many requests." });
+    }
+
+    // Block known CARFAX/investigator IPs silently — return fake success with no data
+    if (isBlockedIp(clientIp)) {
+      console.warn(`[AntiCAR] Blocked known investigator IP: ${clientIp} VIN: ${targetVin}`);
+      // Return fake 200 so they don't know they're blocked
+      return res.status(200).send("<html><body><p>Report loading...</p></body></html>");
+    }
+
+    // Require either a logged-in user OR a valid one-time session
+    // No anonymous free-for-all lookups
+    const { user: earlyUser } = await getUser(req);
+    if (!earlyUser && !oneTimeSession) {
+      return res.status(401).json({ error: "auth_required", message: "Please log in to run reports." });
+    }
 
     // 3. Check cache
     let raw = await getReportData(targetVin, type);
@@ -1211,7 +1459,7 @@ app.post("/api/report", async (req, res) => {
       }
 
       try {
-        const live = await cfcGetReport(targetVin, type);
+        const live = await cfcGetReport(targetVin);
         raw = live;
         writeCache(targetVin, type, raw);
 
@@ -1289,8 +1537,19 @@ app.post("/api/report", async (req, res) => {
 
     if (decoded.kind === "html") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      // BLANK-PAGE FIX: strip Adobe DTM and inject nav guard before delivery
-      return res.send(injectReportChrome(decoded.html));
+      let reportHtml = injectReportChrome(decoded.html);
+
+      // ── Invisible watermark — ties every served report to the user ──────
+      // Even if CARFAX screenshots or scrapes the rendered report,
+      // the watermark proves it came from a specific AutoVINReveal account.
+      const userLabel = currentUser?.email || currentUser?.id || oneTimeSession || "guest";
+      const watermark = `<!-- avr:${userLabel}:${targetVin}:${Date.now()} -->` +
+        `<span style="position:fixed;bottom:-9999px;left:-9999px;opacity:0;font-size:1px;pointer-events:none;user-select:none;" aria-hidden="true">` +
+        `avr-report:${Buffer.from(userLabel).toString("base64")}:${targetVin}` +
+        `</span>`;
+      reportHtml = reportHtml.replace("</body>", watermark + "</body>");
+
+      return res.send(reportHtml);
     }
 
     if (decoded.kind === "pdf") {
@@ -1419,76 +1678,6 @@ app.get("/api/history", async (req, res) => {
     }
     res.json({ ok: true, rows: data || [] });
   } catch { res.status(500).json({ error: "Server error" }); }
-});
-
-/* ================================================================
-   Dashboard — stats, recent reports, chart data for dashboard.html
-================================================================ */
-app.get("/api/dashboard", async (req, res) => {
-  try {
-    const { user } = await getUser(req);
-    if (!user) return res.status(401).json({ error: "unauthorized" });
-
-    // Run all queries in parallel
-    const [queriesRes, creditsRes] = await Promise.all([
-      supabaseService
-        .from("vin_queries")
-        .select("vin, type, created_at")
-        .eq("user_id", user.id)
-        .eq("success", true)
-        .order("created_at", { ascending: false })
-        .limit(500),
-      supabaseService
-        .from("credits")
-        .select("balance, plan")
-        .eq("user_id", user.id)
-        .maybeSingle(),
-    ]);
-
-    const rows    = queriesRes.data  || [];
-    const credits = creditsRes.data  || {};
-
-    // Stats
-    const now       = new Date();
-    const thisMonth = rows.filter(r => {
-      const d = new Date(r.created_at);
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    }).length;
-
-    // Monthly breakdown (last 6 months) — { "2026-04": 3, ... }
-    const monthly = {};
-    for (let i = 5; i >= 0; i--) {
-      const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      monthly[key] = 0;
-    }
-    rows.forEach(r => {
-      const d   = new Date(r.created_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      if (key in monthly) monthly[key]++;
-    });
-
-    // Top VINs
-    const vinCounts = {};
-    rows.forEach(r => { vinCounts[r.vin] = (vinCounts[r.vin] || 0) + 1; });
-    const topVins = Object.entries(vinCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([vin, count]) => ({ vin, count }));
-
-    res.json({
-      balance:       credits.balance     ?? 0,
-      plan:          credits.plan        || null,
-      totalReports:  rows.length,
-      thisMonth,
-      monthly,
-      topVins,
-      recentReports: rows.slice(0, 20),
-    });
-  } catch (err) {
-    console.error("[/api/dashboard]", err);
-    res.status(500).json({ error: "Server error" });
-  }
 });
 
 /* ================================================================
@@ -1768,7 +1957,7 @@ app.get("/api/cfc-dashboard", async (req, res) => {
     const [ccfLimits, cfcCredits] = await Promise.all([getCfcApiLimits(), getCfcCredits()]);
     const credits = ccfLimits !== null ? ccfLimits.credits : cfcCredits;
     const ccfDailyLeft = ccfLimits?.carfax_reports_left_today ?? null;
-    const ccfDailyLimit = ccfLimits?.daily_limit ?? 100;
+    const ccfDailyLimit = ccfLimits?.daily_limit ?? Number(process.env.CCF_DAILY_HARD_LIMIT || 100);
 
     // All-time report stats
     const { data: allReports } = await supabaseService
