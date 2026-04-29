@@ -833,12 +833,6 @@
                 </div>
                 <p class="hidden sm:block text-xs text-gray-500 mt-1">One-time check. No account needed.</p>
               </div>
-              <!-- Cloudflare Turnstile — invisible bot check before payment -->
-              <div class="cf-turnstile mb-3" 
-                data-sitekey="0x4AAAAAADFQrzxC7-PNSl1X"
-                data-theme="light"
-                data-size="normal"></div>
-
               <button id="buy1Btn"
                 class="w-full flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
@@ -896,6 +890,14 @@
               </div>
             </div>
 
+          </div>
+
+          <div class="mt-4 flex justify-center">
+            <!-- Cloudflare Turnstile — invisible bot check before $6 payment -->
+            <div class="cf-turnstile"
+              data-sitekey="0x4AAAAAADFQrzxC7-PNSl1X"
+              data-theme="light"
+              data-size="normal"></div>
           </div>
 
           <div class="mt-5 flex flex-wrap items-center justify-center gap-4 text-[11px] text-gray-400">
