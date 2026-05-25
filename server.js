@@ -326,6 +326,27 @@ async function fetchFromCfc(vin, type = "carfax") {
 
 
 /* ================================================================
+   CheapCARFAX API Limits — fetches live credit/limit info from provider
+================================================================ */
+async function getCfcApiLimits() {
+  try {
+    const key = process.env.CHEAPCARFAX_API_KEY;
+    if (!key) return null;
+    const r = await axios.get(`${CCF_BASE}/limits`, {
+      headers: { "x-api-key": key },
+      timeout: 8000,
+      validateStatus: () => true,
+    });
+    if (r.status !== 200 || !r.data) return null;
+    return {
+      credits:                   r.data.credits_remaining ?? r.data.credits ?? null,
+      carfax_reports_left_today: r.data.daily_remaining   ?? r.data.carfax_reports_left_today ?? null,
+      daily_limit:               r.data.daily_limit       ?? Number(process.env.CCF_DAILY_HARD_LIMIT || 100),
+    };
+  } catch { return null; }
+}
+
+/* ================================================================
    CFC Credit Counter
    Tracks remaining CFC API report credits in Supabase app_settings.
    Starts at 195, decrements by 1 on every live report fetch.
@@ -983,22 +1004,27 @@ app.post("/api/create-checkout-session", async (req, res) => {
       if (!turnstileToken) {
         return res.status(403).json({ error: "captcha_required", message: "Please complete the verification." });
       }
-      const verifyParams = new URLSearchParams();
-      verifyParams.append("secret",   process.env.TURNSTILE_SECRET_KEY);
-      verifyParams.append("response", turnstileToken);
-      verifyParams.append("remoteip", req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || "");
-      const verifyRes = await axios.post(
-        "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-        verifyParams.toString(),
-        {
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          validateStatus: () => true,
-          timeout: 8000,
+      try {
+        const verifyParams = new URLSearchParams();
+        verifyParams.append("secret",   process.env.TURNSTILE_SECRET_KEY);
+        verifyParams.append("response", turnstileToken);
+        verifyParams.append("remoteip", req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || "");
+        const verifyRes = await axios.post(
+          "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+          verifyParams.toString(),
+          {
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            validateStatus: () => true,
+            timeout: 8000,
+          }
+        );
+        if (!verifyRes.data?.success) {
+          console.warn(`[Turnstile] Failed from ${req.ip}. Errors: ${JSON.stringify(verifyRes.data?.["error-codes"])}`);
+          return res.status(403).json({ error: "captcha_failed", message: "Verification failed. Please try again." });
         }
-      );
-      if (!verifyRes.data?.success) {
-        console.warn(`[Turnstile] Failed verification from ${req.ip}. Errors: ${JSON.stringify(verifyRes.data?.["error-codes"])}`);
-        return res.status(403).json({ error: "captcha_failed", message: "Verification failed. Please try again." });
+      } catch (turnstileErr) {
+        // Cloudflare unreachable — log and allow through rather than blocking real users
+        console.error(`[Turnstile] Verification request failed: ${turnstileErr.message} — allowing through`);
       }
     }
     const { user_id: userIdFromBody, price_id, vin, report_type } = req.body || {};
@@ -1927,7 +1953,7 @@ Maximum 2 sentences per reply unless you are asking follow-up questions.
 Never start with "Great question!" or "Good question!" or "Of course!" - just answer.
 
 FACTS - never say anything outside this list:
-Single report is $6 and needs no account. 5-pack is $20 ($4 each) and needs an account. 20-pack is $58 ($2.90 each) and needs an account.
+Single report is $5.99 and needs no account. 5-pack is $20 ($4 each) and needs an account. 20-pack is $58 ($2.90 each) and needs an account.
 Monthly plans: Starter $30/mo for 20 reports, Pro $98/mo for 100 reports, Premium $160/mo for 200 reports.
 Reports cover accidents, odometer rollbacks, title issues, service records, open recalls.
 Search by VIN or license plate plus state. Credits never expire. Pay by card or PayPal.
