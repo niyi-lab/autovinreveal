@@ -4,26 +4,31 @@
   <!-- Core pages -->
   <url>
     <loc>https://www.autovinreveal.com/</loc>
+    <lastmod>2026-05-25</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
     <loc>https://www.autovinreveal.com/history.html</loc>
-    <changefreq>monthly</changefreq>    
+    <lastmod>2026-05-25</lastmod>
+    <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://www.autovinreveal.com/dashboard.html</loc>
+    <lastmod>2026-05-25</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://www.autovinreveal.com/terms.html</loc>
+    <lastmod>2026-05-25</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
     <loc>https://www.autovinreveal.com/privacy.html</loc>
+    <lastmod>2026-05-25</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
@@ -31,6 +36,7 @@
   <!-- Blog index -->
   <url>
     <loc>https://www.autovinreveal.com/blog/</loc>
+    <lastmod>2026-05-25</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>

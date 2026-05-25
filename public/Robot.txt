@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+# Block private pages from indexing
+Disallow: /admin
+Disallow: /api/
+Disallow: /cfc-dashboard.html
+Disallow: /success.html
+
+Sitemap: https://www.autovinreveal.com/sitemap.xml
