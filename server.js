@@ -1048,6 +1048,11 @@ app.post("/api/create-checkout-session", async (req, res) => {
     if (isTwentyPack)    { priceLive = PRICE_20PACK; intent = "buy_credits_20pack"; }
     else if (isFivePack) { priceLive = PRICE_5PACK;  intent = "buy_credits_5pack"; }
 
+    if (!priceLive) {
+      console.error(`[Stripe] Price ID missing — price_id:${price_id} PRICE_SINGLE:${PRICE_SINGLE} PRICE_5PACK:${PRICE_5PACK} PRICE_20PACK:${PRICE_20PACK}`);
+      return res.status(500).json({ error: "price_not_configured", message: "Payment configuration error. Please contact support." });
+    }
+
     const session = await stripeDefault.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -1084,8 +1089,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
     res.json({ url: session.url });
   } catch (err) {
-    console.error("Stripe checkout error:", err);
-    res.status(500).json({ error: "Stripe error" });
+    console.error("Stripe checkout error:", err?.message || err);
+    const msg = err?.message || "Stripe error";
+    res.status(500).json({ error: "stripe_error", message: msg });
   }
 });
 
