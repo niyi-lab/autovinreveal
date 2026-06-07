@@ -23,7 +23,7 @@
  *   #P  — FIX-4: getReportData filters by report type in DB
  *   #Q  — FIX-5: paypalCaptureLimiter on create-order too
  *
- * FIXES IN THIS VERSION:
+ * PREVIOUS FIXES:
  *   BLANK-PAGE — injectReportChrome() strips Adobe DTM analytics
  *                scripts before HTML delivery. DTM reads
  *                document.currentScript.src at init time; when served
@@ -37,6 +37,18 @@
  *                CheapCARFAX API. Falls back to a link email if
  *                button) and attaches it. Falls back to a styled link
  *                email if PDF generation fails.
+ *
+ * FIXES IN THIS VERSION:
+ *   B64-DOUBLE — Reports.VIN returns the report ALREADY base64-encoded.
+ *                fetchFromReportsVin() was wrapping that string in
+ *                Buffer.from(html).toString("base64") a SECOND time, so
+ *                decodeReportBase64() (which only decodes once) handed a
+ *                still-base64 string to the iframe — rendering a wall of
+ *                random letters/numbers instead of the report.
+ *                New coerceReportToBase64() detects raw-HTML vs base64 and
+ *                always returns base64-of-the-real-content, so the single
+ *                decode yields usable HTML/PDF. Applied to both the live
+ *                fetch and the archive-hit path.
  ********************************************************************/
 
 import dotenv from "dotenv";
@@ -249,13 +261,16 @@ const CFC_CREDITS_KEY = "cfc_credits_remaining";
 
 
 /* ================================================================
-   Smart Provider Switching
-   Active provider: CheapCARFAX (CCF) only.
-   Auto-switches on daily limit, auth error, 3+ failures (5min cooldown)
+   Reports.VIN — sole provider
+   Base: https://api.reports.vin/v1
+   Auth: API-KEY header
+   Endpoints used:
+     GET /v1/getrecord/carfax/:vin  — fetch report HTML
+     GET /v1/balance                — credit balance
 ================================================================ */
 
-// CheapCARFAX (panel.cheapcarfax.net) — sole provider
-const CCF_BASE = "https://panel.cheapcarfax.net/api";
+// Reports.VIN — sole provider
+const CCF_BASE = process.env.REPORTSVIN_BASE || "https://api.reports.vin/v1";
 
 const providerState = {
   cfc: { failures: 0, lastFailure: null },
@@ -263,85 +278,209 @@ const providerState = {
 const COOLDOWN_MS = 5 * 60 * 1000; // 5 min cooldown after 3 failures
 
 function cfcAvailable() {
-  if (!process.env.CHEAPCARFAX_API_KEY) return false;
+  if (!process.env.REPORTSVIN_API_KEY) return false;
   const s = providerState.cfc;
   if (s.failures >= 3 && s.lastFailure && (Date.now() - s.lastFailure) < COOLDOWN_MS) {
-    console.log(`[Provider] CheapCARFAX in cooldown after ${s.failures} failures`);
+    console.log(`[Provider] Reports.VIN in cooldown after ${s.failures} failures`);
     return false;
   }
   return true;
 }
 
+/* ----------------------------------------------------------------
+   coerceReportToBase64() — B64-DOUBLE FIX
+
+   The internal report format (cache + DB) is base64-of-the-real-bytes.
+   decodeReportBase64() decodes EXACTLY ONCE, then sniffs gzip / PDF /
+   HTML. So whatever we return here must be base64 of the actual
+   HTML/PDF/gzip — NOT base64 of a base64 string.
+
+   Reports.VIN returns the report ALREADY base64-encoded. The old code
+   did Buffer.from(content).toString("base64") on that string, encoding
+   it a second time. The single decode downstream then produced the
+   still-base64 string, which the iframe rendered as a wall of random
+   letters and numbers.
+
+   This helper figures out what we actually received:
+     • raw HTML / markup  → encode once
+     • already base64     → keep as-is (after a decode sanity-check)
+     • anything else      → encode once (safe fallback)
+---------------------------------------------------------------- */
+function coerceReportToBase64(content) {
+  if (Buffer.isBuffer(content)) {
+    return content.toString("base64");
+  }
+  if (typeof content !== "string") {
+    return Buffer.from(String(content), "utf8").toString("base64");
+  }
+
+  const trimmed = content.trim();
+  const head    = trimmed.slice(0, 4000);
+
+  // 1. Looks like raw HTML / markup → it's the real content, encode once.
+  if (/<\s*(!doctype|html|head|body|div|span|table|script|meta|section|main|article|p\b|h[1-6]\b|svg)/i.test(head)) {
+    return Buffer.from(content, "utf8").toString("base64");
+  }
+
+  // 2. Pure base64 charset (no angle brackets, only A–Z a–z 0–9 + / =).
+  //    Reports.VIN already base64-encoded it — store as-is, but verify it
+  //    decodes to something usable so we don't pass through garbage.
+  const compact = trimmed.replace(/\s+/g, "");
+  if (compact.length > 100 && /^[A-Za-z0-9+/]+={0,2}$/.test(compact)) {
+    try {
+      const buf     = Buffer.from(compact, "base64");
+      const isGzip  = buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
+      const isPdf   = buf.slice(0, 5).toString("utf8") === "%PDF-";
+      const decoded = buf.slice(0, 3000).toString("utf8");
+      const isHtml  = /<\s*(!doctype|html|head|body|div|script|meta)/i.test(decoded);
+      if (isGzip || isPdf || isHtml) {
+        console.log(`[Reports.VIN] Detected pre-encoded base64 (${isGzip ? "gzip" : isPdf ? "pdf" : "html"}) — not re-encoding`);
+        return compact;
+      }
+    } catch (_) { /* fall through */ }
+  }
+
+  // 3. Fallback — treat whatever we got as raw content and encode once.
+  return Buffer.from(content, "utf8").toString("base64");
+}
+
 // Main report fetch entry point — type: "carfax" | "autocheck"
 async function cfcGetReport(vin, type = "carfax") {
   try {
-    const result = await fetchFromCfc(vin, type);
+    const result = await fetchFromReportsVin(vin, type);
     providerState.cfc.failures = 0;
-    console.log(`[Provider] ✓ CheapCARFAX ${type} — VIN: ${vin}`);
+    console.log(`[Provider] ✓ Reports.VIN ${type} — VIN: ${vin}`);
     return result;
   } catch (err) {
     providerState.cfc.failures++;
     providerState.cfc.lastFailure = Date.now();
-    console.error(`[Provider] CheapCARFAX failed for ${vin}: ${err.message}`);
+    console.error(`[Provider] Reports.VIN failed for ${vin}: ${err.message}`);
     throw err;
   }
 }
 
-// ── Fetch from panel.cheapcarfax.net ─────────────────────────────────────────
-async function fetchFromCfc(vin, type = "carfax") {
-  const key = process.env.CHEAPCARFAX_API_KEY;
-  if (!key) throw new Error("CCF_ERROR:CHEAPCARFAX_API_KEY not set");
+// ── Fetch from api.reports.vin ───────────────────────────────────────────────
+async function fetchFromReportsVin(vin, type = "carfax") {
+  const key = process.env.REPORTSVIN_API_KEY;
+  if (!key) throw new Error("RV_ERROR:REPORTSVIN_API_KEY not set");
 
-  const endpoint = type === "autocheck"
-    ? `${CCF_BASE}/autocheck/vin/${vin}/html`
-    : `${CCF_BASE}/carfax/vin/${vin}/html`;
+  // 1. Check archive first — if report already cached on their end, use it (saves a credit)
+  try {
+    const archiveR = await axios.get(`${CCF_BASE}/archive/${vin}`, {
+      headers: { "API-KEY": key },
+      timeout: 8000,
+      validateStatus: () => true,
+    });
+    if (archiveR.status === 200 && archiveR.data && archiveR.data?.status !== "error" && archiveR.data?.status !== "failed") {
+      let html = null;
+      if (typeof archiveR.data === "string" && archiveR.data.length > 100) {
+        html = archiveR.data;
+      } else if (archiveR.data?.html)    { html = archiveR.data.html; }
+      else if (archiveR.data?.report)    { html = archiveR.data.report; }
+      else if (archiveR.data?.content)   { html = archiveR.data.content; }
+      if (html) {
+        console.log(`[Reports.VIN] ✓ Archive hit for ${vin} — no credit consumed`);
+        // B64-DOUBLE FIX: coerce instead of blindly re-encoding
+        return coerceReportToBase64(html);
+      }
+    }
+    console.log(`[Reports.VIN] Archive status ${archiveR.status} for ${vin} — raw: ${JSON.stringify(archiveR.data).slice(0, 200)}`);
+  } catch (archiveErr) {
+    console.log(`[Reports.VIN] Archive miss for ${vin}: ${archiveErr.message}`);
+  }
 
-  console.log(`[CheapCARFAX] Fetching ${type} for ${vin}`);
+  // 2. Live fetch — consumes a credit
+  const endpoint = `${CCF_BASE}/getrecord/carfax/${vin}`;
+  console.log(`[Reports.VIN] Live fetch: GET ${endpoint}`);
+
   const r = await axios.get(endpoint, {
-    headers: { "x-api-key": key },
+    headers: { "API-KEY": key },
     timeout: 45000,
     validateStatus: () => true,
   });
 
-  console.log(`[CheapCARFAX] Status: ${r.status} for ${vin}`);
-  if (r.status >= 400) console.log(`[CheapCARFAX] Error:`, JSON.stringify(r.data).slice(0, 300));
-
-  if (r.status === 401) throw new Error("CCF_AUTH_ERROR:Invalid API key");
-  if (r.status === 429) throw new Error("CCF_RATELIMIT:Rate limit exceeded");
-  if (r.status === 400) {
-    const msg = r.data?.message || "";
-    if (/daily limit/i.test(msg))          throw new Error("CCF_DAILY_LIMIT:" + msg);
-    if (/insufficient credits/i.test(msg)) throw new Error("CCF_LIMIT:Insufficient credits");
-    if (/not found/i.test(msg))            throw new Error("CS_404:VIN not found");
-    throw new Error("CCF_400:" + msg);
+  console.log(`[Reports.VIN] Status: ${r.status} for ${vin}`);
+  // Always log response body on non-200 so we can debug
+  if (r.status !== 200) {
+    console.log(`[Reports.VIN] Response body:`, JSON.stringify(r.data).slice(0, 500));
   }
-  if (r.status >= 400) throw new Error(`CCF_${r.status}:${JSON.stringify(r.data).slice(0, 100)}`);
 
-  const html = r.data?.html;
-  if (!html) throw new Error("CCF_EMPTY_RESPONSE");
+  if (r.status === 401) throw new Error("RV_AUTH_ERROR:Invalid API key");
+  if (r.status === 402) throw new Error("RV_LIMIT:Insufficient credits");
+  if (r.status === 429) throw new Error("RV_RATELIMIT:Rate limit exceeded");
+  if (r.status === 404) throw new Error("CS_404:VIN not found");
+  if (r.status === 400) {
+    const msg = (r.data?.message || r.data?.error || JSON.stringify(r.data) || "").toString();
+    if (/daily limit/i.test(msg))     throw new Error("RV_DAILY_LIMIT:" + msg);
+    if (/insufficient/i.test(msg))    throw new Error("RV_LIMIT:" + msg);
+    if (/not found/i.test(msg))       throw new Error("CS_404:VIN not found");
+    throw new Error("RV_400:" + msg);
+  }
+  if (r.status >= 400) throw new Error(`RV_${r.status}:${JSON.stringify(r.data).slice(0, 200)}`);
 
-  console.log(`[CheapCARFAX] ✓ HTML report for ${vin} (${html.length} chars)`);
-  return Buffer.from(html, "utf8").toString("base64");
+  // Reports.VIN returns 200 with {"status":"error","message":"..."} on auth/other errors
+  if (r.data?.status === "error" || r.data?.status === "failed") {
+    const msg = r.data?.message || r.data?.error || "Unknown error";
+    console.error(`[Reports.VIN] API error in 200 response: ${msg}`);
+    if (/invalid.*api|api.*key|api.*secret|unauthorized/i.test(msg)) {
+      throw new Error("RV_AUTH_ERROR:Invalid API key — check REPORTSVIN_API_KEY in Render env");
+    }
+    if (/credit|balance|insufficient/i.test(msg)) throw new Error("RV_LIMIT:" + msg);
+    if (/not found/i.test(msg))                   throw new Error("CS_404:VIN not found");
+    throw new Error("RV_API_ERROR:" + msg);
+  }
+
+  // Response may be a raw HTML string, a base64 string, or JSON with a field.
+  let html = null;
+  if (typeof r.data === "string" && r.data.length > 100) {
+    // Accept any non-empty string — could be raw HTML OR base64.
+    // coerceReportToBase64() figures out which.
+    html = r.data;
+  } else if (r.data?.html)      { html = r.data.html; }
+  else if (r.data?.report)      { html = r.data.report; }
+  else if (r.data?.content)     { html = r.data.content; }
+  else if (r.data?.data?.html)  { html = r.data.data.html; }
+  else if (r.data?.file)        { html = r.data.file; }
+  else if (r.data?.carfax)      { html = r.data.carfax; }
+  else if (r.data?.result)      { html = r.data.result; }
+  else if (r.data?.body)        { html = r.data.body; }
+  else if (r.data?.page)        { html = r.data.page; }
+  else if (r.data?.base64)      { html = r.data.base64; }
+  else if (r.data?.data?.base64){ html = r.data.data.base64; }
+
+  if (!html) {
+    console.error(`[Reports.VIN] 200 but no report payload — type: ${typeof r.data}`);
+    console.error(`[Reports.VIN] Keys: ${Object.keys(r.data || {}).join(", ")}`);
+    console.error(`[Reports.VIN] Body: ${JSON.stringify(r.data).slice(0, 800)}`);
+    throw new Error("RV_EMPTY_RESPONSE");
+  }
+
+  console.log(`[Reports.VIN] ✓ Report payload for ${vin} (${html.length} chars)`);
+  // B64-DOUBLE FIX: coerce instead of blindly re-encoding
+  return coerceReportToBase64(html);
 }
+
+// ── fetchFromCfc alias — kept for any internal callers ───────────────────────
+const fetchFromCfc = fetchFromReportsVin;
 
 
 /* ================================================================
-   CheapCARFAX API Limits — fetches live credit/limit info from provider
+   Reports.VIN API Limits — fetches live credit balance
 ================================================================ */
 async function getCfcApiLimits() {
   try {
-    const key = process.env.CHEAPCARFAX_API_KEY;
+    const key = process.env.REPORTSVIN_API_KEY;
     if (!key) return null;
-    const r = await axios.get(`${CCF_BASE}/limits`, {
-      headers: { "x-api-key": key },
+    const r = await axios.get(`${CCF_BASE}/balance`, {
+      headers: { "API-KEY": key },
       timeout: 8000,
       validateStatus: () => true,
     });
     if (r.status !== 200 || !r.data) return null;
     return {
-      credits:                   r.data.credits_remaining ?? r.data.credits ?? null,
-      carfax_reports_left_today: r.data.daily_remaining   ?? r.data.carfax_reports_left_today ?? null,
-      daily_limit:               r.data.daily_limit       ?? Number(process.env.CCF_DAILY_HARD_LIMIT || 100),
+      credits:                   r.data.balance ?? r.data.credits ?? r.data.credits_remaining ?? null,
+      carfax_reports_left_today: r.data.daily_remaining ?? r.data.carfax_reports_left_today ?? null,
+      daily_limit:               r.data.daily_limit ?? Number(process.env.CCF_DAILY_HARD_LIMIT || 100),
     };
   } catch { return null; }
 }
@@ -395,6 +534,7 @@ async function getReportData(vin, type) {
   const v = (vin  || "").toUpperCase();
   const t = (type || "").toLowerCase();
 
+  // 1. File cache (ephemeral — 30 day TTL)
   const filePath = ck(v, t);
   if (fs.existsSync(filePath)) {
     try {
@@ -407,6 +547,7 @@ async function getReportData(vin, type) {
     } catch (err) { console.error("Cache file check failed:", err); }
   }
 
+  // 2. Supabase DB — 30 day TTL. Reports older than 30 days require re-purchase.
   try {
     const { data } = await supabaseService
       .from("vin_queries")
@@ -421,7 +562,7 @@ async function getReportData(vin, type) {
     if (data?.report_data) {
       const age = Date.now() - new Date(data.created_at).getTime();
       if (age < MAX_AGE_MS) {
-        writeCache(v, t, data.report_data);
+        try { writeCache(v, t, data.report_data); } catch (_) {}
         return data.report_data;
       }
     }
@@ -432,14 +573,17 @@ async function getReportData(vin, type) {
 
 function decodeReportBase64(rawB64) {
   const buf = Buffer.from(rawB64, "base64");
+  // Gzip compressed HTML
   if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
     try { return { kind: "html", html: gunzipSync(buf).toString("utf8") }; }
     catch { return { kind: "unknown", buffer: buf, error: "gunzip-failed" }; }
   }
+  // PDF
   if (buf.slice(0, 5).toString() === "%PDF-") return { kind: "pdf", buffer: buf };
+  // Treat everything else as HTML — different providers use different starting tags
+  // (some start with <!DOCTYPE, some with <html, some with a script or comment)
   const asText = buf.toString("utf8");
-  if (/<!DOCTYPE html|<html|div class=|body>/i.test(asText.slice(0, 2048)))
-    return { kind: "html", html: asText };
+  if (asText.length > 100) return { kind: "html", html: asText };
   return { kind: "unknown", buffer: buf };
 }
 
@@ -989,8 +1133,8 @@ async function verifyPaypalCapture(captureId) {
 reconcileStalePendingCharges();
 
 // Log provider configuration on startup
-console.log(`[Provider] CheapCARFAX configured: ${!!process.env.CHEAPCARFAX_API_KEY}`);
-console.log(`[Provider] CheapCARFAX ready — daily limit: ${process.env.CCF_DAILY_HARD_LIMIT || 100}`);
+console.log(`[Provider] Reports.VIN configured: ${!!process.env.REPORTSVIN_API_KEY}`);
+console.log(`[Provider] Reports.VIN ready — daily limit: ${process.env.CCF_DAILY_HARD_LIMIT || 100}`);
 
 /* ================================================================
    Stripe Checkout
@@ -1430,9 +1574,6 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
         }
 
         if (pendingChargeId) await resolvePendingCharge(pendingChargeId);
-
-        // Decrement CFC API credit counter on every successful live fetch
-        decrementCfcCredits().catch(() => {});
 
       } catch (e) {
         console.error(`[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`);
@@ -2098,6 +2239,127 @@ app.post("/api/chat-escalate", async (req, res) => {
     console.error("Chat escalate error:", err.message);
     res.status(500).json({ error: "failed" });
   }
+});
+
+/* ================================================================
+   Plate Lookup — converts license plate + state to VIN
+   Uses Reports.VIN /v1/checkplate/:state/:plate
+================================================================ */
+app.get("/api/plate-lookup/:state/:plate", async (req, res) => {
+  try {
+    const state = (req.params.state || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3);
+    const plate = (req.params.plate || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+    if (!state || !plate) return res.status(400).json({ error: "state and plate required" });
+
+    const key = process.env.REPORTSVIN_API_KEY;
+    if (!key) return res.status(500).json({ error: "provider_not_configured" });
+
+    const r = await axios.get(`${CCF_BASE}/checkplate/${state}/${plate}`, {
+      headers: { "API-KEY": key },
+      timeout: 15000,
+      validateStatus: () => true,
+    });
+
+    console.log(`[PlateLookup] ${state}/${plate} → ${r.status}`);
+    if (r.status === 404 || !r.data) return res.status(404).json({ error: "plate_not_found", message: "No vehicle found for that plate." });
+    if (r.status === 401)            return res.status(500).json({ error: "auth_error" });
+    if (r.status >= 400)             return res.status(502).json({ error: "lookup_failed", message: r.data?.message || "Lookup failed." });
+
+    const vin = r.data?.vin || r.data?.VIN || r.data?.data?.vin || null;
+    if (!vin) return res.status(404).json({ error: "vin_not_found", message: "Plate found but no VIN returned." });
+
+    res.json({ ok: true, vin, raw: r.data });
+  } catch (err) {
+    console.error("[PlateLookup] Error:", err.message);
+    res.status(500).json({ error: "plate_lookup_failed", message: err.message });
+  }
+});
+
+/* ================================================================
+   VIN Record Summary — quick preview (no full report fetch)
+   Used to show accident count / title status before user pays
+   Uses Reports.VIN /v1/checkrecords/:vin
+================================================================ */
+app.get("/api/vin-summary/:vin", async (req, res) => {
+  try {
+    const vin = (req.params.vin || "").toUpperCase().trim();
+    const v = validateVin(vin);
+    if (!v.ok) return res.status(422).json({ error: "invalid_vin", message: v.msg });
+
+    const key = process.env.REPORTSVIN_API_KEY;
+    if (!key) return res.status(500).json({ error: "provider_not_configured" });
+
+    const r = await axios.get(`${CCF_BASE}/checkrecords/${vin}`, {
+      headers: { "API-KEY": key },
+      timeout: 15000,
+      validateStatus: () => true,
+    });
+
+    console.log(`[VINSummary] ${vin} → ${r.status}`);
+    if (r.status === 404) return res.status(404).json({ error: "vin_not_found" });
+    if (r.status === 401) return res.status(500).json({ error: "auth_error" });
+    if (r.status >= 400)  return res.status(502).json({ error: "summary_failed" });
+
+    res.json({ ok: true, vin, summary: r.data });
+  } catch (err) {
+    console.error("[VINSummary] Error:", err.message);
+    res.status(500).json({ error: "summary_failed", message: err.message });
+  }
+});
+
+// TEMP DEBUG — test Reports.VIN API directly, delete after confirming it works
+// Usage: GET /api/debug-rv/:vin  (must be logged in as owner)
+app.get("/api/debug-rv/:vin", async (req, res) => {
+  const { user } = await getUser(req).catch(() => ({ user: null }));
+  if (!user || user.email !== CFC_OWNER_EMAIL) return res.status(403).json({ error: "forbidden" });
+
+  const vin = (req.params.vin || "").toUpperCase();
+  const key = process.env.REPORTSVIN_API_KEY;
+  const results = {};
+
+  // Test balance
+  try {
+    const b = await axios.get(`${CCF_BASE}/balance`, { headers: { "API-KEY": key }, timeout: 8000, validateStatus: () => true });
+    results.balance = { status: b.status, data: b.data };
+  } catch (e) { results.balance = { error: e.message }; }
+
+  // Test archive
+  try {
+    const a = await axios.get(`${CCF_BASE}/archive/${vin}`, { headers: { "API-KEY": key }, timeout: 8000, validateStatus: () => true });
+    results.archive = { status: a.status, data: typeof a.data === "string" ? a.data.slice(0, 200) : a.data };
+  } catch (e) { results.archive = { error: e.message }; }
+
+  // Test checkrecords
+  try {
+    const c = await axios.get(`${CCF_BASE}/checkrecords/${vin}`, { headers: { "API-KEY": key }, timeout: 8000, validateStatus: () => true });
+    results.checkrecords = { status: c.status, data: c.data };
+  } catch (e) { results.checkrecords = { error: e.message }; }
+
+  // Test getrecord (does NOT consume credit if it errors, only on success)
+  // Shows the raw shape + whether it looks like base64 or HTML so we can verify the coercion.
+  try {
+    const g = await axios.get(`${CCF_BASE}/getrecord/carfax/${vin}`, { headers: { "API-KEY": key }, timeout: 45000, validateStatus: () => true });
+    const body = g.data;
+    let shape = typeof body;
+    let sample = "";
+    let looksLikeBase64 = false, looksLikeHtml = false;
+    if (typeof body === "string") {
+      sample = body.slice(0, 120);
+      const compact = body.trim().replace(/\s+/g, "");
+      looksLikeBase64 = compact.length > 100 && /^[A-Za-z0-9+/]+={0,2}$/.test(compact.slice(0, 400));
+      looksLikeHtml   = /<\s*(!doctype|html|head|body|div|script)/i.test(body.slice(0, 400));
+    } else if (body && typeof body === "object") {
+      shape = "object: " + Object.keys(body).join(",");
+      sample = JSON.stringify(body).slice(0, 200);
+    }
+    results.getrecord = { status: g.status, shape, looksLikeBase64, looksLikeHtml, sample };
+  } catch (e) { results.getrecord = { error: e.message }; }
+
+  results.getrecord_url = `${CCF_BASE}/getrecord/carfax/${vin}`;
+  results.api_key_set = !!key;
+  results.api_key_prefix = key ? key.slice(0, 12) + "..." : "NOT SET";
+
+  res.json(results);
 });
 
 /* ================================================================
