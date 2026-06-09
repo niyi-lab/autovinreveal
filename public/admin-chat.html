@@ -12,7 +12,7 @@
   header h1{font-size:15px;font-weight:800}
   header a{color:#bfdbfe;font-size:12px;text-decoration:none}
   #login{margin:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:28px;max-width:340px;width:100%;text-align:center}
-  #login input{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin:12px 0;font-size:14px}
+  #login input{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin:8px 0;font-size:14px}
   .btn{background:#2563eb;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer;font-size:13px}
   .btn:hover{background:#1d4ed8}
   #app{flex:1;display:none;overflow:hidden}
@@ -50,11 +50,12 @@
 </header>
 
 <div id="login">
-  <div style="font-weight:800;font-size:16px;margin-bottom:4px">Admin login</div>
-  <div style="font-size:12px;color:#64748b">Enter the admin password to view live chats.</div>
-  <input id="pw" type="password" placeholder="Admin password" onkeydown="if(event.key==='Enter')doLogin()"/>
+  <div style="font-weight:800;font-size:16px;margin-bottom:4px">Owner sign-in</div>
+  <div style="font-size:12px;color:#64748b">Only the site owner can view live chats.</div>
+  <input id="email" type="email" placeholder="Owner email" autocomplete="username"/>
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/>
   <button class="btn" onclick="doLogin()">Sign in</button>
-  <div id="loginErr" style="color:#dc2626;font-size:12px;margin-top:8px;display:none">Wrong password</div>
+  <div id="loginErr" style="color:#dc2626;font-size:12px;margin-top:8px;display:none"></div>
 </div>
 
 <div id="app">
@@ -62,25 +63,40 @@
   <div id="right"><div class="empty">Select a conversation</div></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+const SB_URL  = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
+const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
+const sb = window.supabase.createClient(SB_URL, SB_ANON);
+
 const $ = id => document.getElementById(id);
 let selId = null, listTimer = null, msgTimer = null, curMode = 'ai';
 
-function api(path, opts) {
-  return fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts));
+async function api(path, opts) {
+  const { data } = await sb.auth.getSession();
+  const token = data.session?.access_token || null;
+  const o = Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts);
+  if (token) o.headers['Authorization'] = 'Bearer ' + token;
+  return fetch(path, o);
 }
 function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 function fmtTime(iso){ try { return new Date(iso).toLocaleString(); } catch { return ''; } }
+function showLogin(msg){ $('login').style.display='block'; $('app').classList.remove('on'); if (listTimer) clearInterval(listTimer); if (msg){ $('loginErr').textContent=msg; $('loginErr').style.display='block'; } }
 
 async function doLogin() {
-  const r = await api('/api/admin/login', { method:'POST', body: JSON.stringify({ password: $('pw').value }) });
-  if (r.ok) { $('loginErr').style.display='none'; start(); }
-  else $('loginErr').style.display='block';
+  $('loginErr').style.display='none';
+  const email = $('email').value.trim(), password = $('pw').value;
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { $('loginErr').textContent = error.message; $('loginErr').style.display='block'; return; }
+  start();
 }
 
 async function start() {
+  const { data } = await sb.auth.getSession();
+  if (!data.session) { showLogin(); return; }
   const r = await api('/api/admin/chats');
-  if (r.status === 401) { $('login').style.display='block'; $('app').classList.remove('on'); return; }
+  if (r.status === 403) { showLogin('This account is not the owner.'); return; }
+  if (!r.ok) { showLogin(); return; }
   $('login').style.display='none'; $('app').classList.add('on');
   loadList();
   if (listTimer) clearInterval(listTimer);

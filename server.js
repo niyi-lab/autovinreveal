@@ -1439,9 +1439,18 @@ app.post("/api/crypto/ipn", async (req, res) => {
   }
 
   try {
-    const { data: pending } = await supabaseService
-      .from("crypto_payments").select("*").eq("payment_id", String(payment_id)).maybeSingle();
-    if (!pending) { console.warn(`[NP IPN] No pending payment for ${payment_id}`); return res.status(200).json({ ok: true }); }
+    // Match by order_id (stable) first — crypto2crypto conversions change the
+    // payment_id, so looking up by the original id misses them. Fall back to id.
+    let pending = null;
+    if (order_id) {
+      const { data } = await supabaseService.from("crypto_payments").select("*").eq("order_id", order_id).maybeSingle();
+      pending = data || null;
+    }
+    if (!pending && payment_id) {
+      const { data } = await supabaseService.from("crypto_payments").select("*").eq("payment_id", String(payment_id)).maybeSingle();
+      pending = data || null;
+    }
+    if (!pending) { console.warn(`[NP IPN] No pending payment for order ${order_id} / id ${payment_id}`); return res.status(200).json({ ok: true }); }
     if (pending.status === "fulfilled") return res.status(200).json({ ok: true }); // idempotent
 
     if (pending.user_id) {
@@ -1450,7 +1459,7 @@ app.post("/api/crypto/ipn", async (req, res) => {
     }
     await supabaseService.from("crypto_payments")
       .update({ status: "fulfilled", fulfilled_at: new Date().toISOString() })
-      .eq("payment_id", String(payment_id));
+      .eq("order_id", pending.order_id);
 
     res.status(200).json({ ok: true });
   } catch (e) {
@@ -2316,6 +2325,15 @@ ESCALATE: Only add ESCALATE on its own final line when the customer has a real u
 /* ================================================================
    Live chat takeover — visitor polling + owner inbox
 ================================================================ */
+// Owner-only gate (Supabase token, must be CFC_OWNER_EMAIL).
+async function requireOwnerMw(req, res, next) {
+  try {
+    const { user } = await getUser(req);
+    if (user && CFC_OWNER_EMAIL && (user.email || "").toLowerCase() === CFC_OWNER_EMAIL.toLowerCase()) return next();
+  } catch (_) {}
+  return res.status(403).json({ error: "forbidden" });
+}
+
 // Visitor polls for new owner/assistant messages and the current mode.
 app.get("/api/chat/poll", async (req, res) => {
   try {
@@ -2333,7 +2351,7 @@ app.get("/api/chat/poll", async (req, res) => {
 });
 
 // Owner inbox (admin cookie required).
-app.get("/api/admin/chats", requireAdmin, async (_req, res) => {
+app.get("/api/admin/chats", requireOwnerMw, async (_req, res) => {
   try {
     const { data } = await supabaseService
       .from("chat_conversations")
@@ -2344,7 +2362,7 @@ app.get("/api/admin/chats", requireAdmin, async (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/api/admin/chats/:id", requireAdmin, async (req, res) => {
+app.get("/api/admin/chats/:id", requireOwnerMw, async (req, res) => {
   try {
     const { data: convo } = await supabaseService
       .from("chat_conversations").select("*").eq("id", req.params.id).eq("site", SITE_ID).maybeSingle();
@@ -2356,7 +2374,7 @@ app.get("/api/admin/chats/:id", requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/api/admin/chats/:id/reply", requireAdmin, async (req, res) => {
+app.post("/api/admin/chats/:id/reply", requireOwnerMw, async (req, res) => {
   try {
     const content = String(req.body?.content || "").trim();
     if (!content) return res.status(400).json({ error: "empty" });
@@ -2370,7 +2388,7 @@ app.post("/api/admin/chats/:id/reply", requireAdmin, async (req, res) => {
 });
 
 // Take over (mode=human) or hand back to the AI (mode=ai).
-app.post("/api/admin/chats/:id/mode", requireAdmin, async (req, res) => {
+app.post("/api/admin/chats/:id/mode", requireOwnerMw, async (req, res) => {
   try {
     const mode = req.body?.mode === "human" ? "human" : "ai";
     await supabaseService.from("chat_conversations")

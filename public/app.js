@@ -631,8 +631,12 @@ async function checkOwnerAccess() {
     const { owner } = await r.json();
     const ob  = $id('ownerDashBtn');
     const obm = $id('ownerDashBtnMobile');
+    const oc  = $id('ownerChatBtn');
+    const ocm = $id('ownerChatBtnMobile');
     if (ob)  ob.style.display  = owner ? 'flex' : 'none';
     if (obm) obm.style.display = owner ? 'flex' : 'none';
+    if (oc)  oc.style.display  = owner ? 'flex' : 'none';
+    if (ocm) ocm.style.display = owner ? 'flex' : 'none';
   } catch {}
 }
 
