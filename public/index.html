@@ -1316,6 +1316,9 @@
       let chatOpen    = false;
       let chatHistory = [];
       let chatBusy    = false;
+      let chatConversationId = null;
+      let chatLastSeen = 0;
+      let chatPollTimer = null;
 
       function toggleChat() {
         chatOpen = !chatOpen;
@@ -1329,11 +1332,20 @@
       function appendMessage(text, role) {
         const box = document.getElementById('chatMessages');
         const el  = document.createElement('div');
-        const isUser = role === 'user';
-        el.style.cssText = isUser
-          ? 'background:#2563eb;color:white;border-radius:12px 12px 4px 12px;padding:10px 12px;max-width:85%;align-self:flex-end;font-size:13px;line-height:1.5;'
-          : 'background:#f1f5f9;color:#334155;border-radius:12px 12px 12px 4px;padding:10px 12px;max-width:85%;font-size:13px;line-height:1.5;';
-        el.textContent = text;
+        if (role === 'user') {
+          el.style.cssText = 'background:#2563eb;color:white;border-radius:12px 12px 4px 12px;padding:10px 12px;max-width:85%;align-self:flex-end;font-size:13px;line-height:1.5;';
+          el.textContent = text;
+        } else if (role === 'owner') {
+          el.style.cssText = 'background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;border-radius:12px 12px 12px 4px;padding:10px 12px;max-width:85%;font-size:13px;line-height:1.5;';
+          const tag = document.createElement('div');
+          tag.style.cssText = 'font-size:10px;font-weight:700;color:#059669;margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em;';
+          tag.textContent = 'Support agent';
+          el.appendChild(tag);
+          el.appendChild(document.createTextNode(text));
+        } else {
+          el.style.cssText = 'background:#f1f5f9;color:#334155;border-radius:12px 12px 12px 4px;padding:10px 12px;max-width:85%;font-size:13px;line-height:1.5;';
+          el.textContent = text;
+        }
         box.appendChild(el);
         box.scrollTop = box.scrollHeight;
         return el;
@@ -1374,21 +1386,24 @@
           const r = await fetch('/api/chat', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ message: msg, history: chatHistory.slice(-8), userEmail }),
+            body: JSON.stringify({ message: msg, history: chatHistory.slice(-8), userEmail, conversation_id: chatConversationId }),
           });
           document.getElementById('chatTyping')?.remove();
           const d = await r.json();
-          const reply = d.reply || 'Sorry, something went wrong.';
-          appendMessage(reply, 'assistant');
-          chatHistory.push({ role: 'assistant', content: reply });
+          if (d.conversation_id) { chatConversationId = d.conversation_id; startChatPoll(); }
 
+          if (!d.human) {
+            const reply = d.reply || 'Sorry, something went wrong.';
+            appendMessage(reply, 'assistant');
+            chatHistory.push({ role: 'assistant', content: reply });
 
-          // If escalated to human
-          if (d.escalated) {
-            if (userEmail) {
-              showEscalationConfirm(userEmail, chatHistory.concat([{role:"user",content:msg},{role:"assistant",content:reply}]));
-            } else {
-              showEmailCollector(chatHistory.concat([{role:"user",content:msg},{role:"assistant",content:reply}]));
+            // If the AI escalated, notify the owner (who can also jump in live)
+            if (d.escalated) {
+              if (userEmail) {
+                showEscalationConfirm(userEmail, chatHistory.concat([{role:"user",content:msg},{role:"assistant",content:reply}]));
+              } else {
+                showEmailCollector(chatHistory.concat([{role:"user",content:msg},{role:"assistant",content:reply}]));
+              }
             }
           }
           // Show unread dot if chat is closed
@@ -1402,6 +1417,27 @@
           chatBusy = false;
           document.getElementById('chatSendBtn').style.opacity = '1';
         }
+      }
+
+      // Poll for owner (live agent) replies once a conversation exists
+      async function pollChat() {
+        if (!chatConversationId) return;
+        try {
+          const r = await fetch('/api/chat/poll?conversation_id=' + encodeURIComponent(chatConversationId) + '&after=' + chatLastSeen);
+          if (!r.ok) return;
+          const d = await r.json();
+          for (const m of (d.messages || [])) {
+            if (m.id > chatLastSeen) chatLastSeen = m.id;
+            if (m.role === 'owner') {
+              appendMessage(m.content, 'owner');
+              if (!chatOpen) document.getElementById('chatUnread').style.display = 'block';
+            }
+          }
+        } catch {}
+      }
+      function startChatPoll() {
+        if (chatPollTimer) return;
+        chatPollTimer = setInterval(pollChat, 4000);
       }
 
       // Show greeting after 3s if user hasn't opened chat

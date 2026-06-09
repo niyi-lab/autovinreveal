@@ -1361,7 +1361,10 @@ $id('cryptoPayBtn')?.addEventListener('click', async () => {
     const payment = await r.json();
 
     $id('cryptoAddress').textContent = payment.pay_address || '';
-    $id('cryptoAmount').textContent  = `${payment.pay_amount} ${(payment.pay_currency || 'USDT').toUpperCase()}`;
+    // Round UP to 2 decimals so it's easy to type and never underpays (overpay settles fine).
+    const _pa = Number(payment.pay_amount);
+    const payAmt = isFinite(_pa) ? (Math.ceil(_pa * 100) / 100).toFixed(2) : payment.pay_amount;
+    $id('cryptoAmount').textContent  = `${payAmt} ${(payment.pay_currency || 'USDT').toUpperCase()}`;
 
     if (cryptoExpiryTimer) { clearInterval(cryptoExpiryTimer); cryptoExpiryTimer = null; }
     if (payment.expiration_estimate_date) {
@@ -1403,8 +1406,10 @@ function startCryptoPoll(paymentId) {
       const r = await fetch(`/api/crypto/status/${paymentId}`);
       if (!r.ok) return;
       const s = (await r.json()).payment_status;
-      if (s === 'waiting')    setCryptoStatus('waiting');
-      if (s === 'confirming') setCryptoStatus('confirming');
+      if (s === 'waiting')        setCryptoStatus('waiting');
+      if (s === 'sending')        setCryptoStatus('confirming');
+      if (s === 'confirming')     setCryptoStatus('confirming');
+      if (s === 'partially_paid') { stopCryptoPoll(); setCryptoStatus('underpaid'); }
       if (s === 'finished' || s === 'confirmed') {
         stopCryptoPoll();
         setCryptoStatus('done');
@@ -1431,6 +1436,7 @@ function setCryptoStatus(state) {
     waiting:    { cls: 'bg-amber-50 border-amber-200 text-amber-700', spin: true,  text: 'Waiting for payment…' },
     confirming: { cls: 'bg-blue-50 border-blue-200 text-blue-700',    spin: true,  text: 'Payment detected — confirming on-chain…' },
     done:       { cls: 'bg-green-50 border-green-200 text-green-700', spin: false, text: '✓ Confirmed! Credits added…' },
+    underpaid:  { cls: 'bg-red-50 border-red-200 text-red-700',       spin: false, text: '✗ Underpaid — email support@autovinreveal.com with your payment ID to finish or get a refund.' },
     failed:     { cls: 'bg-red-50 border-red-200 text-red-700',       spin: false, text: '✗ Payment failed. Contact support.' },
     expired:    { cls: 'bg-red-50 border-red-200 text-red-700',       spin: false, text: '✗ Payment window expired. Please start again.' },
   }[state] || {};

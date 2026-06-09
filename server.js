@@ -230,6 +230,7 @@ if (SMTP_USER && SMTP_PASS) {
    CarfaxCheaper removed — CheapCARFAX is the sole provider
 ================================================================ */
 const CFC_OWNER_EMAIL = process.env.CFC_OWNER_EMAIL || "";
+const SITE_ID = "avr"; // distinguishes this site's chats in the shared DB
 const CFC_CREDITS_KEY = "cfc_credits_remaining";
 
 
@@ -1403,8 +1404,35 @@ app.post("/api/crypto/ipn", async (req, res) => {
     if (sig !== expected) { console.warn("[NP IPN] Invalid signature"); return res.status(401).send("Invalid signature"); }
   }
 
-  const { payment_id, payment_status, order_id } = req.body || {};
+  const { payment_id, payment_status, order_id, pay_amount, actually_paid, pay_currency } = req.body || {};
   console.log(`[NP IPN] payment_id=${payment_id} status=${payment_status} order=${order_id}`);
+
+  // Alert the owner on a problem status (underpaid / failed / refunded / expired) so it
+  // can be resolved manually — no credits are granted for these.
+  if (["partially_paid", "failed", "refunded", "expired"].includes(payment_status) && mailer) {
+    try {
+      const { data: p } = await supabaseService.from("crypto_payments").select("*").eq("payment_id", String(payment_id)).maybeSingle();
+      const ownerTo = CFC_OWNER_EMAIL || SMTP_USER;
+      if (ownerTo) {
+        await mailer.sendMail({
+          from: SMTP_FROM, to: ownerTo,
+          subject: `AutoVINReveal crypto ${payment_status} — ${payment_id}`,
+          text: [
+            `A crypto payment came in as "${payment_status}" — no credits were granted.`,
+            ``,
+            `Payment ID:    ${payment_id}`,
+            `Order:         ${order_id}`,
+            `Plan:          ${p?.price_key || "?"} (${p?.credits ?? "?"} credits)`,
+            `User:          ${p?.user_id || "guest"}`,
+            `Expected:      ${pay_amount ?? "?"} ${(pay_currency || "").toUpperCase()}`,
+            `Actually paid: ${actually_paid ?? "?"}`,
+            ``,
+            `Resolve in the NOWPayments dashboard (request top-up or refund), then add credits manually if needed.`,
+          ].join("\n"),
+        });
+      }
+    } catch (e) { console.warn("[NP IPN] owner alert failed:", e.message); }
+  }
 
   if (!["finished", "confirmed"].includes(payment_status)) {
     return res.status(200).json({ ok: true, status: payment_status });
@@ -2100,11 +2128,39 @@ app.get("/api/cfc-dashboard", async (req, res) => {
 ================================================================ */
 app.post("/api/chat", async (req, res) => {
   try {
-    const { message, history = [], userEmail = null } = req.body || {};
+    const { message, history = [], userEmail = null, conversation_id: convoIdRaw = null } = req.body || {};
     if (!message) return res.status(400).json({ error: "message required" });
 
+    // ── Conversation persistence (enables live owner takeover) ──
+    let conversationId = convoIdRaw;
+    let convoMode = "ai";
+    try {
+      if (conversationId) {
+        const { data: c } = await supabaseService
+          .from("chat_conversations").select("id, mode").eq("id", conversationId).eq("site", SITE_ID).maybeSingle();
+        if (c) convoMode = c.mode || "ai";
+        else conversationId = null; // unknown id — start fresh
+      }
+      if (!conversationId) {
+        const { data: c } = await supabaseService
+          .from("chat_conversations").insert({ site: SITE_ID, visitor_email: userEmail || null }).select("id").single();
+        conversationId = c?.id || null;
+      }
+      if (conversationId) {
+        await supabaseService.from("chat_messages").insert({ conversation_id: conversationId, role: "user", content: String(message).slice(0, 4000) });
+        await supabaseService.from("chat_conversations")
+          .update({ last_message_at: new Date().toISOString(), ...(userEmail ? { visitor_email: userEmail } : {}) })
+          .eq("id", conversationId);
+      }
+    } catch (e) { console.warn("[chat] persistence error:", e.message); }
+
+    // If the owner has taken over, the AI stays silent — the widget polls for owner replies.
+    if (convoMode === "human") {
+      return res.json({ conversation_id: conversationId, human: true });
+    }
+
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: "Chat not configured" });
+    if (!apiKey) return res.status(500).json({ error: "Chat not configured", conversation_id: conversationId });
 
     // Account context for signed-in users so the assistant can answer
     // balance / "where's my report" questions directly.
@@ -2213,6 +2269,14 @@ ESCALATE: Only add ESCALATE on its own final line when the customer has a real u
     const shouldEscalate = reply.includes("ESCALATE");
     reply = reply.replace(/\nESCALATE\s*$/m, "").replace(/ESCALATE\s*$/m, "").trim();
 
+    // Persist the assistant reply; flag the conversation for the owner if it escalated.
+    try {
+      if (conversationId) {
+        await supabaseService.from("chat_messages").insert({ conversation_id: conversationId, role: "assistant", content: reply });
+        if (shouldEscalate) await supabaseService.from("chat_conversations").update({ flagged: true }).eq("id", conversationId);
+      }
+    } catch (e) { console.warn("[chat] store reply error:", e.message); }
+
     if (shouldEscalate && mailer) {
       // Email the owner with the full conversation
       const convoLines = [
@@ -2242,11 +2306,78 @@ ESCALATE: Only add ESCALATE on its own final line when the customer has a real u
       }).catch(e => console.error("[Chat escalation email failed]", e.message));
     }
 
-    res.json({ reply, escalated: shouldEscalate });
+    res.json({ reply, escalated: shouldEscalate, conversation_id: conversationId });
   } catch (err) {
     console.error("Chat error:", err.response?.data || err.message);
     res.status(500).json({ error: "Chat failed" });
   }
+});
+
+/* ================================================================
+   Live chat takeover — visitor polling + owner inbox
+================================================================ */
+// Visitor polls for new owner/assistant messages and the current mode.
+app.get("/api/chat/poll", async (req, res) => {
+  try {
+    const conversationId = req.query.conversation_id;
+    const after = Number(req.query.after || 0) || 0;
+    if (!conversationId) return res.json({ mode: "ai", messages: [] });
+    const { data: convo } = await supabaseService
+      .from("chat_conversations").select("mode").eq("id", conversationId).eq("site", SITE_ID).maybeSingle();
+    const { data: msgs } = await supabaseService
+      .from("chat_messages").select("id, role, content, created_at")
+      .eq("conversation_id", conversationId).gt("id", after)
+      .order("id", { ascending: true }).limit(50);
+    res.json({ mode: convo?.mode || "ai", messages: msgs || [] });
+  } catch { res.json({ mode: "ai", messages: [] }); }
+});
+
+// Owner inbox (admin cookie required).
+app.get("/api/admin/chats", requireAdmin, async (_req, res) => {
+  try {
+    const { data } = await supabaseService
+      .from("chat_conversations")
+      .select("id, visitor_email, mode, flagged, status, last_message_at")
+      .eq("site", SITE_ID).eq("status", "open")
+      .order("last_message_at", { ascending: false }).limit(100);
+    res.json({ conversations: data || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/api/admin/chats/:id", requireAdmin, async (req, res) => {
+  try {
+    const { data: convo } = await supabaseService
+      .from("chat_conversations").select("*").eq("id", req.params.id).eq("site", SITE_ID).maybeSingle();
+    if (!convo) return res.status(404).json({ error: "not_found" });
+    const { data: msgs } = await supabaseService
+      .from("chat_messages").select("id, role, content, created_at")
+      .eq("conversation_id", req.params.id).order("id", { ascending: true }).limit(500);
+    res.json({ conversation: convo, messages: msgs || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/admin/chats/:id/reply", requireAdmin, async (req, res) => {
+  try {
+    const content = String(req.body?.content || "").trim();
+    if (!content) return res.status(400).json({ error: "empty" });
+    await supabaseService.from("chat_messages")
+      .insert({ conversation_id: req.params.id, role: "owner", content: content.slice(0, 4000) });
+    await supabaseService.from("chat_conversations")
+      .update({ mode: "human", flagged: false, last_message_at: new Date().toISOString() })
+      .eq("id", req.params.id).eq("site", SITE_ID);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Take over (mode=human) or hand back to the AI (mode=ai).
+app.post("/api/admin/chats/:id/mode", requireAdmin, async (req, res) => {
+  try {
+    const mode = req.body?.mode === "human" ? "human" : "ai";
+    await supabaseService.from("chat_conversations")
+      .update({ mode, ...(mode === "ai" ? { flagged: false } : {}) })
+      .eq("id", req.params.id).eq("site", SITE_ID);
+    res.json({ ok: true, mode });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 /* ================================================================

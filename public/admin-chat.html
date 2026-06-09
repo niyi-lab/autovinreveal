@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="robots" content="noindex,nofollow"/>
+<title>Chat Inbox · AutoVINReveal</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:system-ui,'Segoe UI',sans-serif;background:#f1f5f9;color:#0f172a;height:100vh;display:flex;flex-direction:column}
+  header{background:#1e3a8a;color:#fff;padding:12px 18px;display:flex;align-items:center;justify-content:space-between}
+  header h1{font-size:15px;font-weight:800}
+  header a{color:#bfdbfe;font-size:12px;text-decoration:none}
+  #login{margin:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:28px;max-width:340px;width:100%;text-align:center}
+  #login input{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin:12px 0;font-size:14px}
+  .btn{background:#2563eb;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer;font-size:13px}
+  .btn:hover{background:#1d4ed8}
+  #app{flex:1;display:none;overflow:hidden}
+  #app.on{display:flex}
+  #list{width:300px;border-right:1px solid #e2e8f0;background:#fff;overflow-y:auto;flex-shrink:0}
+  .conv{padding:12px 14px;border-bottom:1px solid #f1f5f9;cursor:pointer}
+  .conv:hover{background:#f8fafc}
+  .conv.sel{background:#eff6ff}
+  .conv .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .conv .who{font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .conv .t{font-size:10px;color:#94a3b8;margin-top:3px}
+  .badge{font-size:9px;font-weight:800;padding:2px 7px;border-radius:999px;text-transform:uppercase;letter-spacing:.04em;flex-shrink:0}
+  .b-flag{background:#fee2e2;color:#b91c1c}
+  .b-human{background:#dcfce7;color:#166534}
+  .b-ai{background:#e2e8f0;color:#475569}
+  #right{flex:1;display:flex;flex-direction:column;background:#f8fafc}
+  #bar{padding:10px 16px;border-bottom:1px solid #e2e8f0;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  #bar .who{font-weight:700;font-size:13px}
+  #msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
+  .m{max-width:72%;padding:9px 12px;border-radius:12px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+  .m-user{background:#fff;border:1px solid #e2e8f0;align-self:flex-start;border-bottom-left-radius:4px}
+  .m-assistant{background:#eef2ff;color:#3730a3;align-self:flex-start;border-bottom-left-radius:4px}
+  .m-owner{background:#2563eb;color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+  .m .lbl{font-size:9px;font-weight:800;opacity:.6;text-transform:uppercase;margin-bottom:2px}
+  #composer{border-top:1px solid #e2e8f0;background:#fff;padding:10px;display:flex;gap:8px;align-items:flex-end}
+  #composer textarea{flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:9px 12px;font-size:13px;resize:none;font-family:inherit;max-height:120px}
+  .empty{margin:auto;color:#94a3b8;font-size:13px}
+  .toggle{font-size:12px;font-weight:700;border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:6px 12px;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <h1>AutoVINReveal · Chat Inbox</h1>
+  <a href="/">← Site</a>
+</header>
+
+<div id="login">
+  <div style="font-weight:800;font-size:16px;margin-bottom:4px">Admin login</div>
+  <div style="font-size:12px;color:#64748b">Enter the admin password to view live chats.</div>
+  <input id="pw" type="password" placeholder="Admin password" onkeydown="if(event.key==='Enter')doLogin()"/>
+  <button class="btn" onclick="doLogin()">Sign in</button>
+  <div id="loginErr" style="color:#dc2626;font-size:12px;margin-top:8px;display:none">Wrong password</div>
+</div>
+
+<div id="app">
+  <div id="list"></div>
+  <div id="right"><div class="empty">Select a conversation</div></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let selId = null, listTimer = null, msgTimer = null, curMode = 'ai';
+
+function api(path, opts) {
+  return fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts));
+}
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function fmtTime(iso){ try { return new Date(iso).toLocaleString(); } catch { return ''; } }
+
+async function doLogin() {
+  const r = await api('/api/admin/login', { method:'POST', body: JSON.stringify({ password: $('pw').value }) });
+  if (r.ok) { $('loginErr').style.display='none'; start(); }
+  else $('loginErr').style.display='block';
+}
+
+async function start() {
+  const r = await api('/api/admin/chats');
+  if (r.status === 401) { $('login').style.display='block'; $('app').classList.remove('on'); return; }
+  $('login').style.display='none'; $('app').classList.add('on');
+  loadList();
+  if (listTimer) clearInterval(listTimer);
+  listTimer = setInterval(loadList, 5000);
+}
+
+async function loadList() {
+  const r = await api('/api/admin/chats');
+  if (!r.ok) return;
+  const { conversations = [] } = await r.json();
+  const el = $('list');
+  if (!conversations.length) { el.innerHTML = '<div class="empty" style="padding:20px">No conversations yet</div>'; return; }
+  el.innerHTML = conversations.map(c => {
+    const badge = c.flagged ? '<span class="badge b-flag">needs you</span>'
+      : (c.mode==='human' ? '<span class="badge b-human">live</span>' : '<span class="badge b-ai">ai</span>');
+    return `<div class="conv ${c.id===selId?'sel':''}" onclick="openConv('${c.id}')">
+      <div class="top"><span class="who">${escapeHtml(c.visitor_email || 'Guest visitor')}</span>${badge}</div>
+      <div class="t">${fmtTime(c.last_message_at)}</div>
+    </div>`;
+  }).join('');
+}
+
+async function openConv(id) {
+  selId = id;
+  $('right').innerHTML = `
+    <div id="bar"><span class="who" id="barWho"></span>
+      <button class="toggle" id="modeBtn" onclick="toggleMode()"></button>
+    </div>
+    <div id="msgs"></div>
+    <div id="composer">
+      <textarea id="reply" rows="1" placeholder="Type a reply… (sending takes over the chat)"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendReply();}"></textarea>
+      <button class="btn" onclick="sendReply()">Send</button>
+    </div>`;
+  loadMsgs(true);
+  if (msgTimer) clearInterval(msgTimer);
+  msgTimer = setInterval(() => loadMsgs(false), 4000);
+  loadList();
+}
+
+async function loadMsgs(forceScroll) {
+  if (!selId) return;
+  const r = await api('/api/admin/chats/' + selId);
+  if (!r.ok) return;
+  const { conversation, messages = [] } = await r.json();
+  curMode = conversation.mode;
+  $('barWho').textContent = conversation.visitor_email || 'Guest visitor';
+  $('modeBtn').textContent = curMode === 'human' ? 'Hand back to AI' : 'Take over';
+  const box = $('msgs');
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+  box.innerHTML = messages.map(m => {
+    const cls = m.role==='owner' ? 'm-owner' : (m.role==='assistant' ? 'm-assistant' : 'm-user');
+    const lbl = m.role==='owner' ? 'You' : (m.role==='assistant' ? 'AI' : 'Visitor');
+    return `<div class="m ${cls}"><div class="lbl">${lbl}</div>${escapeHtml(m.content)}</div>`;
+  }).join('');
+  if (forceScroll || atBottom) box.scrollTop = box.scrollHeight;
+}
+
+async function sendReply() {
+  const ta = $('reply'); const content = (ta.value || '').trim();
+  if (!content || !selId) return;
+  ta.value = '';
+  await api('/api/admin/chats/' + selId + '/reply', { method:'POST', body: JSON.stringify({ content }) });
+  loadMsgs(true); loadList();
+}
+
+async function toggleMode() {
+  if (!selId) return;
+  const mode = curMode === 'human' ? 'ai' : 'human';
+  await api('/api/admin/chats/' + selId + '/mode', { method:'POST', body: JSON.stringify({ mode }) });
+  loadMsgs(false); loadList();
+}
+
+start();
+</script>
+</body>
+</html>
