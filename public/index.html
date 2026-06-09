@@ -14,16 +14,16 @@
          pinch-zoom which is a WCAG 1.4.4 accessibility violation. -->
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>CARFAX Reports for $5 | Instant VIN Check & Vehicle History | AutoVINReveal</title>
-    <meta name="description" content="Get a full official CARFAX vehicle history report for just $5 — same data as the dealership. Instant VIN check. Accident history, odometer rollbacks, title brands, service records. No subscription needed." />
-    <meta name="keywords" content="cheap carfax report, carfax $5, vin check, vehicle history report, vin lookup, car history check, accident history, odometer rollback, salvage title check, used car history" />
-    <link rel="canonical" href="https://autovinreveal.com/" />
+    <title>Vehicle History Reports for $5 | Instant VIN Check | AutoVINReveal</title>
+    <meta name="description" content="Get a full official vehicle history report for just $5 — same data as the dealership. Instant VIN check. Accident history, odometer rollbacks, title brands, service records. No subscription needed." />
+    <meta name="keywords" content="cheap vehicle history report, vin check $5, vin lookup, car history check, accident history, odometer rollback, salvage title check, used car history" />
+    <link rel="canonical" href="https://www.autovinreveal.com/" />
 
-    <meta property="og:title" content="CARFAX Vehicle History Reports for $5 — Instant VIN Check" />
-    <meta property="og:description" content="Don't pay $40 at the dealership. Get the exact same CARFAX vehicle history report for just $5. Instant access. No subscription. Check accidents, title, mileage and more." />
-    <meta property="og:image" content="https://autovinreveal.com/og-image.png" />
+    <meta property="og:title" content="Vehicle History Reports for $5 — Instant VIN Check" />
+    <meta property="og:description" content="Don't pay $40 at the dealership. Get the same official vehicle history report for just $5. Instant access. No subscription. Check accidents, title, mileage and more." />
+    <meta property="og:image" content="https://www.autovinreveal.com/og-image.png" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://autovinreveal.com" />
+    <meta property="og:url" content="https://www.autovinreveal.com" />
     <meta name="twitter:card" content="summary_large_image" />
 
     <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32" />
@@ -34,14 +34,14 @@
       {
         "@context": "https://schema.org/",
         "@type": "Product",
-        "name": "CARFAX Vehicle History Report",
-        "image": "https://autovinreveal.com/og-image.png",
-        "description": "Full CARFAX vehicle history report including accident history, odometer rollback check, title brands, service records, and ownership history.",
+        "name": "Vehicle History Report",
+        "image": "https://www.autovinreveal.com/og-image.png",
+        "description": "Full vehicle history report including accident history, odometer rollback check, title brands, service records, and ownership history.",
         "brand": { "@type": "Brand", "name": "AutoVINReveal" },
         "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.9", "reviewCount": "1240" },
         "offers": {
           "@type": "AggregateOffer",
-          "url": "https://autovinreveal.com",
+          "url": "https://www.autovinreveal.com",
           "priceCurrency": "USD",
           "lowPrice": "6.00",
           "highPrice": "58.00",
@@ -53,10 +53,10 @@
         "@context": "https://schema.org/",
         "@type": "WebSite",
         "name": "AutoVINReveal",
-        "url": "https://autovinreveal.com",
+        "url": "https://www.autovinreveal.com",
         "potentialAction": {
           "@type": "SearchAction",
-          "target": "https://autovinreveal.com/?vin={search_term_string}",
+          "target": "https://www.autovinreveal.com/?vin={search_term_string}",
           "query-input": "required name=search_term_string"
         }
       },
@@ -64,7 +64,7 @@
         "@context": "https://schema.org/",
         "@type": "FAQPage",
         "mainEntity": [
-          { "@type": "Question", "name": "How much does a CARFAX report cost?", "acceptedAnswer": { "@type": "Answer", "text": "A single CARFAX report costs $5 at AutoVINReveal — the same report costs up to $44.99 on the official CARFAX website." } },
+          { "@type": "Question", "name": "How much does a vehicle history report cost?", "acceptedAnswer": { "@type": "Answer", "text": "A single vehicle history report costs $5 at AutoVINReveal — far less than the up to $44.99 charged elsewhere." } },
           { "@type": "Question", "name": "How quickly do I get the report?", "acceptedAnswer": { "@type": "Answer", "text": "Instantly. The report loads in your browser within seconds of payment." } },
           { "@type": "Question", "name": "Do credits expire?", "acceptedAnswer": { "@type": "Answer", "text": "No. Credits are stored in your account and never expire." } }
         ]
@@ -136,6 +136,23 @@
         .pricing-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
         .pricing-col { min-width: 0; }
       }
+
+      /* Price chip strip: allow horizontal scroll on small screens with a
+         right-edge fade so it's obvious there's more to swipe. */
+      .chip-strip { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
+      .chip-strip::-webkit-scrollbar { display: none; }
+      @media (max-width: 639px) {
+        .chip-strip {
+          -webkit-mask-image: linear-gradient(to right, #000 88%, transparent 100%);
+                  mask-image: linear-gradient(to right, #000 88%, transparent 100%);
+        }
+      }
+
+      /* Smooth, consistent micro-interactions across links + FAQ toggles */
+      nav a, footer a, #faq summary { transition: color .15s ease, background-color .15s ease; }
+      #faq details { transition: box-shadow .15s ease; }
+      #faq details[open] { box-shadow: 0 8px 24px -12px rgba(37,99,235,0.18); }
+      #faq summary { cursor: pointer; }
     </style>
   <!-- Cloudflare Turnstile — bot protection -->
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
@@ -189,7 +206,6 @@
             <span id="userEmail" class="text-sm font-medium text-gray-600"></span>
             <button id="logoutBtn" class="text-xs text-red-500 hover:text-red-700 font-medium">Sign out</button>
           </div>
-          <a href="/blog/" class="text-sm font-semibold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors">Blog</a>
           <button id="loginBtn" class="text-sm font-bold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors">Log in</button>
         </div>
 
@@ -288,20 +304,34 @@
           Don't buy a lemon. <br /><span class="text-blue-200">Check the VIN.</span>
         </h1>
         <p class="text-lg sm:text-xl text-blue-100 max-w-2xl mx-auto font-light leading-relaxed">
-          Get the official <strong>CARFAX® Vehicle History Report</strong> instantly for just
+          Get the official <strong>Vehicle History Report</strong> instantly for just
           <span class="text-white font-bold bg-blue-600 px-2 rounded">$5.99</span>.<br class="hidden sm:block" />
           Same data as the dealership, without the markup.
         </p>
+        <div class="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-blue-100 text-xs sm:text-sm font-medium pt-2">
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-blue-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            256-bit SSL secure
+          </span>
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-blue-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            Instant delivery
+          </span>
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-blue-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            No account needed
+          </span>
+        </div>
       </div>
     </header>
 
-    <main class="flex-grow -mt-24 px-2 sm:px-4 relative z-20 pb-16">
+    <main class="flex-grow -mt-16 sm:-mt-24 px-2 sm:px-4 relative z-20 pb-16">
       <div class="max-w-5xl mx-auto">
 
         <div class="glass-card bg-white rounded-2xl shadow-2xl shadow-blue-900/20 overflow-hidden ring-1 ring-black/5">
           <div class="border-b border-gray-100 bg-white px-3 sm:px-6 py-2">
             <div class="flex items-center justify-between gap-2">
-              <div class="flex items-center gap-1.5 sm:gap-3 flex-nowrap">
+              <div class="chip-strip flex items-center gap-1.5 sm:gap-3 flex-nowrap min-w-0">
                 <div class="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-gray-50 border border-gray-200">
                   <span class="text-[10px] sm:text-[11px] font-semibold text-gray-500">1 Report</span>
                   <span class="font-black text-slate-900 text-sm sm:text-base leading-none">$5.99</span>
@@ -319,12 +349,12 @@
                   <span class="text-[10px] font-bold text-green-500 bg-green-100 px-1.5 py-0.5 rounded-full hidden sm:inline">$2.90 each</span>
                 </div>
               </div>
-              <div class="flex items-center gap-3 text-[11px] text-gray-400 font-medium flex-shrink-0">
+              <div class="hidden sm:flex items-center gap-3 text-[11px] text-gray-400 font-medium flex-shrink-0">
                 <span class="flex items-center gap-1">
                   <svg class="w-3.5 h-3.5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                  <span class="hidden xs:inline">No subscription</span>
+                  <span>No subscription</span>
                 </span>
-                <span class="hidden sm:flex items-center gap-1">
+                <span class="flex items-center gap-1">
                   <svg class="w-3.5 h-3.5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
                   Credits never expire
                 </span>
@@ -354,7 +384,7 @@
 
               <div id="typeGroup" class="hidden">
                 <select name="type">
-                  <option value="carfax">CARFAX</option>
+                  <option value="carfax">Vehicle History</option>
                   <option value="autocheck">AutoCheck</option>
                 </select>
               </div>
@@ -362,7 +392,7 @@
               <div class="pt-2">
                 <!-- PATCH 3: Fixed active:scale-[0.98] → active:scale-[.98] (was invalid Tailwind value) -->
                 <button id="go" type="submit" class="glow-btn w-full bg-blue-600 hover:bg-blue-700 text-white h-14 rounded-xl font-bold text-lg shadow-xl shadow-blue-600/20 transition-all active:scale-[.98] flex items-center justify-center gap-2">
-                  <span>Get CARFAX Report Now</span>
+                  <span>Get Vehicle History Report</span>
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
                   </svg>
@@ -404,10 +434,10 @@
           <div class="text-center mb-8">
             <span class="inline-block bg-blue-50 text-blue-700 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider mb-3">Real Report Preview</span>
             <h2 class="text-2xl font-bold text-slate-900">This Is What You Get — Instantly</h2>
-            <p class="text-gray-500 mt-2 text-sm max-w-xl mx-auto">A full CARFAX® Vehicle History Report delivered in seconds. Accident history, ownership records, service history, title checks — everything.</p>
+            <p class="text-gray-500 mt-2 text-sm max-w-xl mx-auto">A full Vehicle History Report delivered in seconds. Accident history, ownership records, service history, title checks — everything.</p>
           </div>
 
-<!-- Mini recent reports strip -->
+          <!-- Mini recent reports strip -->
           <div id="recentChecksBar" class="hidden mt-4 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
             <div class="flex items-center justify-between mb-3">
               <h3 id="recentChecksTitle" class="text-sm font-bold text-gray-700">Your Recent Reports</h3>
@@ -416,12 +446,10 @@
             <div id="recentChecksList" class="space-y-2"></div>
           </div>
 
-
-
-          <div class="relative rounded-2xl overflow-hidden shadow-2xl shadow-blue-900/15 border border-gray-200 bg-white">
+          <div class="relative rounded-2xl overflow-hidden shadow-2xl shadow-blue-900/15 border border-gray-200 bg-white mt-4">
             <!-- Top label bar -->
             <div class="bg-blue-600 text-white text-xs font-bold px-4 py-2 flex items-center justify-between">
-              <span>📋 Sample CARFAX Report — 2017 Lexus RC 350</span>
+              <span>📋 Sample Vehicle History Report — 2017 Lexus RC 350</span>
               <span class="bg-white/20 px-2 py-0.5 rounded text-[11px]">Actual report from our system</span>
             </div>
 
@@ -432,8 +460,8 @@
                 <!-- Blurred mock -->
                 <div class="blur-[3px] pointer-events-none select-none px-4 py-3 bg-white space-y-2 text-[11px]">
                   <div class="bg-[#0057a8] rounded px-3 py-1.5 flex items-center gap-2">
-                    <span style="font-family:Arial Black,sans-serif;font-size:10px;" class="bg-white text-[#0057a8] font-black px-1.5 py-0.5 rounded">CARFAX</span>
-                    <span class="text-white font-bold text-[10px]">Vehicle History Report™</span>
+                    <span style="font-family:Arial Black,sans-serif;font-size:10px;" class="bg-white text-[#0057a8] font-black px-1.5 py-0.5 rounded">REPORT</span>
+                    <span class="text-white font-bold text-[10px]">Vehicle History Report</span>
                   </div>
                   <div class="font-black text-gray-900 text-sm">2017 Lexus RC 350</div>
                   <div class="text-gray-400 font-mono text-[10px]">VIN: JTHSE5BC8H5007726</div>
@@ -457,6 +485,7 @@
                 </div>
               </div>
             </a>
+          </div>
         </section>
 
         <section class="mt-16 text-center">
@@ -475,7 +504,7 @@
             <div class="p-6 bg-white rounded-xl shadow-sm border border-gray-100 hover:-translate-y-1 transition-transform">
               <div class="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-xl font-bold">3</div>
               <h3 class="font-bold text-lg mb-2">Instant PDF View</h3>
-              <p class="text-sm text-gray-500">The full CARFAX report opens immediately. Download, print, or share it.</p>
+              <p class="text-sm text-gray-500">The full report opens immediately. Download, print, or share it.</p>
             </div>
           </div>
         </section>
@@ -502,7 +531,7 @@
                   <p class="text-sm text-gray-500">Perfect for a one-time check before buying.</p>
                 </div>
                 <ul class="space-y-2 text-sm text-slate-600 flex-1 mb-6">
-                  <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> 1 full CARFAX report</li>
+                  <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> 1 full vehicle history report</li>
                   <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> Instant PDF download</li>
                   <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> No account needed</li>
                   <li class="flex items-center gap-2 text-gray-300"><span>—</span> Credits never expire</li>
@@ -531,7 +560,7 @@
                   </div>
                 </div>
                 <ul class="space-y-2 text-sm text-blue-50 flex-1 mb-6 relative z-10">
-                  <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> 5 full CARFAX reports</li>
+                  <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> 5 full vehicle history reports</li>
                   <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> Credits never expire</li>
                   <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> Use across any device</li>
                   <li class="flex items-center gap-2"><span class="text-yellow-300 font-bold">✓</span> Account required</li>
@@ -560,7 +589,7 @@
                   </div>
                 </div>
                 <ul class="space-y-2 text-sm text-slate-300 flex-1 mb-6 relative z-10">
-                  <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> 20 full CARFAX reports</li>
+                  <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> 20 full vehicle history reports</li>
                   <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> Credits never expire</li>
                   <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> Priority support</li>
                   <li class="flex items-center gap-2"><span class="text-green-400 font-bold">✓</span> Account required</li>
@@ -614,7 +643,7 @@
               <div class="text-2xl shrink-0 mt-0.5">🔔</div>
               <div>
                 <h4 class="font-bold text-sm text-purple-900 mb-1">Don't ignore open recalls</h4>
-                <p class="text-xs text-purple-700 leading-relaxed">Some recalls are safety-critical. A CARFAX report shows open recalls so you know what still needs to be fixed — for free at the dealer.</p>
+                <p class="text-xs text-purple-700 leading-relaxed">Some recalls are safety-critical. A vehicle history report shows open recalls so you know what still needs to be fixed — for free at the dealer.</p>
               </div>
             </div>
             <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 flex gap-3">
@@ -660,7 +689,7 @@
             </div>
             <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
               <div class="flex items-center gap-1 text-yellow-400 mb-3">★★★★★</div>
-              <p class="text-gray-700 text-sm leading-relaxed">"I am a dealer and The <strong>5-pack bundle for $25</strong> is a no-brainer. Same CARFAX PDF I used to pay $40 for. Highly recommended."</p>
+              <p class="text-gray-700 text-sm leading-relaxed">"I am a dealer and the <strong>5-pack bundle for $20</strong> is a no-brainer. Same report PDF I used to pay $40 for. Highly recommended."</p>
               <div class="mt-4 flex items-center gap-3">
                 <div class="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center text-xs font-bold text-gray-600">ST</div>
                 <div class="text-xs"><div class="font-bold text-gray-900">Sarah T.</div><div class="text-gray-500">Dealer / Reseller</div></div>
@@ -676,7 +705,7 @@
             </div>
             <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hidden lg:block">
               <div class="flex items-center gap-1 text-yellow-400 mb-3">★★★★★</div>
-              <p class="text-gray-700 text-sm leading-relaxed">"Found an odometer rollback on a Honda Civic thanks to this. The dash said 80k miles, CARFAX showed 160k last year. Be careful out there!"</p>
+              <p class="text-gray-700 text-sm leading-relaxed">"Found an odometer rollback on a Honda Civic thanks to this. The dash said 80k miles, the report showed 160k last year. Be careful out there!"</p>
               <div class="mt-4 flex items-center gap-3">
                 <div class="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center text-xs font-bold text-gray-600">DK</div>
                 <div class="text-xs"><div class="font-bold text-gray-900">David K.</div><div class="text-gray-500">Verified Buyer</div></div>
@@ -684,7 +713,7 @@
             </div>
             <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hidden lg:block">
               <div class="flex items-center gap-1 text-yellow-400 mb-3">★★★★★</div>
-              <p class="text-gray-700 text-sm leading-relaxed">"Does exactly what it says. Cheap CARFAX reports. No hidden fees or subscriptions. I use this site every time I look for a car."</p>
+              <p class="text-gray-700 text-sm leading-relaxed">"Does exactly what it says. Cheap vehicle history reports. No hidden fees or subscriptions. I use this site every time I look for a car."</p>
               <div class="mt-4 flex items-center gap-3">
                 <div class="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center text-xs font-bold text-gray-600">EP</div>
                 <div class="text-xs"><div class="font-bold text-gray-900">Elena P.</div><div class="text-gray-500">Verified Buyer</div></div>
@@ -713,10 +742,10 @@
             </details>
             <details class="group bg-white rounded-lg border border-gray-200 p-4 cursor-pointer">
               <summary class="flex justify-between items-center font-medium list-none">
-                <span>Is this a real CARFAX report?</span>
+                <span>Is this a real vehicle history report?</span>
                 <span class="transition group-open:rotate-180"><svg fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg></span>
               </summary>
-              <div class="text-gray-600 text-sm mt-3">Yes. We provide genuine CARFAX vehicle history reports containing the exact same data found in reports from the dealership or the official site, just at a wholesale price.</div>
+              <div class="text-gray-600 text-sm mt-3">Yes. We provide genuine vehicle history reports containing the exact same data found in reports from the dealership or the official site, just at a wholesale price.</div>
             </details>
             <details class="group bg-white rounded-lg border border-gray-200 p-4 cursor-pointer">
               <summary class="flex justify-between items-center font-medium list-none">
@@ -758,7 +787,7 @@
               <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-extrabold text-sm shadow-lg">A</div>
               <span class="font-bold text-white text-lg tracking-tight">AutoVIN<span class="text-blue-400">Reveal</span></span>
             </div>
-            <p class="text-sm text-slate-400 max-w-xs leading-relaxed mb-4">Affordable, instant CARFAX vehicle history reports. Same data as the dealership — without the $40 markup.</p>
+            <p class="text-sm text-slate-400 max-w-xs leading-relaxed mb-4">Affordable, instant vehicle history reports. Same data as the dealership — without the $40 markup.</p>
             <div class="flex flex-wrap gap-2">
               <span class="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full">✓ No subscription</span>
               <span class="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full">✓ Credits never expire</span>
@@ -807,7 +836,7 @@
         <!-- Bottom bar -->
         <div class="flex flex-col sm:flex-row justify-between items-center gap-3 text-xs text-slate-600">
           <p>© 2026 AutoVINReveal. All rights reserved.</p>
-          <p>Not affiliated with CARFAX, Inc. All trademarks belong to their respective owners.</p>
+          <p>Not affiliated with any vehicle history report provider. All trademarks belong to their respective owners.</p>
         </div>
       </div>
     </footer>
@@ -890,6 +919,63 @@
               </div>
             </div>
 
+          </div>
+
+          <!-- Crypto (USDT) payment option -->
+          <div class="mt-5 border-t border-gray-200 pt-4">
+            <button id="cryptoToggle" type="button" class="w-full flex items-center justify-center gap-2 text-sm font-bold text-gray-600 hover:text-gray-900 transition-colors">
+              <svg class="w-4 h-4" viewBox="0 0 32 32" fill="#26a17b"><path d="M16 0C7.163 0 0 7.163 0 16s7.163 16 16 16 16-7.163 16-16S24.837 0 16 0zm4.5 11.5h-3v6.2c2.4.3 4.2 1 4.2 1.8s-1.8 1.5-4.2 1.8v.2h-1v-.2c-2.4-.3-4.2-1-4.2-1.8s1.8-1.5 4.2-1.8v-6.2h-3V10h7v1.5z"/></svg>
+              Or pay with crypto (USDT)
+              <svg id="cryptoChevron" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
+            </button>
+
+            <div id="cryptoPanel" class="hidden mt-4">
+              <div class="grid grid-cols-3 gap-2 mb-3" id="cryptoPlans">
+                <button type="button" data-cplan="single" class="crypto-plan border-2 border-blue-500 bg-blue-50 rounded-lg py-2 text-center transition-colors">
+                  <span class="block font-black text-slate-900 text-sm">$5.99</span><span class="block text-[10px] text-gray-500">1 report</span>
+                </button>
+                <button type="button" data-cplan="five" class="crypto-plan border-2 border-gray-200 rounded-lg py-2 text-center transition-colors">
+                  <span class="block font-black text-slate-900 text-sm">$20</span><span class="block text-[10px] text-gray-500">5 reports</span>
+                </button>
+                <button type="button" data-cplan="twenty" class="crypto-plan border-2 border-gray-200 rounded-lg py-2 text-center transition-colors">
+                  <span class="block font-black text-slate-900 text-sm">$58</span><span class="block text-[10px] text-gray-500">20 reports</span>
+                </button>
+              </div>
+              <button id="cryptoPayBtn" type="button" class="w-full flex items-center justify-center gap-2 text-white font-bold py-2.5 rounded-lg text-sm transition-colors" style="background:#26a17b">
+                <svg class="w-4 h-4" viewBox="0 0 32 32" fill="white"><path d="M16 0C7.163 0 0 7.163 0 16s7.163 16 16 16 16-7.163 16-16S24.837 0 16 0zm4.5 11.5h-3v6.2c2.4.3 4.2 1 4.2 1.8s-1.8 1.5-4.2 1.8v.2h-1v-.2c-2.4-.3-4.2-1-4.2-1.8s1.8-1.5 4.2-1.8v-6.2h-3V10h7v1.5z"/></svg>
+                Pay with USDT
+              </button>
+
+              <div id="cryptoPayBox" class="hidden mt-4 bg-gray-50 border border-gray-200 rounded-xl p-4">
+                <div class="flex items-center justify-between mb-3">
+                  <span class="text-sm font-bold text-gray-800">Send USDT (BSC / BEP-20)</span>
+                  <span id="cryptoExpiry" class="text-xs text-gray-400 font-mono"></span>
+                </div>
+                <div class="flex gap-4 items-start flex-wrap">
+                  <div id="cryptoQR" class="w-[120px] h-[120px] bg-white border border-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden"></div>
+                  <div class="flex-1 min-w-[160px]">
+                    <div class="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">Send exactly</div>
+                    <div id="cryptoAmount" class="font-mono text-xl font-bold mb-3" style="color:#26a17b"></div>
+                    <div class="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">To address</div>
+                    <div class="flex items-center gap-2">
+                      <div id="cryptoAddress" class="font-mono text-[11px] text-gray-700 break-all flex-1 bg-white border border-gray-200 rounded px-2 py-1.5"></div>
+                      <button type="button" onclick="copyCryptoAddress()" class="flex-shrink-0 w-8 h-8 bg-gray-900 text-white rounded flex items-center justify-center" title="Copy address" aria-label="Copy address">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="white" stroke-width="2.5" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div id="cryptoStatus" class="mt-3 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-700 flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></span>
+                  Waiting for payment…
+                </div>
+                <p class="text-[10px] text-gray-400 text-center mt-2.5 leading-relaxed">
+                  Send <strong>USDT on BSC (BEP-20)</strong> only · Wrong network = lost funds<br>
+                  Credits added automatically within 1–3 minutes of confirmation
+                </p>
+              </div>
+              <p class="text-center text-[11px] text-gray-400 mt-2.5">Powered by NOWPayments · Sign in required</p>
+            </div>
           </div>
 
           <div class="mt-4 flex justify-center">
@@ -1015,7 +1101,7 @@
 
     <!-- Social Proof Toast -->
     <div id="socialProofToast"
-      style="display:none;position:fixed;bottom:80px;left:16px;z-index:200;max-width:300px;"
+      style="display:none;position:fixed;bottom:96px;left:16px;z-index:200;max-width:300px;"
       class="sm:bottom-6">
       <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 flex items-start gap-3 animate-[fadeIn_0.3s_ease-out]">
         <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-base flex-shrink-0 font-bold text-blue-700" id="spFlag">US</div>
@@ -1162,7 +1248,7 @@
     <!-- ============================================================
          AI Chat Widget
     ============================================================ -->
-    <div id="chatWidget" style="position:fixed;bottom:80px;right:16px;z-index:300;font-family:'Inter',sans-serif;" class="sm:bottom-6">
+    <div id="chatWidget" style="position:fixed;bottom:96px;right:16px;z-index:300;font-family:'Inter',sans-serif;" class="sm:bottom-6">
 
       <!-- Bubble button -->
       <button id="chatBubble" onclick="toggleChat()"
@@ -1279,13 +1365,16 @@
         showTyping();
 
         try {
-          // Get user email if logged in
+          // Get user email + token if logged in (token lets the bot see balance/history)
           const userEmail = window._currentSession?.user?.email || null;
+          const token = window._currentSession?.access_token || null;
+          const headers = { 'Content-Type': 'application/json' };
+          if (token) headers['Authorization'] = 'Bearer ' + token;
 
           const r = await fetch('/api/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: msg, history: chatHistory.slice(-6), userEmail }),
+            headers,
+            body: JSON.stringify({ message: msg, history: chatHistory.slice(-8), userEmail }),
           });
           document.getElementById('chatTyping')?.remove();
           const d = await r.json();

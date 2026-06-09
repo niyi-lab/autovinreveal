@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+
+# Keep private/app pages out of the index
+Disallow: /admin
+Disallow: /api/
+Disallow: /dashboard.html
+Disallow: /history.html
+Disallow: /success.html
+
+Sitemap: https://www.autovinreveal.com/sitemap.xml

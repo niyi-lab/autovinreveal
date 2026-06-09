@@ -406,11 +406,14 @@
           plate: isPlate ? (emailTarget.plate || '') : '',
         };
 
+        const { token } = await getSession();
+        if (!token) { showToast('Please sign in to email reports.', 'error'); return; }
+
         const restore = setBtnLoading($id('sendEmailBtn'), 'Sending…');
         try {
           const r = await apiFetch('/api/email-report', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify(body),
           }, 15_000);
           if (!r.ok) throw new Error(await r.text());
@@ -484,7 +487,7 @@
                 showReportLoader();
                 const r2 = await apiFetch('/api/report', {
                   method: 'POST', headers,
-                  body: JSON.stringify({ vin, type: item.type, as: 'html', allowLive: false }),
+                  body: JSON.stringify({ vin, type: item.type, as: 'html', allowLive: true }),
                 }, 60_000);
                 hideReportLoader();
                 if (!r2.ok) { showToast('Re-fetch failed', 'error'); return; }
@@ -597,9 +600,11 @@
       async function copyShareLink(item) {
         const vin = item.vin !== '(from plate)' ? item.vin : item.plate;
         try {
+          const { token } = await getSession();
+          if (!token) { showToast('Please sign in to share reports.', 'error'); return; }
           const r = await apiFetch('/api/share', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({ vin, type: item.type }),
           }, 10_000);
           if (!r.ok) throw new Error(await r.text());
@@ -739,7 +744,8 @@
                 const local = loadLocalHistory();
                 const newLocal = local.filter(l => !(l.vin === item.vin && l.type === item.type));
                 saveLocalHistory(newLocal);
-                allItems = allItems.filter((_, i) => i !== idx);
+                // Match by identity, not by filtered-list index, so the clicked row is removed.
+                allItems = allItems.filter(it => !(it.vin === item.vin && it.type === item.type));
                 applyFilters();
                 showToast('Removed from local history', 'ok');
               }

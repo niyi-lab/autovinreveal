@@ -807,9 +807,11 @@ async function downloadHistoryPDF(item, btn = null) {
 
 async function copyShareLink(vin, type) {
   try {
+    const { token } = await getSession();
+    if (!token) { showToast('Please sign in to share reports.', 'error'); return; }
     const r = await apiFetch(
       API.share,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vin, type }) },
+      { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ vin, type }) },
       10_000
     );
     if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
@@ -856,11 +858,14 @@ sendEmailBtn?.addEventListener('click', async () => {
     plate: isPlate ? (emailTargetItem.plate || '') : '',
   };
 
+  const { token } = await getSession();
+  if (!token) { showToast('Please sign in to email reports.', 'error'); return; }
+
   const restore = setBtnLoading(sendEmailBtn, 'Sending…');
   try {
     const r = await apiFetch(
       '/api/email-report',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) },
       15_000
     );
     if (!r.ok) throw new Error(await r.text());
@@ -1289,6 +1294,149 @@ $id('saveNewPasswordBtn')?.addEventListener('click', async () => {
   } catch (e) { showToast(e.message, 'error'); }
   finally { restore(); }
 });
+
+/* ================================
+   Crypto payment (NOWPayments / USDT) — sign-in required
+================================ */
+let selectedCryptoPlan = 'single';
+let cryptoPollTimer    = null;
+let cryptoExpiryTimer  = null;
+
+$id('cryptoToggle')?.addEventListener('click', () => {
+  const panel = $id('cryptoPanel');
+  const chev  = $id('cryptoChevron');
+  if (!panel) return;
+  const nowOpen = panel.classList.toggle('hidden') === false;
+  if (chev) chev.style.transform = nowOpen ? 'rotate(180deg)' : '';
+});
+
+document.querySelectorAll('.crypto-plan').forEach(btn => {
+  btn.addEventListener('click', () => {
+    selectedCryptoPlan = btn.dataset.cplan || 'single';
+    document.querySelectorAll('.crypto-plan').forEach(b => {
+      const on = b === btn;
+      b.classList.toggle('border-blue-500', on);
+      b.classList.toggle('bg-blue-50', on);
+      b.classList.toggle('border-gray-200', !on);
+    });
+    resetCryptoBox();
+  });
+});
+
+function resetCryptoBox() {
+  $id('cryptoPayBox')?.classList.add('hidden');
+  stopCryptoPoll();
+  if (cryptoExpiryTimer) { clearInterval(cryptoExpiryTimer); cryptoExpiryTimer = null; }
+}
+
+window.copyCryptoAddress = async function () {
+  const addr = $id('cryptoAddress')?.textContent?.trim();
+  if (!addr) return;
+  try { await navigator.clipboard.writeText(addr); showToast('Address copied!', 'ok'); }
+  catch { showToast('Could not copy — select manually', 'error'); }
+};
+
+$id('cryptoPayBtn')?.addEventListener('click', async () => {
+  const btn = $id('cryptoPayBtn');
+  const { user, token } = await getSession();
+  if (!user || !token) {
+    showToast('Please sign in to pay with crypto.', 'error');
+    closeBuyModal();
+    openLogin();
+    return;
+  }
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Creating payment…';
+  try {
+    const r = await apiFetch('/api/crypto/create-payment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ price_key: selectedCryptoPlan }),
+    }, 20_000);
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e.message || e.error || 'Payment creation failed');
+    }
+    const payment = await r.json();
+
+    $id('cryptoAddress').textContent = payment.pay_address || '';
+    $id('cryptoAmount').textContent  = `${payment.pay_amount} ${(payment.pay_currency || 'USDT').toUpperCase()}`;
+
+    if (cryptoExpiryTimer) { clearInterval(cryptoExpiryTimer); cryptoExpiryTimer = null; }
+    if (payment.expiration_estimate_date) {
+      const exp = new Date(payment.expiration_estimate_date);
+      const upd = () => {
+        const m  = Math.max(0, Math.round((exp - Date.now()) / 60000));
+        const el = $id('cryptoExpiry');
+        if (el) el.textContent = m > 0 ? `Expires in ${m}m` : 'Expired';
+      };
+      upd();
+      cryptoExpiryTimer = setInterval(upd, 30000);
+    }
+
+    const qrEl = $id('cryptoQR');
+    if (qrEl && payment.pay_address) {
+      const img = document.createElement('img');
+      img.src = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(payment.pay_address)}&margin=2`;
+      img.width = 120; img.height = 120; img.style.display = 'block'; img.alt = 'Payment QR';
+      qrEl.innerHTML = ''; qrEl.appendChild(img);
+    }
+
+    $id('cryptoPayBox').classList.remove('hidden');
+    setCryptoStatus('waiting');
+    startCryptoPoll(payment.payment_id);
+  } catch (e) {
+    showToast(e.message || 'Crypto payment failed', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+});
+
+function startCryptoPoll(paymentId) {
+  stopCryptoPoll();
+  let attempts = 0;
+  cryptoPollTimer = setInterval(async () => {
+    if (++attempts > 80) { stopCryptoPoll(); setCryptoStatus('expired'); return; } // ~6.5 min
+    try {
+      const r = await fetch(`/api/crypto/status/${paymentId}`);
+      if (!r.ok) return;
+      const s = (await r.json()).payment_status;
+      if (s === 'waiting')    setCryptoStatus('waiting');
+      if (s === 'confirming') setCryptoStatus('confirming');
+      if (s === 'finished' || s === 'confirmed') {
+        stopCryptoPoll();
+        setCryptoStatus('done');
+        setTimeout(async () => {
+          closeBuyModal();
+          showToast('🎉 Crypto payment confirmed! Credits added.', 'ok');
+          await refreshBalancePill();
+          resetCryptoBox();
+        }, 2000);
+      }
+      if (s === 'failed' || s === 'refunded' || s === 'expired') { stopCryptoPoll(); setCryptoStatus('failed'); }
+    } catch (_) { /* silent poll error */ }
+  }, 5000);
+}
+
+function stopCryptoPoll() {
+  if (cryptoPollTimer) { clearInterval(cryptoPollTimer); cryptoPollTimer = null; }
+}
+
+function setCryptoStatus(state) {
+  const el = $id('cryptoStatus');
+  if (!el) return;
+  const cfg = {
+    waiting:    { cls: 'bg-amber-50 border-amber-200 text-amber-700', spin: true,  text: 'Waiting for payment…' },
+    confirming: { cls: 'bg-blue-50 border-blue-200 text-blue-700',    spin: true,  text: 'Payment detected — confirming on-chain…' },
+    done:       { cls: 'bg-green-50 border-green-200 text-green-700', spin: false, text: '✓ Confirmed! Credits added…' },
+    failed:     { cls: 'bg-red-50 border-red-200 text-red-700',       spin: false, text: '✗ Payment failed. Contact support.' },
+    expired:    { cls: 'bg-red-50 border-red-200 text-red-700',       spin: false, text: '✗ Payment window expired. Please start again.' },
+  }[state] || {};
+  el.className = `mt-3 px-3 py-2.5 rounded-lg border text-xs font-semibold flex items-center gap-2 ${cfg.cls || ''}`;
+  el.innerHTML = (cfg.spin ? `<span class="w-2.5 h-2.5 border-2 border-current border-t-transparent rounded-full animate-spin"></span>` : '') + `<span>${cfg.text || ''}</span>`;
+}
 
 /* ================================
    Init

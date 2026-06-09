@@ -12,7 +12,6 @@
     "dev": "concurrently -k --success=first -n SERVER,CSS -c blue,magenta \"npm:dev:server\" \"npm:dev:css\""
   },
   "dependencies": {
-    "@paypal/checkout-server-sdk": "^1.0.3",
     "@supabase/supabase-js": "2.58.0",
     "axios": "1.12.2",
     "cookie-parser": "^1.4.7",
@@ -24,7 +23,6 @@
     "helmet": "7.1.0",
     "morgan": "1.10.0",
     "nodemailer": "^7.0.10",
-    "puppeteer": "^24.40.0",
     "stripe": "19.1.0"
   },
   "devDependencies": {

@@ -69,12 +69,8 @@ import fs from "fs";
 import Stripe from "stripe";
 import { gunzipSync } from "zlib";
 import crypto from "crypto";
-import { createRequire } from "module";
 import cookieParser from "cookie-parser";
 import nodemailer from "nodemailer";
-
-const require = createRequire(import.meta.url);
-const paypalSdk = require("@paypal/checkout-server-sdk");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -105,7 +101,7 @@ if (!APP_SECRET || APP_SECRET === "change_me_in_env_file") {
    Security / redirects
 ================================================================ */
 app.set("trust proxy", 1);
-const WEBHOOK_PATHS = new Set(["/api/stripe-webhook", "/api/stripe-webhook/"]);
+const WEBHOOK_PATHS = new Set(["/api/stripe-webhook", "/api/stripe-webhook/", "/api/crypto/ipn"]);
 
 app.use((req, res, next) => {
   if (WEBHOOK_PATHS.has(req.path)) return next();
@@ -142,16 +138,6 @@ app.get("/healthz", (_req, res) => res.status(200).send("ok"));
     // Return a fake 200 to confuse the scraper
     return res.status(200).json({ success: true, data: [] });
   });
-});
-
-// TEMP — find outbound IP, delete after getting it
-app.get("/api/myip", async (_req, res) => {
-  try {
-    const r = await axios.get("https://api.ipify.org?format=json", { timeout: 5000 });
-    res.json(r.data);
-  } catch (e) {
-    res.json({ error: e.message });
-  }
 });
 
 /* ================================================================
@@ -193,19 +179,6 @@ function stripeForId(id) {
     return new Stripe(STRIPE_TEST_SECRET_KEY, { apiVersion: "2024-06-20" });
   }
   return stripeLive;
-}
-
-/* ================================================================
-   PayPal package config
-================================================================ */
-const PAYPAL_PACKAGE_CONFIG = {
-  single:   { amount: "6.00",  credits: 1  },
-  "5pack":  { amount: "20.00", credits: 5  },
-  "20pack": { amount: "58.00", credits: 20 },
-};
-function resolvePaypalPackage(pkg) {
-  if (pkg === "10pack") return PAYPAL_PACKAGE_CONFIG["20pack"]; // legacy alias
-  return PAYPAL_PACKAGE_CONFIG[pkg] || PAYPAL_PACKAGE_CONFIG["single"];
 }
 
 /* ================================================================
@@ -480,7 +453,7 @@ async function getCfcApiLimits() {
     return {
       credits:                   r.data.balance ?? r.data.credits ?? r.data.credits_remaining ?? null,
       carfax_reports_left_today: r.data.daily_remaining ?? r.data.carfax_reports_left_today ?? null,
-      daily_limit:               r.data.daily_limit ?? Number(process.env.CCF_DAILY_HARD_LIMIT || 100),
+      daily_limit:               r.data.daily_limit ?? (process.env.CCF_DAILY_HARD_LIMIT ? Number(process.env.CCF_DAILY_HARD_LIMIT) : null),
     };
   } catch { return null; }
 }
@@ -829,17 +802,7 @@ async function refundAndResolve(chargeId, userId, sessionId) {
       await addCreditsAtomic(userId, 1);
       console.log(`[Refund] +1 credit to user ${userId} for charge ${chargeId}`);
     } else if (sessionId) {
-      if (sessionId.startsWith("pp_")) {
-        const captureId = sessionId.replace("pp_", "");
-        try {
-          const refundReq = new paypalSdk.payments.CapturesRefundRequest(captureId);
-          refundReq.requestBody({ reason: "AutoVINReveal: VIN not found or report generation failed." });
-          await ppClient.execute(refundReq);
-          console.log(`[Refund] PayPal refund issued for capture ${captureId}`);
-        } catch (ppErr) {
-          console.error(`[Refund] FATAL: PayPal refund failed for ${captureId}:`, ppErr.message);
-        }
-      } else if (sessionId.startsWith("cs_")) {
+      if (sessionId.startsWith("cs_")) {
         try {
           const sStripe = stripeForId(sessionId);
           const session = await sStripe.checkout.sessions.retrieve(sessionId);
@@ -929,6 +892,15 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
   }
 
   try {
+    // Idempotency — Stripe delivers events at least once; never double-grant credits.
+    const { error: dupErr } = await supabaseService
+      .from("processed_webhook_events")
+      .insert({ event_id: event.id });
+    if (dupErr) {
+      if (dupErr.code === "23505") return res.status(200).json({ ok: true, duplicate: true });
+      console.error("[Webhook] idempotency insert error:", dupErr.message);
+    }
+
     // ── One-time purchases ──
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
@@ -1012,6 +984,8 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
     return res.status(200).json({ ok: true });
   } catch (e) {
     console.error("Webhook handler error:", e);
+    // Roll back the idempotency marker so Stripe's retry can reprocess this event.
+    try { await supabaseService.from("processed_webhook_events").delete().eq("event_id", event.id); } catch (_) {}
     return res.status(500).send("Webhook handler error");
   }
 });
@@ -1110,31 +1084,27 @@ setInterval(() => {
   for (const [ip, entry] of suspiciousIps) {
     if (entry.lastSeen < cutoff) suspiciousIps.delete(ip);
   }
+  // Also trim the guest purchase log so it doesn't grow unbounded.
+  for (const [ip, log] of guestPurchaseLog) {
+    const recent = log.filter(l => l.ts >= cutoff);
+    if (recent.length) guestPurchaseLog.set(ip, recent);
+    else guestPurchaseLog.delete(ip);
+  }
 }, 60 * 60 * 1000);
 
-const paypalCaptureLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: "Too many PayPal requests" });
+// Tighter limit for the unauthenticated provider-lookup endpoints (plate / vin-summary)
+const lookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { error: "rate_limited", message: "Too many lookups. Please slow down." },
+});
 
-/* ================================================================
-   PayPal client
-================================================================ */
-const PAYPAL_ENV = (process.env.PAYPAL_ENV || "sandbox").toLowerCase();
-const ppEnv = PAYPAL_ENV === "live"
-  ? new paypalSdk.core.LiveEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET)
-  : new paypalSdk.core.SandboxEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET);
-const ppClient = new paypalSdk.core.PayPalHttpClient(ppEnv);
-
-async function verifyPaypalCapture(captureId) {
-  const req = new paypalSdk.payments.CapturesGetRequest(captureId);
-  const res = await ppClient.execute(req);
-  return res?.result;
-}
-
-// Must run after ppClient is defined so PayPal refunds have a live client
+// Refund any charges left dangling by a prior crash (Stripe refunds only).
 reconcileStalePendingCharges();
 
 // Log provider configuration on startup
 console.log(`[Provider] Reports.VIN configured: ${!!process.env.REPORTSVIN_API_KEY}`);
-console.log(`[Provider] Reports.VIN ready — daily limit: ${process.env.CCF_DAILY_HARD_LIMIT || 100}`);
+console.log(`[Provider] Reports.VIN ready — daily limit: ${process.env.CCF_DAILY_HARD_LIMIT || "none"}`);
 
 /* ================================================================
    Stripe Checkout
@@ -1186,6 +1156,12 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
     const isTwentyPack = price_id === "STRIPE_PRICE_20PACK" || price_id === "20pack";
     const isFivePack   = price_id === "STRIPE_PRICE_5PACK"  || price_id === "5pack";
+
+    // Bundles must be tied to an account, or the webhook can't store the credits
+    // (guest would pay and receive nothing).
+    if ((isTwentyPack || isFivePack) && !userId) {
+      return res.status(401).json({ error: "login_required", message: "Please sign in to buy a bundle." });
+    }
 
     let priceLive = PRICE_SINGLE;
     let intent    = vin ? "buy_report" : "buy_credit_single";
@@ -1322,99 +1298,136 @@ app.get("/api/credits/:user_id", async (req, res) => {
 });
 
 /* ================================================================
-   PayPal — Create Order
+   NOWPayments — crypto (USDT on BSC) checkout
+   Requires sign-in for all plans so the IPN can always credit an account.
 ================================================================ */
-app.post("/api/paypal/create-order", paypalCaptureLimiter, async (req, res) => {
+const NP_API_KEY    = process.env.NOWPAYMENTS_API_KEY || "";
+const NP_IPN_SECRET = process.env.NOWPAYMENTS_IPN_SECRET || "";
+const NP_BASE       = "https://api.nowpayments.io/v1";
+const NP_AMOUNTS = {
+  single: { usd: 5.99,  credits: 1  },
+  five:   { usd: 20.00, credits: 5  },
+  twenty: { usd: 58.00, credits: 20 },
+};
+
+// Recursively sort object keys for NOWPayments IPN HMAC verification
+function sortObjectKeys(obj) {
+  if (typeof obj !== "object" || obj === null) return obj;
+  if (Array.isArray(obj)) return obj.map(sortObjectKeys);
+  return Object.keys(obj).sort().reduce((acc, k) => { acc[k] = sortObjectKeys(obj[k]); return acc; }, {});
+}
+
+app.post("/api/crypto/create-payment", async (req, res) => {
   try {
-    const { package: pkgKey, vin, user_id } = req.body;
+    if (!NP_API_KEY) return res.status(503).json({ error: "Crypto payments not configured" });
 
-    let customIdentifier = "";
-    let description      = "";
+    const { price_key } = req.body || {};
+    const plan = NP_AMOUNTS[price_key];
+    if (!plan) return res.status(400).json({ error: "Invalid price key" });
 
-    if (vin) {
-      const v = validateVin(vin);
-      if (!v.ok) return res.status(422).json({ error: "invalid_vin", reason: v.code, message: v.msg });
-      customIdentifier = v.vin;
-      description      = `Vehicle History Report (VIN: ${customIdentifier})`;
-    } else {
-      customIdentifier = user_id ? `USER:${user_id}` : "GUEST_BUNDLE";
-      description      = "AutoVINReveal Credits";
+    // Crypto is async — require an account so the IPN can credit it.
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "login_required", message: "Please sign in to pay with crypto." });
+
+    const orderId = `avr-${price_key}-${user.id}-${Date.now()}`;
+    const payload = {
+      price_amount:        plan.usd,
+      price_currency:      "usd",
+      pay_currency:        "usdtbsc",        // USDT on BSC — cheapest fees
+      order_id:            orderId,
+      order_description:   `AutoVINReveal ${plan.credits} credit${plan.credits !== 1 ? "s" : ""}`,
+      ipn_callback_url:    `${SITE_URL}/api/crypto/ipn`,
+      success_url:         `${SITE_URL}/?crypto=success&order=${encodeURIComponent(orderId)}`,
+      cancel_url:          `${SITE_URL}/?crypto=cancel`,
+      is_fixed_rate:       false,
+      is_fee_paid_by_user: false,
+    };
+
+    const r = await axios.post(`${NP_BASE}/payment`, payload, {
+      headers: { "x-api-key": NP_API_KEY, "Content-Type": "application/json" },
+      timeout: 15000, validateStatus: () => true,
+    });
+    if (r.status !== 200 && r.status !== 201) {
+      console.error("[NP] create error", r.status, JSON.stringify(r.data).slice(0, 300));
+      return res.status(502).json({ error: "Crypto provider error — please try again" });
     }
 
-    const pkg = resolvePaypalPackage(pkgKey);
+    const payment = r.data;
+    try {
+      await supabaseService.from("crypto_payments").insert({
+        payment_id: String(payment.payment_id),
+        order_id:   orderId,
+        price_key,
+        credits:    plan.credits,
+        user_id:    user.id,
+        status:     "waiting",
+        created_at: new Date().toISOString(),
+      });
+    } catch (e) { console.warn("[NP] store payment failed:", e.message); }
 
-    const invoiceId = [
-      pkgKey || "single",
-      customIdentifier.replace(/[^A-Za-z0-9]/g, "-").slice(0, 60),
-      Date.now(),
-    ].join("_");
-
-    const request = new paypalSdk.orders.OrdersCreateRequest();
-    request.prefer("return=representation");
-    request.requestBody({
-      intent: "CAPTURE",
-      application_context: { shipping_preference: "NO_SHIPPING", brand_name: "AutoVINReveal" },
-      purchase_units: [{
-        amount: {
-          currency_code: "USD",
-          value: pkg.amount,
-          breakdown: { item_total: { currency_code: "USD", value: pkg.amount } },
-        },
-        custom_id:  customIdentifier,
-        invoice_id: invoiceId,
-        description,
-        items: [{
-          name:        description,
-          unit_amount: { currency_code: "USD", value: pkg.amount },
-          quantity:    "1",
-          description: user_id ? `User: ${user_id}` : "Guest purchase",
-          sku:         pkgKey || "single",
-        }],
-      }],
+    res.json({
+      payment_id:               payment.payment_id,
+      pay_address:              payment.pay_address,
+      pay_amount:               payment.pay_amount,
+      pay_currency:             payment.pay_currency,
+      price_amount:             payment.price_amount,
+      price_currency:           payment.price_currency,
+      expiration_estimate_date: payment.expiration_estimate_date,
+      order_id:                 orderId,
     });
-
-    const order = await ppClient.execute(request);
-    res.json({ id: order.result.id });
-  } catch (err) {
-    console.error("PayPal Create Error:", err);
-    res.status(500).json({ error: "Failed to create PayPal order" });
+  } catch (e) {
+    console.error("[NP] create unhandled:", e.message);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-/* ================================================================
-   PayPal — Capture Order
-================================================================ */
-app.post("/api/paypal/capture-order", paypalCaptureLimiter, async (req, res) => {
+app.get("/api/crypto/status/:payment_id", async (req, res) => {
   try {
-    const { orderID, user_id, package: pkg = "single" } = req.body || {};
-    if (!orderID) return res.status(400).json({ error: "orderID required" });
+    if (!NP_API_KEY) return res.status(503).json({ error: "Not configured" });
+    const r = await axios.get(`${NP_BASE}/payment/${req.params.payment_id}`, {
+      headers: { "x-api-key": NP_API_KEY }, timeout: 8000, validateStatus: () => true,
+    });
+    if (r.status !== 200) return res.status(r.status).json({ error: "Payment not found" });
+    res.json(r.data);
+  } catch { res.status(500).json({ error: "Server error" }); }
+});
 
-    const { credits } = resolvePaypalPackage(pkg);
+app.post("/api/crypto/ipn", async (req, res) => {
+  // Verify NOWPayments signature (HMAC-SHA512 over the sorted JSON body)
+  if (NP_IPN_SECRET) {
+    const sig = req.headers["x-nowpayments-sig"];
+    if (!sig) return res.status(400).send("Missing signature");
+    const expected = crypto.createHmac("sha512", NP_IPN_SECRET)
+      .update(JSON.stringify(sortObjectKeys(req.body)))
+      .digest("hex");
+    if (sig !== expected) { console.warn("[NP IPN] Invalid signature"); return res.status(401).send("Invalid signature"); }
+  }
 
-    if (pkg !== "single" && !user_id) {
-      return res.status(400).json({ error: "user_id required for bundle purchases" });
+  const { payment_id, payment_status, order_id } = req.body || {};
+  console.log(`[NP IPN] payment_id=${payment_id} status=${payment_status} order=${order_id}`);
+
+  if (!["finished", "confirmed"].includes(payment_status)) {
+    return res.status(200).json({ ok: true, status: payment_status });
+  }
+
+  try {
+    const { data: pending } = await supabaseService
+      .from("crypto_payments").select("*").eq("payment_id", String(payment_id)).maybeSingle();
+    if (!pending) { console.warn(`[NP IPN] No pending payment for ${payment_id}`); return res.status(200).json({ ok: true }); }
+    if (pending.status === "fulfilled") return res.status(200).json({ ok: true }); // idempotent
+
+    if (pending.user_id) {
+      await addCreditsAtomic(pending.user_id, pending.credits);
+      console.log(`[NP IPN] +${pending.credits} credits → user ${pending.user_id}`);
     }
+    await supabaseService.from("crypto_payments")
+      .update({ status: "fulfilled", fulfilled_at: new Date().toISOString() })
+      .eq("payment_id", String(payment_id));
 
-    const capReq = new paypalSdk.orders.OrdersCaptureRequest(orderID);
-    capReq.requestBody({});
-    const capRes    = await ppClient.execute(capReq);
-    const cap       = capRes?.result?.purchase_units?.[0]?.payments?.captures?.[0];
-    const captureId = cap?.id || null;
-
-    if (!captureId || cap?.status !== "COMPLETED")
-      return res.status(400).json({ error: "Capture not completed" });
-
-    const verified = await verifyPaypalCapture(captureId);
-    if (!verified || verified.status !== "COMPLETED")
-      return res.status(400).json({ error: "Capture verification failed" });
-
-    if (user_id) await addCreditsAtomic(user_id, credits);
-
-    console.log(`[PayPal] Captured ${pkg} (${credits} credit${credits > 1 ? "s" : ""}) for user ${user_id || "guest"}`);
-    res.json({ ok: true, captureId, credits });
-  } catch (err) {
-    console.error("PayPal capture error:", err);
-    res.status(500).json({ error: "PayPal capture failed" });
+    res.status(200).json({ ok: true });
+  } catch (e) {
+    console.error("[NP IPN] Fulfillment error:", e.message);
+    res.status(500).json({ error: "Fulfillment error" });
   }
 });
 
@@ -1502,102 +1515,9 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
       }
     }
 
-    // 5. Live fetch
-    if (!raw && allowLive) {
-
-      if (!alreadyOwned && !oneTimeSession) {
-        if (currentUser) {
-          pendingChargeId = await createPendingCharge({ userId: currentUser.id, vin: targetVin });
-
-          const { error: rpcErr } = await supabaseForToken(
-            req.headers.authorization?.split(" ")[1]
-          ).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
-
-          if (rpcErr) {
-            await resolvePendingCharge(pendingChargeId);
-            pendingChargeId = null;
-            return res.status(402).json({ error: "insufficient_credits" });
-          }
-        } else {
-          return res.status(401).json({ error: "purchase_required" });
-        }
-      }
-
-      if (oneTimeSession && !alreadyOwned) {
-        try {
-          if (!oneTimeSession.startsWith("pp_")) {
-            const sStripe = stripeForId(oneTimeSession);
-            const s       = await sStripe.checkout.sessions.retrieve(oneTimeSession);
-            if (s.payment_status !== "paid") throw new Error("unpaid");
-          }
-          await markSessionConsumed(oneTimeSession);
-          pendingChargeId = await createPendingCharge({ sessionId: oneTimeSession, vin: targetVin });
-        } catch (e) {
-          if (e.message === "SESSION_ALREADY_CONSUMED") {
-            return res.status(400).json({ error: "receipt_already_used" });
-          }
-          return res.status(400).json({ error: "receipt_invalid" });
-        }
-      }
-
-      try {
-        const live = await cfcGetReport(targetVin, type);
-        raw = live;
-        writeCache(targetVin, type, raw);
-
-        if (currentUser) {
-          // Try to update existing row first (if any), then insert
-          const { data: existing } = await supabaseService
-            .from("vin_queries")
-            .select("id")
-            .eq("user_id", currentUser.id)
-            .eq("vin", targetVin)
-            .eq("type", type)
-            .maybeSingle();
-
-          if (existing?.id) {
-            // Update the existing row with fresh report data
-            const { error: updErr } = await supabaseService
-              .from("vin_queries")
-              .update({ report_data: raw, success: true })
-              .eq("id", existing.id);
-            if (updErr) console.error("[DB] Update report_data failed:", updErr.message);
-            else console.log("[DB] report_data updated for", targetVin);
-          } else {
-            // Insert new row
-            const { error: insErr } = await supabaseService
-              .from("vin_queries")
-              .insert({ user_id: currentUser.id, vin: targetVin, type, report_data: raw, success: true });
-            if (insErr) console.error("[DB] Insert report failed:", insErr.message);
-            else console.log("[DB] report_data stored for", targetVin);
-          }
-        }
-
-        if (pendingChargeId) await resolvePendingCharge(pendingChargeId);
-
-      } catch (e) {
-        console.error(`[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`);
-
-        if (pendingChargeId) {
-          await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
-          pendingChargeId = null;
-        }
-
-        const msg = String(e.message || "");
-        if (msg.includes("CS_404") || /invalid.*vin|vin.*not.*found/i.test(msg)) {
-          return res.status(422).json({
-            error: "invalid_vin", reason: "remote_reject",
-            message: "VIN not found in database. You have been refunded.",
-          });
-        }
-        return res.status(502).json({
-          error: "provider_error",
-          message: "Report generation failed. You have been refunded.",
-        });
-      }
-    }
-
-    if (!raw) {
+    // ── 5. Deliverability ────────────────────────────────────────
+    // Nothing cached and we're not allowed to fetch live.
+    if (!raw && !allowLive) {
       if (alreadyOwned) {
         return res.status(404).json({
           error: "report_not_cached",
@@ -1606,7 +1526,82 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
           can_refetch: true,
         });
       }
-      return res.status(404).json({ error: "not_found", message: "No report found." });
+      // Non-owner trying to view a report they haven't bought.
+      return res.status(402).json({ error: "payment_required", message: "You don't own this report yet." });
+    }
+
+    // ── 6. Payment gate — non-owners pay before delivery, even on a cache hit ──
+    // Owners view/re-fetch for free. This is what makes a NEW user pay for a VIN
+    // another user already ran, while the original owner is never re-charged.
+    if (!alreadyOwned) {
+      if (oneTimeSession) {
+        try {
+          // Stripe one-time guest receipt only (PayPal removed).
+          const sStripe = stripeForId(oneTimeSession);
+          const s       = await sStripe.checkout.sessions.retrieve(oneTimeSession);
+          if (s.payment_status !== "paid") throw new Error("unpaid");
+          await markSessionConsumed(oneTimeSession);
+          pendingChargeId = await createPendingCharge({ sessionId: oneTimeSession, vin: targetVin });
+        } catch (e) {
+          if (e.message === "SESSION_ALREADY_CONSUMED") return res.status(400).json({ error: "receipt_already_used" });
+          return res.status(400).json({ error: "receipt_invalid" });
+        }
+      } else if (currentUser) {
+        pendingChargeId = await createPendingCharge({ userId: currentUser.id, vin: targetVin });
+        const { error: rpcErr } = await supabaseForToken(
+          req.headers.authorization?.split(" ")[1]
+        ).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
+        if (rpcErr) {
+          await resolvePendingCharge(pendingChargeId);
+          pendingChargeId = null;
+          return res.status(402).json({ error: "insufficient_credits" });
+        }
+      } else {
+        return res.status(401).json({ error: "purchase_required" });
+      }
+    }
+
+    // ── 7. Live fetch (only when not already cached) ─────────────
+    let justFetched = false;
+    if (!raw) {
+      try {
+        raw = await cfcGetReport(targetVin, type);
+        justFetched = true;
+        writeCache(targetVin, type, raw);
+      } catch (e) {
+        console.error(`[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`);
+        if (pendingChargeId) {
+          await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
+          pendingChargeId = null;
+        }
+        const msg = String(e.message || "");
+        if (msg.includes("CS_404") || /invalid.*vin|vin.*not.*found/i.test(msg)) {
+          return res.status(422).json({ error: "invalid_vin", reason: "remote_reject", message: "VIN not found in database. You have been refunded." });
+        }
+        return res.status(502).json({ error: "provider_error", message: "Report generation failed. You have been refunded." });
+      }
+    }
+
+    if (!raw) return res.status(404).json({ error: "not_found", message: "No report found." });
+
+    // ── 8. Record ownership / refresh the user's stored copy ─────
+    // Store on a fresh fetch, or to create the row for a paying non-owner so they
+    // own it next time. Owners re-viewing from cache skip this (no wasted write).
+    if (currentUser && (justFetched || !alreadyOwned)) {
+      const { data: existing } = await supabaseService
+        .from("vin_queries")
+        .select("id")
+        .eq("user_id", currentUser.id).eq("vin", targetVin).eq("type", type)
+        .maybeSingle();
+      if (existing?.id) {
+        const { error: updErr } = await supabaseService
+          .from("vin_queries").update({ report_data: raw, success: true }).eq("id", existing.id);
+        if (updErr) console.error("[DB] Update report_data failed:", updErr.message);
+      } else {
+        const { error: insErr } = await supabaseService
+          .from("vin_queries").insert({ user_id: currentUser.id, vin: targetVin, type, report_data: raw, success: true });
+        if (insErr) console.error("[DB] Insert report failed:", insErr.message);
+      }
     }
 
     // 6. Deliver
@@ -1628,11 +1623,13 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
         `</span>`;
       reportHtml = reportHtml.replace("</body>", watermark + "</body>");
 
+      if (pendingChargeId) { await resolvePendingCharge(pendingChargeId); pendingChargeId = null; }
       return res.send(reportHtml);
     }
 
     if (decoded.kind === "pdf") {
       res.setHeader("Content-Type", "application/pdf");
+      if (pendingChargeId) { await resolvePendingCharge(pendingChargeId); pendingChargeId = null; }
       return res.send(decoded.buffer);
     }
 
@@ -1664,46 +1661,50 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
 app.post("/api/email-report", async (req, res) => {
   try {
     if (!mailer) return res.status(500).json({ error: "email_not_configured" });
+
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "unauthorized" });
+
     const { to, vin, type = "carfax" } = req.body || {};
     if (!to || !String(to).includes("@")) return res.status(400).json({ error: "invalid_to" });
 
     const targetVin = (vin || "").trim().toUpperCase();
     if (!targetVin) return res.status(400).json({ error: "vin_required" });
+    const typeL = (type || "carfax").toLowerCase();
 
-    const raw = await getReportData(targetVin, type);
+    // Only the owner may email their report (was previously unauthenticated —
+    // anyone who knew a cached VIN could email that report).
+    const { data: owned } = await supabaseService
+      .from("vin_queries")
+      .select("id")
+      .eq("user_id", user.id).eq("vin", targetVin).eq("type", typeL).eq("success", true)
+      .maybeSingle();
+    if (!owned) return res.status(403).json({ error: "report_not_owned" });
+
+    const raw = await getReportData(targetVin, typeL);
     if (!raw) return res.status(404).json({ error: "not_cached" });
 
     const decoded = decodeReportBase64(raw);
-    const subject = `Your ${type.toUpperCase()} Vehicle History Report — ${targetVin}`;
+    const subject = `Your ${typeL.toUpperCase()} Vehicle History Report — ${targetVin}`;
 
-    // Attempt real PDF generation via CarSimulcast (same as download button)
-    let pdfBuffer = null;
-
+    // If the cached report is already a PDF, attach it directly.
     if (decoded.kind === "pdf") {
-      pdfBuffer = decoded.buffer;
-    } else if (decoded.kind === "html") {
-      try {
-        // PDF generation not available — will fall back to link email below
-      } catch (pdfErr) {
-        console.error("[email-report] PDF generation failed:", pdfErr.message);
-      }
-    }
-
-    if (pdfBuffer) {
       await mailer.sendMail({
         from: SMTP_FROM, to, subject,
         text: `Your vehicle history report for VIN ${targetVin} is attached as a PDF.`,
         attachments: [{
-          filename:    `${targetVin}-${type}-report.pdf`,
-          content:     pdfBuffer,
+          filename:    `${targetVin}-${typeL}-report.pdf`,
+          content:     decoded.buffer,
           contentType: "application/pdf",
         }],
       });
       return res.json({ ok: true, format: "pdf" });
     }
 
-    // Fallback: send a styled link email
-    const reportUrl = `${SITE_URL}/view-report/${targetVin}?type=${type}`;
+    // HTML report — email a tokenized share link (the old /view-report/:vin route
+    // never existed, so that link 404'd to the homepage).
+    const { token } = await createShareToken(targetVin, typeL);
+    const reportUrl = `${SITE_URL}/view/${token}`;
     await mailer.sendMail({
       from: SMTP_FROM, to, subject,
       text: [
@@ -1764,11 +1765,25 @@ app.get("/api/history", async (req, res) => {
 ================================================================ */
 app.post("/api/share", async (req, res) => {
   try {
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "unauthorized" });
+
     const { vin, type = "carfax" } = req.body || {};
     if (!vin) return res.status(400).json({ error: "vin required" });
-    const raw = await getReportData(vin, type);
+    const vinU  = vin.toUpperCase().trim();
+    const typeL = (type || "carfax").toLowerCase();
+
+    // Only the owner of a report may create a share link for it.
+    const { data: owned } = await supabaseService
+      .from("vin_queries")
+      .select("id")
+      .eq("user_id", user.id).eq("vin", vinU).eq("type", typeL).eq("success", true)
+      .maybeSingle();
+    if (!owned) return res.status(403).json({ error: "report_not_owned" });
+
+    const raw = await getReportData(vinU, typeL);
     if (!raw) return res.status(404).json({ error: "not_cached" });
-    const { token, expiresAt } = await createShareToken(vin, type);
+    const { token, expiresAt } = await createShareToken(vinU, typeL);
     res.json({ url: `${SITE_URL}/view/${token}`, expiresAt });
   } catch { res.status(500).json({ error: "Failed to create share link" }); }
 });
@@ -2036,7 +2051,7 @@ app.get("/api/cfc-dashboard", async (req, res) => {
     const [ccfLimits, cfcCredits] = await Promise.all([getCfcApiLimits(), getCfcCredits()]);
     const credits = ccfLimits !== null ? ccfLimits.credits : cfcCredits;
     const ccfDailyLeft = ccfLimits?.carfax_reports_left_today ?? null;
-    const ccfDailyLimit = ccfLimits?.daily_limit ?? Number(process.env.CCF_DAILY_HARD_LIMIT || 100);
+    const ccfDailyLimit = ccfLimits?.daily_limit ?? (process.env.CCF_DAILY_HARD_LIMIT ? Number(process.env.CCF_DAILY_HARD_LIMIT) : null);
 
     // All-time report stats
     const { data: allReports } = await supabaseService
@@ -2091,11 +2106,37 @@ app.post("/api/chat", async (req, res) => {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return res.status(500).json({ error: "Chat not configured" });
 
+    // Account context for signed-in users so the assistant can answer
+    // balance / "where's my report" questions directly.
+    let acctContext = "";
+    try {
+      const { user } = await getUser(req);
+      if (user) {
+        const { data: credRow } = await supabaseService
+          .from("credits").select("balance").eq("user_id", user.id).maybeSingle();
+        const { data: recent } = await supabaseService
+          .from("vin_queries")
+          .select("vin, type, success, created_at")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(5);
+        acctContext =
+          `\n\n--- SIGNED-IN ACCOUNT CONTEXT (use to answer; never paste verbatim) ---\n` +
+          `Email: ${user.email}\n` +
+          `Credit balance: ${credRow?.balance ?? 0}\n` +
+          ((recent && recent.length)
+            ? "Recent reports:\n" + recent.map(r =>
+                `  • ${r.vin} (${r.type}) — ${r.success ? "delivered" : "failed"} on ${new Date(r.created_at).toLocaleDateString("en-US")}`
+              ).join("\n")
+            : "No reports run yet.");
+      }
+    } catch (_) { /* unauthenticated — no context */ }
+
     const systemPrompt = `ROLE: You are a live chat support agent for AutoVINReveal. You talk like a real human - short, warm, casual.
 
 ABSOLUTE FORMATTING RULES - breaking these is your only failure mode:
 ZERO markdown. No asterisks, no bold, no bullet points, no numbered lists, no dashes as list items, no headers.
-Write ONLY plain sentences. To list things write them inline: "You can pay by card or PayPal."
+Write ONLY plain sentences. To list things write them inline: "You can pay by card."
 Maximum 2 sentences per reply unless you are asking follow-up questions.
 Never start with "Great question!" or "Good question!" or "Of course!" - just answer.
 
@@ -2103,7 +2144,7 @@ FACTS - never say anything outside this list:
 Single report is $5.99 and needs no account. 5-pack is $20 ($4 each) and needs an account. 20-pack is $58 ($2.90 each) and needs an account.
 Monthly plans: Starter $30/mo for 20 reports, Pro $98/mo for 100 reports, Premium $160/mo for 200 reports.
 Reports cover accidents, odometer rollbacks, title issues, service records, open recalls.
-Search by VIN or license plate plus state. Credits never expire. Pay by card or PayPal.
+Search by VIN or license plate plus state. Credits never expire. Pay by card.
 Failed reports are automatically refunded. Support email is support@autovinreveal.com.
 
 IF ASKED ABOUT MISSING/FAILED REPORT - ask ONE question at a time in order:
@@ -2129,15 +2170,33 @@ ESCALATE: Only add ESCALATE on its own final line when the customer has a real u
       { role: "assistant", content: "In that case email support@autovinreveal.com with your transaction ID and the VIN you searched and they will get it sorted fast." },
     ];
 
+    // De-dupe: the client pushes the latest user turn into `history` AND sends it
+    // as `message`; drop a trailing user turn equal to message to avoid a double turn.
+    const cleaned = history.slice(-8).map(m => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: String(m.content || ""),
+    }));
+    while (cleaned.length && cleaned[cleaned.length - 1].role === "user" && cleaned[cleaned.length - 1].content === message) {
+      cleaned.pop();
+    }
+
     const messages = [
       ...FEW_SHOT,
-      ...history.slice(-6).map(m => ({ role: m.role, content: m.content })),
+      ...cleaned,
       { role: "user", content: message },
     ];
 
     const response = await axios.post(
       "https://api.anthropic.com/v1/messages",
-      { model: "claude-haiku-4-5-20251001", max_tokens: 300, system: systemPrompt, messages },
+      {
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 500,
+        system: [
+          { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+          ...(acctContext ? [{ type: "text", text: acctContext }] : []),
+        ],
+        messages,
+      },
       {
         headers: {
           "Content-Type": "application/json",
@@ -2245,7 +2304,7 @@ app.post("/api/chat-escalate", async (req, res) => {
    Plate Lookup — converts license plate + state to VIN
    Uses Reports.VIN /v1/checkplate/:state/:plate
 ================================================================ */
-app.get("/api/plate-lookup/:state/:plate", async (req, res) => {
+app.get("/api/plate-lookup/:state/:plate", lookupLimiter, async (req, res) => {
   try {
     const state = (req.params.state || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3);
     const plate = (req.params.plate || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
@@ -2280,7 +2339,7 @@ app.get("/api/plate-lookup/:state/:plate", async (req, res) => {
    Used to show accident count / title status before user pays
    Uses Reports.VIN /v1/checkrecords/:vin
 ================================================================ */
-app.get("/api/vin-summary/:vin", async (req, res) => {
+app.get("/api/vin-summary/:vin", lookupLimiter, async (req, res) => {
   try {
     const vin = (req.params.vin || "").toUpperCase().trim();
     const v = validateVin(vin);
@@ -2305,61 +2364,6 @@ app.get("/api/vin-summary/:vin", async (req, res) => {
     console.error("[VINSummary] Error:", err.message);
     res.status(500).json({ error: "summary_failed", message: err.message });
   }
-});
-
-// TEMP DEBUG — test Reports.VIN API directly, delete after confirming it works
-// Usage: GET /api/debug-rv/:vin  (must be logged in as owner)
-app.get("/api/debug-rv/:vin", async (req, res) => {
-  const { user } = await getUser(req).catch(() => ({ user: null }));
-  if (!user || user.email !== CFC_OWNER_EMAIL) return res.status(403).json({ error: "forbidden" });
-
-  const vin = (req.params.vin || "").toUpperCase();
-  const key = process.env.REPORTSVIN_API_KEY;
-  const results = {};
-
-  // Test balance
-  try {
-    const b = await axios.get(`${CCF_BASE}/balance`, { headers: { "API-KEY": key }, timeout: 8000, validateStatus: () => true });
-    results.balance = { status: b.status, data: b.data };
-  } catch (e) { results.balance = { error: e.message }; }
-
-  // Test archive
-  try {
-    const a = await axios.get(`${CCF_BASE}/archive/${vin}`, { headers: { "API-KEY": key }, timeout: 8000, validateStatus: () => true });
-    results.archive = { status: a.status, data: typeof a.data === "string" ? a.data.slice(0, 200) : a.data };
-  } catch (e) { results.archive = { error: e.message }; }
-
-  // Test checkrecords
-  try {
-    const c = await axios.get(`${CCF_BASE}/checkrecords/${vin}`, { headers: { "API-KEY": key }, timeout: 8000, validateStatus: () => true });
-    results.checkrecords = { status: c.status, data: c.data };
-  } catch (e) { results.checkrecords = { error: e.message }; }
-
-  // Test getrecord (does NOT consume credit if it errors, only on success)
-  // Shows the raw shape + whether it looks like base64 or HTML so we can verify the coercion.
-  try {
-    const g = await axios.get(`${CCF_BASE}/getrecord/carfax/${vin}`, { headers: { "API-KEY": key }, timeout: 45000, validateStatus: () => true });
-    const body = g.data;
-    let shape = typeof body;
-    let sample = "";
-    let looksLikeBase64 = false, looksLikeHtml = false;
-    if (typeof body === "string") {
-      sample = body.slice(0, 120);
-      const compact = body.trim().replace(/\s+/g, "");
-      looksLikeBase64 = compact.length > 100 && /^[A-Za-z0-9+/]+={0,2}$/.test(compact.slice(0, 400));
-      looksLikeHtml   = /<\s*(!doctype|html|head|body|div|script)/i.test(body.slice(0, 400));
-    } else if (body && typeof body === "object") {
-      shape = "object: " + Object.keys(body).join(",");
-      sample = JSON.stringify(body).slice(0, 200);
-    }
-    results.getrecord = { status: g.status, shape, looksLikeBase64, looksLikeHtml, sample };
-  } catch (e) { results.getrecord = { error: e.message }; }
-
-  results.getrecord_url = `${CCF_BASE}/getrecord/carfax/${vin}`;
-  results.api_key_set = !!key;
-  results.api_key_prefix = key ? key.slice(0, 12) + "..." : "NOT SET";
-
-  res.json(results);
 });
 
 /* ================================================================
