@@ -1164,6 +1164,11 @@ app.post("/api/create-checkout-session", async (req, res) => {
       return res.status(401).json({ error: "login_required", message: "Please sign in to buy a bundle." });
     }
 
+    // A single report is for one specific vehicle — require a VIN.
+    if (!isTwentyPack && !isFivePack && !vin) {
+      return res.status(422).json({ error: "vin_required", message: "Please enter a VIN — single reports are for one specific vehicle." });
+    }
+
     let priceLive = PRICE_SINGLE;
     let intent    = vin ? "buy_report" : "buy_credit_single";
     if (isTwentyPack)    { priceLive = PRICE_20PACK; intent = "buy_credits_20pack"; }

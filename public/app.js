@@ -55,8 +55,14 @@ const API_TIMEOUT_MS = 30_000;
 function $id(id) { return document.getElementById(id); }
 
 function showToast(message, type = 'error') {
-  const box = $id('toastBox');
-  if (!box) { alert(message); return; }
+  let box = $id('toastBox');
+  if (!box) {
+    // No container on this page (e.g. success.html) — create one so we never use alert().
+    box = document.createElement('div');
+    box.id = 'toastBox';
+    box.style.cssText = 'position:fixed;top:16px;right:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;max-width:340px;';
+    document.body.appendChild(box);
+  }
   const el = document.createElement('div');
   el.className = `transform transition-all duration-300 flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${
     type === 'error'
@@ -1096,8 +1102,21 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
 }
 
 $id('buy1Btn')?.addEventListener('click', async () => {
+  const { user } = await getSession();
+  let pending = currentBuyModalPendingData;
+  // A single report is tied to one VIN — fall back to the VIN input if needed.
+  if (!pending?.vin) {
+    const v = (document.querySelector('input[name="vin"]')?.value || '').trim().toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/gi, '');
+    if (v.length === 17) pending = { vin: v, type: 'carfax' };
+  }
+  if (!pending?.vin) {
+    closeBuyModal();
+    showToast('Enter a VIN first — a single report is for one specific vehicle.', 'error');
+    const vinInput = document.querySelector('input[name="vin"]');
+    if (vinInput) { vinInput.focus(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    return;
+  }
   const btn = $id('buy1Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
-  const { user } = await getSession(); const pending = currentBuyModalPendingData;
   closeBuyModal();
   await startStripePurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: pending });
   restore();
