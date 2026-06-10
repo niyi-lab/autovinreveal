@@ -347,7 +347,7 @@ function setPrimaryCTA(mode = 'view') {
     btn.onclick = () => openBuyModal();
   } else {
     btn.type = 'submit';
-    btn.innerHTML = `<span>Get CARFAX Report Now</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>`;
+    btn.innerHTML = `<span>Get Vehicle History Report Now</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>`;
     btn.onclick = null;
   }
 }
@@ -939,7 +939,7 @@ function recentChecksRowHTML(vin, type, ago) {
       <div class="flex items-center gap-2 min-w-0">
         <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse flex-shrink-0"></div>
         <span class="font-mono text-xs font-semibold text-gray-800 truncate">${vin}</span>
-        <span class="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-semibold uppercase flex-shrink-0">${type}</span>
+        <!-- report-type badge hidden for now (restore: <span class="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-semibold uppercase flex-shrink-0">VEHICLE&nbsp;HISTORY</span>) -->
       </div>
       <span class="text-[11px] text-gray-400 flex-shrink-0">${ago}</span>
     </div>

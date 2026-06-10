@@ -75,7 +75,7 @@
         <!-- Type filter -->
         <select id="typeFilter" class="h-10 rounded-xl border border-gray-200 bg-gray-50 focus:border-blue-400 outline-none px-3 text-sm font-medium text-gray-600 cursor-pointer">
           <option value="">All types</option>
-          <option value="carfax">CARFAX</option>
+          <option value="carfax">Vehicle History</option>
           <option value="autocheck">AutoCheck</option>
         </select>
 
@@ -674,7 +674,7 @@
 
           const typeTag = item.type === 'autocheck'
             ? `<span class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-purple-100 text-purple-700 rounded-full">AutoCheck</span>`
-            : `<span class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-blue-100 text-blue-700 rounded-full">CARFAX</span>`;
+            : `<span class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-blue-100 text-blue-700 rounded-full">Vehicle History</span>`;
 
           const srcTag = item.source === 'server'
             ? `<span class="px-2 py-0.5 text-[10px] font-medium text-blue-500 bg-blue-50 border border-blue-100 rounded-full flex items-center gap-1">
