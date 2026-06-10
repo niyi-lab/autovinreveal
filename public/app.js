@@ -422,7 +422,7 @@ async function resumePendingPurchase() {
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (!user && stripeSessionId) pending.oneTimeSession = stripeSessionId;
   try {
-    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) });
+    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) }, 60_000);
     if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
     const html = await r.text();
     clearPending();
@@ -447,13 +447,16 @@ async function handleSuccessIfNeeded() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ vin: vinParam, type: 'carfax', as: 'html', oneTimeSession: stripeSessionId }),
-      });
+      }, 60_000);
       if (!r.ok) throw new Error(await r.text());
       const html = await r.text();
       openReport(html);
       trackPurchase(6.00);
       return;
-    } catch (e) { showToast(e.message || 'Failed to fetch report', 'error'); }
+    } catch (e) {
+      console.error('[report] post-payment fetch failed:', e.message);
+      showToast('Payment received — your report is taking longer than usual. Your purchase is safe; please wait a moment, then refresh. Still stuck? Email support@autovinreveal.com.', 'error');
+    }
   }
   if (stripeSessionId || onSuccessPage()) {
     const pending = tryLoadPending();
@@ -1231,7 +1234,7 @@ f?.addEventListener('submit', async (e) => {
   try {
     if (!currentUser && stripeSessionId) data.oneTimeSession = stripeSessionId;
 
-    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) });
+    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) }, 60_000);
 
     if (r.status === 401 || r.status === 402) {
       localStorage.setItem(PENDING_KEY, JSON.stringify(data));
