@@ -501,7 +501,7 @@ if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 const ck = (vin, type) => path.join(CACHE_DIR, `${vin}-${type}.b64`);
 const writeCache = (vin, type, data) => fs.writeFileSync(ck(vin, type), data, "utf8");
 
-const REPORT_TTL_DAYS = 30;
+const REPORT_TTL_DAYS = 20;
 const MAX_AGE_MS      = REPORT_TTL_DAYS * 24 * 60 * 60 * 1000;
 
 async function getReportData(vin, type) {
@@ -1562,8 +1562,8 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
     if (!raw && !allowLive) {
       if (alreadyOwned) {
         return res.status(404).json({
-          error: "report_not_cached",
-          message: "This report is no longer in our cache. Please search the VIN again — you won't be charged as you already own it.",
+          error: "report_expired",
+          message: "This report has expired (20-day limit). Search the VIN again to pull a fresh copy — it will use one credit.",
           vin: targetVin,
           can_refetch: true,
         });
@@ -1572,10 +1572,12 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
       return res.status(402).json({ error: "payment_required", message: "You don't own this report yet." });
     }
 
-    // ── 6. Payment gate — non-owners pay before delivery, even on a cache hit ──
-    // Owners view/re-fetch for free. This is what makes a NEW user pay for a VIN
-    // another user already ran, while the original owner is never re-charged.
-    if (!alreadyOwned) {
+    // ── 6. Payment gate ──────────────────────────────────────────
+    // Free ONLY while a cached copy exists (≤20 days) AND you own it. Once it has
+    // expired (raw is null), a fresh pull is a new purchase for everyone — owner
+    // included. Non-owners always pay, even on a cache hit.
+    const freeAccess = alreadyOwned && raw;
+    if (!freeAccess) {
       if (oneTimeSession) {
         try {
           // Stripe one-time guest receipt only (PayPal removed).
@@ -1636,8 +1638,9 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
         .eq("user_id", currentUser.id).eq("vin", targetVin).eq("type", type)
         .maybeSingle();
       if (existing?.id) {
+        // Bump created_at so the 20-day TTL restarts from this fresh pull.
         const { error: updErr } = await supabaseService
-          .from("vin_queries").update({ report_data: raw, success: true }).eq("id", existing.id);
+          .from("vin_queries").update({ report_data: raw, success: true, created_at: new Date().toISOString() }).eq("id", existing.id);
         if (updErr) console.error("[DB] Update report_data failed:", updErr.message);
       } else {
         const { error: insErr } = await supabaseService

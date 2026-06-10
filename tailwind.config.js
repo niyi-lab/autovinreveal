@@ -13,6 +13,6 @@ export default {
       }
     }
   },
-  corePlugins: { preflight: false }, // keeps your own reset/styles intact
+  corePlugins: { preflight: true }, // matches the Play CDN (which applied preflight) now that we ship built CSS
   plugins: []
 };
