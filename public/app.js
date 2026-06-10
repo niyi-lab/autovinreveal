@@ -16,7 +16,7 @@
 //   #C — clearPending() moved into the success path so a throw in renderHistory can't skip it
 //   #D — dataset.renderedFor cleared on logout so guest→login→logout cycle re-renders buttons
 //   #E — plate/state inputs sanitised before being stored in pending data (alphanumeric only)
-//   FIX-6 — trackPurchase hardcoded 6.00 fixed in resumePendingPurchase() and handleSuccessIfNeeded()
+//   FIX-6 — trackPurchase hardcoded 5.99 fixed in resumePendingPurchase() and handleSuccessIfNeeded()
 //   FIX-7 — setPrimaryCTA('buy') no longer gates guests behind openLogin()
 //   FIX-PP — PayPal fully removed. Stripe is the sole payment processor.
 //
@@ -83,7 +83,7 @@ function showToast(message, type = 'error') {
   }, 4000);
 }
 
-function trackPurchase(value = 6.00) {
+function trackPurchase(value = 5.99) {
   try {
     fbq('track', 'Purchase', {
       value, currency: 'USD',
@@ -433,7 +433,7 @@ async function resumePendingPurchase() {
     const html = await r.text();
     clearPending();
     openReport(html);
-    trackPurchase(pending.amount || 6.00);
+    trackPurchase(pending.amount || 5.99);
     showToast('Report ready!', 'ok');
     addToHistory({ vin: pending.vin, type: pending.type || 'carfax', ts: Date.now() });
     renderHistory();
@@ -457,7 +457,7 @@ async function handleSuccessIfNeeded() {
       if (!r.ok) throw new Error(await r.text());
       const html = await r.text();
       openReport(html);
-      trackPurchase(6.00);
+      trackPurchase(5.99);
       return;
     } catch (e) {
       console.error('[report] post-payment fetch failed:', e.message);
@@ -1215,7 +1215,7 @@ f?.addEventListener('submit', async (e) => {
     type:      fd.type || 'carfax',
     as:        'html',
     allowLive: true,
-    amount:    6.00,
+    amount:    5.99,
   };
   if (!data.vin) { showToast('Enter a VIN', 'error'); return; }
 

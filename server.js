@@ -103,8 +103,14 @@ if (!APP_SECRET || APP_SECRET === "change_me_in_env_file") {
 app.set("trust proxy", 1);
 const WEBHOOK_PATHS = new Set(["/api/stripe-webhook", "/api/stripe-webhook/", "/api/crypto/ipn"]);
 
+function isLocalHost(host) {
+  return /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/.test(host || "");
+}
+
 app.use((req, res, next) => {
   if (WEBHOOK_PATHS.has(req.path)) return next();
+  // Never force HTTPS/www on localhost — there's no local TLS, so it'd break dev.
+  if (isLocalHost(req.headers.host)) return next();
   if (process.env.NODE_ENV === "production") {
     const xfProto = req.get("x-forwarded-proto");
     if (!req.secure && xfProto !== "https") {
@@ -117,8 +123,13 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use((_req, res, next) => {
-  res.setHeader("Content-Security-Policy", "upgrade-insecure-requests");
+app.use((req, res, next) => {
+  // upgrade-insecure-requests forces sub-resources to https — correct in prod,
+  // but it breaks http://localhost (CSS/JS would be fetched over a non-existent
+  // local TLS). Skip it for localhost.
+  if (!isLocalHost(req.headers.host)) {
+    res.setHeader("Content-Security-Policy", "upgrade-insecure-requests");
+  }
   next();
 });
 
