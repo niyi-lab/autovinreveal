@@ -50,6 +50,25 @@ const API = {
 };
 
 const PENDING_KEY    = 'pendingReport';
+
+// Turn a server /api/report error response into a clean, reassuring message.
+// The server replies with JSON like { error: "invalid_vin"|"provider_error", message }.
+// A wrong/unknown VIN must read as "VIN not found, you were not charged" — never
+// surface the raw "provider_error" token to the user.
+async function friendlyReportError(res) {
+  let body = {};
+  try { body = await res.clone().json(); }
+  catch { try { const t = await res.text(); body = t ? JSON.parse(t) : {}; } catch { body = {}; } }
+  const code = body.error || '';
+  if (code === 'invalid_vin' || res.status === 422) {
+    return 'VIN not found — please double-check it. You were not charged.';
+  }
+  if (code === 'insufficient_credits') return 'You’re out of credits.';
+  if (code === 'provider_error') {
+    return 'We couldn’t pull that report right now. If you were charged, you’ve been refunded — please try again shortly.';
+  }
+  return body.message || ('HTTP ' + res.status);
+}
 const API_TIMEOUT_MS = 30_000;
 
 function $id(id) { return document.getElementById(id); }
@@ -185,11 +204,11 @@ async function apiFetch(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
      allow-forms       — needed for any forms inside the report
    Top-level navigation is NOT in the list — the report cannot escape.
 ================================ */
-function openReport(html, vin) {
-  showReportOverlay(html, vin);
+function openReport(html, vin, opts = {}) {
+  showReportOverlay(html, vin, opts);
 }
 
-function showReportOverlay(html, vin) {
+function showReportOverlay(html, vin, opts = {}) {
   document.getElementById('reportOverlay')?.remove();
 
   const overlay = document.createElement('div');
@@ -219,6 +238,25 @@ function showReportOverlay(html, vin) {
         ✕ Close
       </button>
     </div>`;
+
+  // Guest email-capture — only when a guest (no logged-in user) just bought this
+  // report and we have its VIN. Lets them send a personal copy to any email.
+  if (opts.guest && vin) {
+    const cap = document.createElement('div');
+    cap.style.cssText =
+      'flex-basis:100%;display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;';
+    cap.innerHTML = `
+      <span style="color:rgba(255,255,255,0.85);font-size:12px;">Want a copy?</span>
+      <input id="guestEmailInput" type="email" inputmode="email" autocomplete="email"
+        placeholder="you@example.com"
+        style="flex:1;min-width:160px;max-width:260px;padding:5px 10px;border-radius:6px;border:none;font-size:12px;" />
+      <button id="guestEmailBtn"
+        style="background:#16a34a;color:white;border:none;padding:5px 12px;border-radius:6px;
+               font-weight:bold;cursor:pointer;font-size:12px;">
+        Email me a copy
+      </button>`;
+    bar.appendChild(cap);
+  }
 
   const iframe = document.createElement('iframe');
   iframe.style.cssText = 'flex:1;border:none;width:100%;';
@@ -265,6 +303,33 @@ function showReportOverlay(html, vin) {
       btn.disabled = false;
     }
   });
+
+  // Guest email-capture handler — POST { to, vin, type, oneTimeSession } to the
+  // unauth guest path of /api/email-report. Reuses showToast for feedback.
+  if (opts.guest && vin) {
+    overlay.querySelector('#guestEmailBtn')?.addEventListener('click', async () => {
+      const input = overlay.querySelector('#guestEmailInput');
+      const btn   = overlay.querySelector('#guestEmailBtn');
+      const to    = (input?.value || '').trim();
+      if (!to || !to.includes('@')) { showToast('Enter a valid email', 'error'); input?.focus(); return; }
+      const orig = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = '⏳ Sending…';
+      try {
+        const r = await apiFetch('/api/email-report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to, vin, type: 'carfax', oneTimeSession: opts.oneTimeSession || null }),
+        }, 30_000);
+        if (!r.ok) { showToast('Could not send — please try again', 'error'); return; }
+        showToast(`Report sent to ${to}`, 'ok');
+        if (input) input.value = '';
+      } catch {
+        showToast('Could not send — please try again', 'error');
+      } finally {
+        btn.disabled = false; btn.innerHTML = orig;
+      }
+    });
+  }
 
   function closeOverlay() {
     const el = document.getElementById('reportOverlay');
@@ -429,10 +494,10 @@ async function resumePendingPurchase() {
   if (!user && stripeSessionId) pending.oneTimeSession = stripeSessionId;
   try {
     const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) }, 60_000);
-    if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
+    if (!r.ok) { showToast(await friendlyReportError(r), 'error'); return; }
     const html = await r.text();
     clearPending();
-    openReport(html);
+    openReport(html, pending.vin || '', (!user && stripeSessionId && pending.vin) ? { guest: true, oneTimeSession: stripeSessionId } : {});
     trackPurchase(pending.amount || 5.99);
     showToast('Report ready!', 'ok');
     addToHistory({ vin: pending.vin, type: pending.type || 'carfax', ts: Date.now() });
@@ -456,7 +521,8 @@ async function handleSuccessIfNeeded() {
       }, 60_000);
       if (!r.ok) throw new Error(await r.text());
       const html = await r.text();
-      openReport(html);
+      const { user } = await getSession();
+      openReport(html, vinParam, user ? {} : { guest: true, oneTimeSession: stripeSessionId });
       trackPurchase(5.99);
       return;
     } catch (e) {
@@ -512,6 +578,20 @@ $id('loginBtnMobile')?.addEventListener('click', openLogin); // mobile nav
 
 $id('closeUpdatePasswordModal')?.addEventListener('click', () => {
   $id('updatePasswordModal')?.classList.add('hidden');
+});
+
+// Show/hide password eye toggle (shared by login + update-password fields)
+document.querySelectorAll('[data-pw-toggle]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const input = $id(btn.getAttribute('data-pw-toggle'));
+    if (!input) return;
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.setAttribute('aria-pressed', String(show));
+    btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    btn.querySelector('[data-pw-eye]')?.classList.toggle('hidden', show);
+    btn.querySelector('[data-pw-eye-off]')?.classList.toggle('hidden', !show);
+  });
 });
 
 async function doSignup() {
@@ -1261,7 +1341,7 @@ f?.addEventListener('submit', async (e) => {
       openBuyModal(data);
       return;
     }
-    if (!r.ok) { showToast(await r.text() || ('HTTP ' + r.status), 'error'); return; }
+    if (!r.ok) { showToast(await friendlyReportError(r), 'error'); return; }
 
     const html = await r.text();
     openReport(html, data.vin || '');

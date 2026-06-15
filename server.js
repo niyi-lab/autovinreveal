@@ -1630,8 +1630,15 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
           pendingChargeId = null;
         }
         const msg = String(e.message || "");
-        if (msg.includes("CS_404") || /invalid.*vin|vin.*not.*found/i.test(msg)) {
-          return res.status(422).json({ error: "invalid_vin", reason: "remote_reject", message: "VIN not found in database. You have been refunded." });
+        // Treat every "provider has no record for this format-valid VIN" signal as a
+        // friendly not-found, not a scary provider error. The pending charge was
+        // already refunded above (refundAndResolve), so the user is never charged.
+        const notFound =
+          msg.includes("CS_404") ||
+          msg.includes("RV_EMPTY_RESPONSE") ||
+          /invalid.*vin|vin.*not.*found|not.?found|no\s+(record|report|data|results?)|does\s*n['o]?t\s+exist|unavailable|not\s+available|no\s+vehicle/i.test(msg);
+        if (notFound) {
+          return res.status(422).json({ error: "invalid_vin", reason: "remote_reject", message: "VIN not found — please double-check it. You have not been charged." });
         }
         return res.status(502).json({ error: "provider_error", message: "Report generation failed. You have been refunded." });
       }
@@ -1719,23 +1726,39 @@ app.post("/api/email-report", async (req, res) => {
     if (!mailer) return res.status(500).json({ error: "email_not_configured" });
 
     const { user } = await getUser(req);
-    if (!user) return res.status(401).json({ error: "unauthorized" });
 
-    const { to, vin, type = "carfax" } = req.body || {};
+    const { to, vin, type = "carfax", oneTimeSession } = req.body || {};
     if (!to || !String(to).includes("@")) return res.status(400).json({ error: "invalid_to" });
 
     const targetVin = (vin || "").trim().toUpperCase();
     if (!targetVin) return res.status(400).json({ error: "vin_required" });
     const typeL = (type || "carfax").toLowerCase();
 
-    // Only the owner may email their report (was previously unauthenticated —
-    // anyone who knew a cached VIN could email that report).
-    const { data: owned } = await supabaseService
-      .from("vin_queries")
-      .select("id")
-      .eq("user_id", user.id).eq("vin", targetVin).eq("type", typeL).eq("success", true)
-      .maybeSingle();
-    if (!owned) return res.status(403).json({ error: "report_not_owned" });
+    if (user) {
+      // Logged-in: only the owner may email their report (was previously
+      // unauthenticated — anyone who knew a cached VIN could email that report).
+      const { data: owned } = await supabaseService
+        .from("vin_queries")
+        .select("id")
+        .eq("user_id", user.id).eq("vin", targetVin).eq("type", typeL).eq("success", true)
+        .maybeSingle();
+      if (!owned) return res.status(403).json({ error: "report_not_owned" });
+    } else {
+      // Guest: authorize via the one-time Stripe checkout receipt. Verify the
+      // session is paid and its metadata.vin matches the requested VIN. This is a
+      // read-only Stripe check (no markSessionConsumed), so guests can resend.
+      if (!oneTimeSession) return res.status(401).json({ error: "unauthorized" });
+      try {
+        const sStripe = stripeForId(oneTimeSession);
+        const s = await sStripe.checkout.sessions.retrieve(oneTimeSession);
+        if (s.payment_status !== "paid") return res.status(403).json({ error: "receipt_unpaid" });
+        if ((s.metadata?.vin || "").trim().toUpperCase() !== targetVin) {
+          return res.status(403).json({ error: "receipt_vin_mismatch" });
+        }
+      } catch {
+        return res.status(403).json({ error: "receipt_invalid" });
+      }
+    }
 
     const raw = await getReportData(targetVin, typeL);
     if (!raw) return res.status(404).json({ error: "not_cached" });
@@ -2228,6 +2251,8 @@ FACTS - never say anything outside this list:
 Single report is $5.99 and needs no account. 5-pack is $20 ($4 each) and needs an account. 20-pack is $58 ($2.90 each) and needs an account.
 Monthly plans: Starter $30/mo for 20 reports, Pro $98/mo for 100 reports, Premium $160/mo for 200 reports.
 Reports cover accidents, odometer rollbacks, title issues, service records, open recalls.
+It is a full, complete vehicle history report - the same data you would get from a dealer report or CARFAX, including accidents, title brands, odometer rollbacks, open recalls, and service records. Data comes from a national vehicle-history database. When asked if it is a full report or a full CARFAX, confidently confirm yes - do not say you are unsure.
+If they ask why it asks them to verify (a checkbox or captcha) when they hit Pay Now: that is a quick Cloudflare bot-check shown right before payment to keep bots out. Tell them nothing is wrong - just complete the check and they go straight to checkout.
 Search by VIN or license plate plus state. Credits never expire. Pay by card.
 Failed reports are automatically refunded. Support email is support@autovinreveal.com.
 
@@ -2252,6 +2277,10 @@ ESCALATE: Only add ESCALATE on its own final line when the customer has a real u
       { role: "assistant", content: "Ok. Did you see any error message on screen, or did it just not show the report?" },
       { role: "user",      content: "no error it just didnt show" },
       { role: "assistant", content: "In that case email support@autovinreveal.com with your transaction ID and the VIN you searched and they will get it sorted fast." },
+      { role: "user",      content: "is it a full carfax" },
+      { role: "assistant", content: "Yes - it's a full vehicle history report with all the same data you'd get from a dealer report, including accidents, title brands, odometer rollbacks, open recalls, and service records. It pulls from a national vehicle-history database." },
+      { role: "user",      content: "why does it keep asking me to verify when i hit pay now" },
+      { role: "assistant", content: "That's just a quick Cloudflare bot-check right before payment to keep bots out, nothing's wrong. Complete the checkbox and you'll go straight to checkout." },
     ];
 
     // De-dupe: the client pushes the latest user turn into `history` AND sends it
