@@ -757,13 +757,14 @@ async function unmarkSessionConsumed(sessionId) {
 /* ================================================================
    Share Tokens — DB-backed
 ================================================================ */
-async function createShareToken(vin, type) {
+async function createShareToken(vin, type, vehicle = null) {
   const token     = Buffer.from(crypto.randomUUID()).toString("base64url").replace(/=/g, "");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   await supabaseService.from("share_tokens").insert({
     token,
     vin:        vin.toUpperCase(),
     type:       type.toLowerCase(),
+    vehicle:    vehicle || null,
     expires_at: expiresAt,
   });
   return { token, expiresAt };
@@ -772,12 +773,99 @@ async function createShareToken(vin, type) {
 async function getShareToken(token) {
   const { data } = await supabaseService
     .from("share_tokens")
-    .select("vin, type, expires_at")
+    .select("vin, type, vehicle, expires_at")
     .eq("token", token)
     .maybeSingle();
   if (!data) return null;
   if (new Date(data.expires_at).getTime() <= Date.now()) return null;
   return data;
+}
+
+/* Derive a "YEAR MAKE MODEL" label from a provider report, for share previews.
+   The report body is React-rendered from embedded JSON, so we read that JSON
+   (or a visible "YYYY Make Model" string) rather than the rendered DOM. */
+function extractVehicleLabel(html) {
+  if (!html || typeof html !== "string") return null;
+  // 1. Structured JSON fields embedded by the provider (e.g. __INITIAL__DATA__).
+  const year  = html.match(/"(?:modelYear|model_year|year)"\s*:\s*"?(\d{4})"?/i)?.[1];
+  const make  = html.match(/"make(?:Name)?"\s*:\s*"([^"]{2,30})"/i)?.[1];
+  const model = html.match(/"model(?:Name)?"\s*:\s*"([^"]{1,40})"/i)?.[1];
+  if (year && make) {
+    const label = [year, make, model].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    if (label.length >= 6) return label;
+  }
+  // 2. Fallback: a visible "YYYY Make Model" string (title/heading).
+  const m = html.match(/\b(?:19|20)\d{2}\s+[A-Z][A-Za-z-]{1,18}(?:\s+[A-Za-z0-9][A-Za-z0-9.-]{0,18}){0,3}/);
+  return m ? m[0].replace(/\s+/g, " ").trim() : null;
+}
+
+/* Make names that should NOT be naively title-cased (acronyms / styling). */
+const MAKE_OVERRIDES = {
+  BMW: "BMW", GMC: "GMC", "MERCEDES-BENZ": "Mercedes-Benz", MINI: "MINI",
+  RAM: "Ram", FIAT: "FIAT", BYD: "BYD", "ROLLS-ROYCE": "Rolls-Royce",
+  KIA: "Kia", "ALFA ROMEO": "Alfa Romeo", "LAND ROVER": "Land Rover",
+};
+function normalizeMake(make) {
+  const up = make.trim().toUpperCase();
+  if (MAKE_OVERRIDES[up]) return MAKE_OVERRIDES[up];
+  return make.trim().replace(/\b[a-z]+/gi, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
+}
+
+/* Authoritative VIN → "YEAR MAKE MODEL" via NHTSA vPIC (free, no key).
+   Cached in-memory by VIN; returns null on failure so callers can fall back. */
+const VEHICLE_LABEL_CACHE = new Map();
+async function decodeVinLabel(vin) {
+  if (!vin) return null;
+  const key = vin.toUpperCase();
+  if (VEHICLE_LABEL_CACHE.has(key)) return VEHICLE_LABEL_CACHE.get(key);
+  try {
+    const r = await axios.get(
+      `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${encodeURIComponent(key)}?format=json`,
+      { timeout: 4000 }
+    );
+    const row   = r.data?.Results?.[0] || {};
+    const year  = String(row.ModelYear || "").trim();
+    const make  = String(row.Make || "").trim();
+    const model = String(row.Model || "").trim();
+    if (make) {
+      const label = [year, normalizeMake(make), model].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+      if (label.length >= 4) { VEHICLE_LABEL_CACHE.set(key, label); return label; }
+    }
+  } catch { /* network/timeout — fall through to null */ }
+  return null;
+}
+
+/* Inject Open Graph / Twitter meta into a shared report's <head> so links
+   preview with the vehicle's year+model instead of a blank card. */
+function injectShareMeta(html, { vin, vehicle, url }) {
+  const esc = (s) => String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const host  = SITE_URL.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+  const title = (vehicle ? `${vehicle} — Vehicle History Report` : `Vehicle History Report — VIN ${vin}`) + ` | ${host}`;
+  const desc  = vehicle
+    ? `Full history for this ${vehicle}: accidents, title brands, odometer, open recalls & service records — via AutoVINReveal.`
+    : `Full vehicle history report: accidents, title brands, odometer, recalls & service records — via AutoVINReveal.`;
+  const img = `${SITE_URL}/og-image.png`;
+  const tags =
+    `<title>${esc(title)}</title>\n` +
+    `<meta name="description" content="${esc(desc)}">\n` +
+    `<meta name="robots" content="noindex,nofollow">\n` +
+    `<meta property="og:type" content="article">\n` +
+    `<meta property="og:site_name" content="AutoVINReveal">\n` +
+    `<meta property="og:title" content="${esc(title)}">\n` +
+    `<meta property="og:description" content="${esc(desc)}">\n` +
+    `<meta property="og:url" content="${esc(url)}">\n` +
+    `<meta property="og:image" content="${esc(img)}">\n` +
+    `<meta property="og:image:width" content="1200">\n` +
+    `<meta property="og:image:height" content="630">\n` +
+    `<meta name="twitter:card" content="summary_large_image">\n` +
+    `<meta name="twitter:title" content="${esc(title)}">\n` +
+    `<meta name="twitter:description" content="${esc(desc)}">\n` +
+    `<meta name="twitter:image" content="${esc(img)}">`;
+  // Drop the provider's own <title> so ours is the one shown.
+  let out = html.replace(/<title>[\s\S]*?<\/title>/i, "");
+  if (/<head[^>]*>/i.test(out)) return out.replace(/<head[^>]*>/i, (mt) => `${mt}\n${tags}`);
+  return `<head>${tags}</head>\n${out}`;
 }
 
 /* ================================================================
@@ -1017,7 +1105,7 @@ app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 // Legitimate users run 1-5 reports. Scrapers run hundreds.
 const reportRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000,   // 1 hour window
-  max: 10,                     // max 10 report requests per IP per hour
+  max: 30,                     // anonymous guests only (logged-in users are skipped below)
   keyGenerator: (req) => {
     // Use forwarded IP (Render passes real IP in x-forwarded-for)
     return req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip;
@@ -1026,8 +1114,13 @@ const reportRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    // Don't rate limit Render health checks
-    return req.path === "/health";
+    // Never limit Render health checks.
+    if (req.path === "/health") return true;
+    // Logged-in users are already protected by the credit system and the
+    // per-IP unique-VIN tracker, and re-opening a report they already own is
+    // free — so this coarse anti-scrape limit must never block them.
+    if (req.headers.authorization?.startsWith("Bearer ")) return true;
+    return false;
   },
 });
 
@@ -1036,15 +1129,23 @@ const suspiciousIps = new Map(); // ip → { count, firstSeen, blocked }
 
 function trackSuspicion(ip, vin) {
   const now = Date.now();
-  const entry = suspiciousIps.get(ip) || { count: 0, vins: new Set(), firstSeen: now, blocked: false };
+  let entry = suspiciousIps.get(ip);
+  // Roll the 1-hour window: once it elapses, forget everything for this IP —
+  // including any prior block. Without this, a blocked entry stayed blocked
+  // until the next server restart (why "waiting days" never cleared it).
+  if (!entry || (now - entry.firstSeen) > 60 * 60 * 1000) {
+    entry = { count: 0, vins: new Set(), firstSeen: now, blocked: false };
+  }
   entry.count++;
   entry.vins.add(vin);
   entry.lastSeen = now;
 
-  // Auto-block if: 20+ unique VINs in 1 hour from same IP
-  if (entry.vins.size >= 20 && (now - entry.firstSeen) < 60 * 60 * 1000) {
+  // Auto-block if: 30+ unique VINs within the rolling 1-hour window.
+  if (entry.vins.size >= 30) {
+    if (!entry.blocked) {
+      console.warn(`[AntiScrape] BLOCKED IP ${ip} — ${entry.vins.size} unique VINs in ${Math.round((now - entry.firstSeen)/60000)}min`);
+    }
     entry.blocked = true;
-    console.warn(`[AntiScrape] BLOCKED IP ${ip} — ${entry.vins.size} unique VINs in ${Math.round((now - entry.firstSeen)/60000)}min`);
   }
   suspiciousIps.set(ip, entry);
   return entry.blocked;
@@ -1529,11 +1630,6 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
       return res.status(403).json({ error: "forbidden", message: "Access denied." });
     }
 
-    // Block if this IP has been auto-blocked for scraping
-    if (trackSuspicion(clientIp, targetVin)) {
-      return res.status(429).json({ error: "rate_limited", message: "Too many requests." });
-    }
-
     // Block known CARFAX/investigator IPs silently — return fake success with no data
     if (isBlockedIp(clientIp)) {
       console.warn(`[AntiCAR] Blocked known investigator IP: ${clientIp} VIN: ${targetVin}`);
@@ -1588,6 +1684,13 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
     // expired (raw is null), a fresh pull is a new purchase for everyone — owner
     // included. Non-owners always pay, even on a cache hit.
     const freeAccess = alreadyOwned && raw;
+
+    // Anti-scrape: only brand-new (non-owned) lookups count toward the per-IP
+    // unique-VIN limit. Re-opening reports you already own never trips it.
+    if (!freeAccess && trackSuspicion(clientIp, targetVin)) {
+      return res.status(429).json({ error: "rate_limited", message: "Too many requests. Please try again later." });
+    }
+
     if (!freeAccess) {
       if (oneTimeSession) {
         try {
@@ -1862,7 +1965,16 @@ app.post("/api/share", async (req, res) => {
 
     const raw = await getReportData(vinU, typeL);
     if (!raw) return res.status(404).json({ error: "not_cached" });
-    const { token, expiresAt } = await createShareToken(vinU, typeL);
+
+    // Resolve the real vehicle (year/make/model) for the link preview — decode the
+    // VIN authoritatively (NHTSA), falling back to the report's embedded data.
+    let vehicle = await decodeVinLabel(vinU);
+    if (!vehicle) {
+      const dec = decodeReportBase64(raw);
+      if (dec?.kind === "html") vehicle = extractVehicleLabel(dec.html);
+    }
+
+    const { token, expiresAt } = await createShareToken(vinU, typeL, vehicle);
     res.json({ url: `${SITE_URL}/view/${token}`, expiresAt });
   } catch { res.status(500).json({ error: "Failed to create share link" }); }
 });
@@ -1876,8 +1988,13 @@ app.get("/view/:token", async (req, res) => {
     const decoded = decodeReportBase64(raw);
     if (decoded.kind === "html") {
       res.setHeader("Content-Type", "text/html");
-      // BLANK-PAGE FIX: same injection as main report route
-      return res.send(injectReportChrome(decoded.html));
+      // BLANK-PAGE FIX: same injection as main report route, plus share-preview
+      // meta so links unfurl with the vehicle's year+model.
+      // Prefer the label stored when the link was created; fall back for older
+      // tokens (report-embedded data, then an authoritative VIN decode).
+      const vehicle  = meta.vehicle || extractVehicleLabel(decoded.html) || await decodeVinLabel(meta.vin);
+      const shareUrl = `${SITE_URL}/view/${req.params.token}`;
+      return res.send(injectShareMeta(injectReportChrome(decoded.html), { vin: meta.vin, vehicle, url: shareUrl }));
     }
     if (decoded.kind === "pdf") {
       res.setHeader("Content-Type", "application/pdf");

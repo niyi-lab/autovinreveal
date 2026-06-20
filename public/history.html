@@ -172,6 +172,32 @@
         }, 4000);
       }
 
+      /* Styled confirm dialog — replaces the ugly native confirm()/alert().
+         Returns a Promise<boolean>. */
+      function customConfirm({ title = 'Are you sure?', message = '', confirmText = 'Confirm', cancelText = 'Cancel', tone = 'blue' } = {}) {
+        return new Promise((resolve) => {
+          document.getElementById('confirmBackdrop')?.remove();
+          const backdrop = document.createElement('div');
+          backdrop.id = 'confirmBackdrop';
+          backdrop.className = 'fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 backdrop-blur-sm';
+          const okClass = tone === 'red' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700';
+          backdrop.innerHTML = `
+            <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" role="dialog" aria-modal="true">
+              <h3 class="text-lg font-bold text-gray-900 mb-2">${title}</h3>
+              <p class="text-sm text-gray-500 mb-6 whitespace-pre-line">${message}</p>
+              <div class="flex gap-3 justify-end">
+                <button data-cc="cancel" class="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">${cancelText}</button>
+                <button data-cc="ok" class="px-4 py-2 rounded-lg text-sm font-bold text-white ${okClass} transition-colors">${confirmText}</button>
+              </div>
+            </div>`;
+          document.body.appendChild(backdrop);
+          const done = (val) => { backdrop.remove(); resolve(val); };
+          backdrop.querySelector('[data-cc="ok"]').addEventListener('click', () => done(true));
+          backdrop.querySelector('[data-cc="cancel"]').addEventListener('click', () => done(false));
+          backdrop.addEventListener('click', (e) => { if (e.target === backdrop) done(false); });
+        });
+      }
+
       function setBtnLoading(btn, text = 'Loading…') {
         if (!btn) return () => {};
         const orig = btn.innerHTML;
@@ -329,7 +355,7 @@
         // Save as PDF — opens new tab and triggers print
         bar.querySelector('#overlayPrintBtn').addEventListener('click', () => {
           const win = window.open('', '_blank');
-          if (!win) { alert('Pop-ups blocked. Please allow pop-ups.'); return; }
+          if (!win) { showToast('Pop-ups blocked — please allow pop-ups and try again.', 'error'); return; }
           win.document.open(); win.document.write(html); win.document.close();
           win.addEventListener('load', () => setTimeout(() => win.print(), 500));
         });
@@ -482,7 +508,12 @@
           if (r.status === 404) {
             const json = await r.json().catch(() => ({}));
             if (json.can_refetch && vin) {
-              const go = confirm('This report is no longer in our cache.\n\nClick OK to re-fetch it for free (you already own it).');
+              const go = await customConfirm({
+                title: 'Report expired',
+                message: "This report is older than 20 days, so it's no longer saved on our servers.\n\nRe-fetch a fresh copy from the provider now? This will use 1 credit.",
+                confirmText: 'Re-fetch · 1 credit',
+                cancelText: 'Cancel',
+              });
               if (go) {
                 showReportLoader();
                 const r2 = await apiFetch('/api/report', {
@@ -678,10 +709,10 @@
 
           const srcTag = item.source === 'server'
             ? `<span class="px-2 py-0.5 text-[10px] font-medium text-blue-500 bg-blue-50 border border-blue-100 rounded-full flex items-center gap-1">
-                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-                Supabase
+                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-.88-3.797A4 4 0 0112 6.341 3.5 3.5 0 0118.5 9a3.5 3.5 0 01-.5 6.95M5 19h13"/></svg>
+                Saved
               </span>`
-            : `<span class="px-2 py-0.5 text-[10px] font-medium text-gray-400 bg-gray-100 rounded-full">local</span>`
+            : `<span class="px-2 py-0.5 text-[10px] font-medium text-gray-400 bg-gray-100 rounded-full">This device</span>`
 
           const row = document.createElement('div');
           row.className = 'row-enter bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-all p-4 sm:p-5';
@@ -801,8 +832,15 @@
       $id('typeFilter')?.addEventListener('change',  applyFilters);
       $id('sortOrder')?.addEventListener('change',   applyFilters);
 
-      $id('clearAllBtn')?.addEventListener('click', () => {
-        if (!confirm('Clear all local report history? Server-side records for your account will not be deleted.')) return;
+      $id('clearAllBtn')?.addEventListener('click', async () => {
+        const ok = await customConfirm({
+          title: 'Clear local history?',
+          message: 'This clears reports saved in this browser only. Reports saved to your account will not be deleted.',
+          confirmText: 'Clear',
+          cancelText: 'Cancel',
+          tone: 'red',
+        });
+        if (!ok) return;
         localStorage.removeItem(HISTORY_KEY);
         allItems = allItems.filter(i => i.source === 'server'); // keep server rows in view
         applyFilters();

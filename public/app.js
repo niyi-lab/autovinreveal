@@ -1044,6 +1044,11 @@ function recentChecksRowHTML(vin, type, ago) {
         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
         Email
       </button>
+      <button data-vin="${vin}" data-type="${type}" data-action="copylink"
+        class="flex items-center gap-1 text-[11px] font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-lg transition-colors">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 11-5.656-5.656l1.5-1.5m6.828-1.828a4 4 0 010-5.656l3-3a4 4 0 115.656 5.656l-1.5 1.5"/></svg>
+        Copy link
+      </button>
     </div>
   </div>`;
 }
@@ -1071,6 +1076,7 @@ function bindRecentChecksBtns() {
       }
       if (action === 'download') downloadHistoryPDF(item, btn);
       if (action === 'email')    openEmailModal(item);
+      if (action === 'copylink') copyShareLink(vin, type);
     });
   });
 }
