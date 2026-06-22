@@ -68,7 +68,7 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
             </svg>
           </div>
-          <input id="searchInput" type="text" placeholder="Search by VIN or plate…"
+          <input id="searchInput" type="text" placeholder="Search by VIN, plate, make or model…"
             class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 outline-none text-sm transition-all font-mono uppercase placeholder:normal-case placeholder:font-sans placeholder:capitalize" />
         </div>
 
@@ -285,12 +285,13 @@
           }
           const { rows = [] } = await r.json();
           return rows.map(row => ({
-            vin:    row.vin,
-            type:   row.type || 'carfax',
-            ts:     new Date(row.created_at).getTime(),
-            state:  row.state  || '',
-            plate:  row.plate  || '',
-            source: 'server',
+            vin:     row.vin,
+            type:    row.type || 'carfax',
+            ts:      new Date(row.created_at).getTime(),
+            state:   row.state   || '',
+            plate:   row.plate   || '',
+            vehicle: row.vehicle || '',
+            source:  'server',
           }));
         } catch { return []; }
       }
@@ -658,7 +659,8 @@
 
         filteredItems = allItems.filter(item => {
           if (q && !item.vin.toUpperCase().includes(q) &&
-              !(item.plate || '').toUpperCase().includes(q)) return false;
+              !(item.plate   || '').toUpperCase().includes(q) &&
+              !(item.vehicle || '').toUpperCase().includes(q)) return false;
           if (type && item.type !== type) return false;
           return true;
         });
@@ -702,6 +704,10 @@
           const label   = isPlate
             ? `<span class="font-mono font-bold">${item.plate || '—'}</span><span class="ml-1.5 text-xs text-gray-400 font-normal">(plate lookup)</span>`
             : `<span class="font-mono font-bold">${item.vin}</span>`;
+          const vehName = (item.vehicle || '').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+          const vehLine = vehName
+            ? `<p class="text-sm font-bold text-gray-900 truncate mb-0.5">${vehName}</p>`
+            : '';
 
           const typeTag = item.type === 'autocheck'
             ? `<span class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-purple-100 text-purple-700 rounded-full">AutoCheck</span>`
@@ -720,8 +726,9 @@
           row.innerHTML = `
             <div class="flex flex-col sm:flex-row sm:items-center gap-3">
               <div class="flex-1 min-w-0">
+                ${vehLine}
                 <div class="flex flex-wrap items-center gap-2 mb-1">
-                  <span class="text-gray-900 text-sm">${label}</span>
+                  <span class="text-gray-700 text-sm">${label}</span>
                   ${typeTag}
                   ${srcTag}
                 </div>

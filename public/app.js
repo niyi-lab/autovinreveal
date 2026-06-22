@@ -60,12 +60,18 @@ async function friendlyReportError(res) {
   try { body = await res.clone().json(); }
   catch { try { const t = await res.text(); body = t ? JSON.parse(t) : {}; } catch { body = {}; } }
   const code = body.error || '';
-  if (code === 'invalid_vin' || res.status === 422) {
+  if (code === 'report_unavailable') {
+    return body.message || 'This report isn’t available for this VIN right now. You were not charged — please try again in a few minutes.';
+  }
+  if (code === 'invalid_vin') {
     return 'VIN not found — please double-check it. You were not charged.';
   }
   if (code === 'insufficient_credits') return 'You’re out of credits.';
   if (code === 'provider_error') {
     return 'We couldn’t pull that report right now. If you were charged, you’ve been refunded — please try again shortly.';
+  }
+  if (res.status === 422) {
+    return 'VIN not found — please double-check it. You were not charged.';
   }
   return body.message || ('HTTP ' + res.status);
 }
@@ -204,6 +210,20 @@ async function apiFetch(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
      allow-forms       — needed for any forms inside the report
    Top-level navigation is NOT in the list — the report cannot escape.
 ================================ */
+// Read the owner/age/vehicle hints the server attaches to a delivered report
+// (X-Report-Owned / X-Report-Age-Days / X-Report-Vehicle).
+function ownerOptsFromRes(res, isUser) {
+  let vehicle = '';
+  try { vehicle = decodeURIComponent(res.headers.get('X-Report-Vehicle') || ''); }
+  catch { vehicle = res.headers.get('X-Report-Vehicle') || ''; }
+  const ageRaw = res.headers.get('X-Report-Age-Days');
+  return {
+    owned:   res.headers.get('X-Report-Owned') === '1' && !!isUser,
+    ageDays: ageRaw != null ? parseInt(ageRaw, 10) : null,
+    vehicle,
+  };
+}
+
 function openReport(html, vin, opts = {}) {
   showReportOverlay(html, vin, opts);
 }
@@ -219,9 +239,20 @@ function showReportOverlay(html, vin, opts = {}) {
   const bar = document.createElement('div');
   bar.style.cssText =
     'flex-shrink:0;background:#1e3a8a;padding:8px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;';
+  const titleText  = (opts.vehicle || '').replace(/[<>&"]/g, '') || 'Vehicle History Report';
+  const ageNote    = (opts.owned && opts.ageDays != null && opts.ageDays >= 20)
+    ? `<span style="color:rgba(255,255,255,0.7);font-size:11px;white-space:nowrap;">Saved · ${opts.ageDays}d old</span>` : '';
+  const refreshBtn = (opts.owned && vin && vin !== '(from plate)')
+    ? `<button id="overlayRefreshBtn" data-stage="0"
+        style="background:transparent;color:white;border:1px solid rgba(255,255,255,0.4);padding:5px 12px;border-radius:6px;
+               font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
+        🔄 Get updated report
+      </button>` : '';
   bar.innerHTML = `
-    <span style="color:white;font-weight:bold;font-size:14px;flex-shrink:0;">Vehicle History Report</span>
+    <span style="color:white;font-weight:bold;font-size:14px;flex-shrink:0;max-width:52vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${titleText}</span>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      ${ageNote}
+      ${refreshBtn}
       <button id="overlayPrintBtn"
         style="background:transparent;color:white;border:1px solid rgba(255,255,255,0.4);padding:5px 12px;border-radius:6px;
                font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
@@ -246,7 +277,8 @@ function showReportOverlay(html, vin, opts = {}) {
     cap.style.cssText =
       'flex-basis:100%;display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;';
     cap.innerHTML = `
-      <span style="color:rgba(255,255,255,0.85);font-size:12px;">Want a copy?</span>
+      <span style="color:#fde68a;font-size:12px;font-weight:700;">💾 Save your report —</span>
+      <span style="color:rgba(255,255,255,0.9);font-size:12px;">download it above (it won't be saved to an account), or email yourself a copy:</span>
       <input id="guestEmailInput" type="email" inputmode="email" autocomplete="email"
         placeholder="you@example.com"
         style="flex:1;min-width:160px;max-width:260px;padding:5px 10px;border-radius:6px;border:none;font-size:12px;" />
@@ -327,6 +359,40 @@ function showReportOverlay(html, vin, opts = {}) {
         showToast('Could not send — please try again', 'error');
       } finally {
         btn.disabled = false; btn.innerHTML = orig;
+      }
+    });
+  }
+
+  // Owner "Get updated report" — voluntary re-pull for newer data (uses 1 credit).
+  // Two-click confirm avoids an ugly browser dialog and an accidental charge.
+  if (opts.owned && vin && vin !== '(from plate)') {
+    overlay.querySelector('#overlayRefreshBtn')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const reset = () => { btn.dataset.stage = '0'; btn.disabled = false; btn.innerHTML = '🔄 Get updated report'; btn.style.background = 'transparent'; };
+      if (btn.dataset.stage === '0') {
+        btn.dataset.stage = '1';
+        btn.innerHTML = '🔄 Uses 1 credit — confirm';
+        btn.style.background = '#16a34a';
+        setTimeout(() => { if (btn.dataset.stage === '1') reset(); }, 4000);
+        return;
+      }
+      btn.disabled = true; btn.innerHTML = '⏳ Fetching latest…';
+      try {
+        const { token } = await getSession();
+        if (!token) { showToast('Please sign in', 'error'); reset(); return; }
+        const r = await apiFetch(API.report, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ vin, type: opts.type || 'carfax', as: 'html', allowLive: true, refresh: true }),
+        }, 60_000);
+        if (!r.ok) { showToast(await friendlyReportError(r), 'error'); reset(); return; }
+        const freshHtml = await r.text();
+        const o2 = ownerOptsFromRes(r, true);
+        showToast('Updated report loaded', 'ok');
+        try { await refreshBalancePill?.(); } catch (_) {}
+        showReportOverlay(freshHtml, vin, { owned: true, ageDays: o2.ageDays != null ? o2.ageDays : 0, vehicle: o2.vehicle || opts.vehicle, type: opts.type || 'carfax' });
+      } catch {
+        showToast('Could not refresh — please try again', 'error'); reset();
       }
     });
   }
@@ -831,39 +897,30 @@ async function openHistoryHTML(item) {
   showToast('Loading report…', 'ok');
   try {
     await ensureBackendReady();
-    const r = await apiFetch(API.report, {
+    let r = await apiFetch(API.report, {
       method: 'POST', headers,
-      // allowLive: false — serve from Supabase cache only, never charge a credit
+      // allowLive: false — serve the owner's stored copy, never charge a credit
       body: JSON.stringify({ vin, type, as: 'html', allowLive: false }),
     });
 
     if (r.status === 404) {
       const json = await r.json().catch(() => ({}));
       if (json.can_refetch) {
-        // Report owned but not cached — offer to re-run for free
-        const go = confirm(
-          'This report is no longer in our cache.\n\n' +
-          'Click OK to re-fetch it for free (you already own it).'
-        );
-        if (go) {
-          // Re-run with allowLive — server will skip credit since alreadyOwned
-          const r2 = await apiFetch(API.report, {
-            method: 'POST', headers,
-            body: JSON.stringify({ vin, type, as: 'html', allowLive: true }),
-          });
-          if (!r2.ok) { showToast('Re-fetch failed — ' + r2.status, 'error'); return; }
-          const html2 = await r2.text();
-          openReport(html2, vin);
-        }
-        return;
-      }
-      showToast('Report not found.', 'error'); return;
+        // Owner's saved copy isn't loadable right now — re-pull it for FREE (they
+        // own it). No prompt: viewing what you bought should never be a chore.
+        showToast('Refreshing your saved report…', 'ok');
+        r = await apiFetch(API.report, {
+          method: 'POST', headers,
+          body: JSON.stringify({ vin, type, as: 'html', allowLive: true }),
+        }, 60_000);
+        if (!r.ok) { showToast(await friendlyReportError(r), 'error'); return; }
+      } else { showToast('Report not found.', 'error'); return; }
     }
 
-    if (!r.ok) { showToast('Could not load report — ' + r.status, 'error'); return; }
+    if (!r.ok) { showToast(await friendlyReportError(r), 'error'); return; }
 
     const html = await r.text();
-    openReport(html, vin);
+    openReport(html, vin, { ...ownerOptsFromRes(r, !!token), type });
   } catch (e) { showToast(e.message || 'Request failed', 'error'); }
 }
 
@@ -1350,7 +1407,10 @@ f?.addEventListener('submit', async (e) => {
     if (!r.ok) { showToast(await friendlyReportError(r), 'error'); return; }
 
     const html = await r.text();
-    openReport(html, data.vin || '');
+    const isGuest = !currentUser && stripeSessionId;
+    openReport(html, data.vin || '', isGuest
+      ? { guest: true, oneTimeSession: stripeSessionId }
+      : { ...ownerOptsFromRes(r, !!currentUser), type: data.type || 'carfax' });
     showToast('Report fetched successfully!', 'ok');
     addToHistory({ vin: data.vin, type: data.type, ts: Date.now() });
     renderHistory();

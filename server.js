@@ -254,19 +254,26 @@ const CFC_CREDITS_KEY = "cfc_credits_remaining";
      GET /v1/balance                — credit balance
 ================================================================ */
 
-// Reports.VIN — sole provider
-const CCF_BASE = process.env.REPORTSVIN_BASE || "https://api.reports.vin/v1";
+// Report provider — switchable via REPORT_PROVIDER ("reportsvin" | "cheapcarfax").
+const REPORT_PROVIDER  = (process.env.REPORT_PROVIDER || "reportsvin").toLowerCase();
+const CCF_BASE         = process.env.REPORTSVIN_BASE    || "https://api.reports.vin/v1";
+const CHEAPCARFAX_BASE = process.env.CHEAPCARFAX_BASE   || "https://panel.cheapcarfax.net";
+const CHEAPCARFAX_KEY  = process.env.CHEAPCARFAX_API_KEY || "";
 
 const providerState = {
   cfc: { failures: 0, lastFailure: null },
 };
 const COOLDOWN_MS = 5 * 60 * 1000; // 5 min cooldown after 3 failures
 
+function providerHasKey() {
+  return REPORT_PROVIDER === "cheapcarfax" ? !!CHEAPCARFAX_KEY : !!process.env.REPORTSVIN_API_KEY;
+}
+
 function cfcAvailable() {
-  if (!process.env.REPORTSVIN_API_KEY) return false;
+  if (!providerHasKey()) return false;
   const s = providerState.cfc;
   if (s.failures >= 3 && s.lastFailure && (Date.now() - s.lastFailure) < COOLDOWN_MS) {
-    console.log(`[Provider] Reports.VIN in cooldown after ${s.failures} failures`);
+    console.log(`[Provider] ${REPORT_PROVIDER} in cooldown after ${s.failures} failures`);
     return false;
   }
   return true;
@@ -329,17 +336,84 @@ function coerceReportToBase64(content) {
   return Buffer.from(content, "utf8").toString("base64");
 }
 
+/* Title-case an ALL-CAPS "YEAR MAKE MODEL" string for display, keeping the year,
+   digit-bearing tokens (X3, F-150), and short acronyms (BMW, GMC, RX) uppercase. */
+function prettyVehicle(s) {
+  if (!s || typeof s !== "string") return null;
+  const out = s.trim().split(/\s+/).map((w) => {
+    if (/^\d{4}$/.test(w)) return w;                       // year
+    if (/\d/.test(w)) return w.toUpperCase();              // X3, F-150, RX350
+    if (w.length <= 3 && !/[aeiou]/i.test(w)) return w.toUpperCase(); // BMW, GMC, RX, GLE
+    return w[0].toUpperCase() + w.slice(1).toLowerCase();
+  }).join(" ");
+  return out || null;
+}
+
+/* CheapCARFAX provider — GET /api/carfax/vin/{vin}/html, x-api-key header,
+   returns JSON { html, id, yearMakeModel }. Returns { raw(base64), vehicle }. */
+async function fetchFromCheapcarfax(vin, _type = "carfax") {
+  if (!CHEAPCARFAX_KEY) throw new Error("RV_AUTH_ERROR:CHEAPCARFAX_API_KEY not set");
+  const endpoint = `${CHEAPCARFAX_BASE}/api/carfax/vin/${vin}/html`;
+  const MAX_ATTEMPTS = 3;
+  let lastTransient = "";
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    console.log(`[CheapCARFAX] Live fetch (attempt ${attempt}/${MAX_ATTEMPTS}): GET ${endpoint}`);
+    const r = await axios.get(endpoint, {
+      headers: { "x-api-key": CHEAPCARFAX_KEY },
+      timeout: 45000,
+      validateStatus: () => true,
+    });
+    console.log(`[CheapCARFAX] Status: ${r.status} for ${vin}`);
+    if (r.status !== 200) console.log(`[CheapCARFAX] Body:`, JSON.stringify(r.data).slice(0, 300));
+
+    if (r.status === 401) throw new Error("RV_AUTH_ERROR:Invalid CheapCARFAX API key");
+    if (r.status === 429) throw new Error("RV_RATELIMIT:Rate limit exceeded");
+    if (r.status === 400 || r.status === 404) {
+      const msg = (r.data?.message || r.data?.error || JSON.stringify(r.data) || "").toString();
+      if (/daily limit/i.test(msg))     throw new Error("RV_DAILY_LIMIT:" + msg);
+      if (/insufficient|credit|balance/i.test(msg)) throw new Error("RV_LIMIT:" + msg);
+      if (/required|17 characters|invalid|not found|no record/i.test(msg)) throw new Error("CS_404:" + msg);
+      if (/not available|unavailable|try again|processing|generating|pending|temporar/i.test(msg)) {
+        lastTransient = msg;
+        if (attempt < MAX_ATTEMPTS) { await new Promise((s) => setTimeout(s, 2500 * attempt)); continue; }
+        throw new Error("RV_UNAVAILABLE:" + msg);
+      }
+      throw new Error("RV_400:" + msg);
+    }
+    if (r.status >= 400) throw new Error(`RV_${r.status}:${JSON.stringify(r.data).slice(0, 200)}`);
+
+    const html    = r.data?.html;
+    const vehicle = prettyVehicle((r.data?.yearMakeModel || "").trim());
+    if (!html || typeof html !== "string" || html.length < 100) {
+      lastTransient = "empty html payload";
+      if (attempt < MAX_ATTEMPTS) { await new Promise((s) => setTimeout(s, 2500 * attempt)); continue; }
+      throw new Error("RV_EMPTY_RESPONSE");
+    }
+    console.log(`[CheapCARFAX] ✓ payload for ${vin} (${html.length} chars) — ${vehicle || "no ymm"}`);
+    return { raw: coerceReportToBase64(html), vehicle };
+  }
+  throw new Error("RV_UNAVAILABLE:" + (lastTransient || "Report Not Available"));
+}
+
 // Main report fetch entry point — type: "carfax" | "autocheck"
+// Returns { raw: <base64>, vehicle: <"YEAR Make Model"|null> }.
 async function cfcGetReport(vin, type = "carfax") {
   try {
-    const result = await fetchFromReportsVin(vin, type);
+    let result;
+    if (REPORT_PROVIDER === "cheapcarfax") {
+      result = await fetchFromCheapcarfax(vin, type);   // { raw, vehicle }
+    } else {
+      const raw = await fetchFromReportsVin(vin, type);  // base64 string
+      result = { raw, vehicle: null };
+    }
     providerState.cfc.failures = 0;
-    console.log(`[Provider] ✓ Reports.VIN ${type} — VIN: ${vin}`);
+    console.log(`[Provider] ✓ ${REPORT_PROVIDER} ${type} — VIN: ${vin}`);
     return result;
   } catch (err) {
     providerState.cfc.failures++;
     providerState.cfc.lastFailure = Date.now();
-    console.error(`[Provider] Reports.VIN failed for ${vin}: ${err.message}`);
+    console.error(`[Provider] ${REPORT_PROVIDER} failed for ${vin}: ${err.message}`);
     throw err;
   }
 }
@@ -374,9 +448,15 @@ async function fetchFromReportsVin(vin, type = "carfax") {
     console.log(`[Reports.VIN] Archive miss for ${vin}: ${archiveErr.message}`);
   }
 
-  // 2. Live fetch — consumes a credit
+  // 2. Live fetch — consumes a credit. "Report Not Available!" from this API is
+  // usually transient (the upstream report is still being generated), so retry a
+  // few times with a short backoff before giving up.
   const endpoint = `${CCF_BASE}/getrecord/carfax/${vin}`;
-  console.log(`[Reports.VIN] Live fetch: GET ${endpoint}`);
+  const MAX_ATTEMPTS = 3;
+  let lastTransient = "";
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  console.log(`[Reports.VIN] Live fetch (attempt ${attempt}/${MAX_ATTEMPTS}): GET ${endpoint}`);
 
   const r = await axios.get(endpoint, {
     headers: { "API-KEY": key },
@@ -411,7 +491,13 @@ async function fetchFromReportsVin(vin, type = "carfax") {
       throw new Error("RV_AUTH_ERROR:Invalid API key — check REPORTSVIN_API_KEY in Render env");
     }
     if (/credit|balance|insufficient/i.test(msg)) throw new Error("RV_LIMIT:" + msg);
-    if (/not found/i.test(msg))                   throw new Error("CS_404:VIN not found");
+    if (/not found|no record|does\s*n[o']?t\s+exist|invalid\s+vin/i.test(msg)) throw new Error("CS_404:VIN not found");
+    // Transient: report still generating / momentarily unavailable → wait & retry.
+    if (/not available|unavailable|try again|processing|generating|in progress|pending|temporar/i.test(msg)) {
+      lastTransient = msg;
+      if (attempt < MAX_ATTEMPTS) { await new Promise((s) => setTimeout(s, 2500 * attempt)); continue; }
+      throw new Error("RV_UNAVAILABLE:" + msg);
+    }
     throw new Error("RV_API_ERROR:" + msg);
   }
 
@@ -443,6 +529,10 @@ async function fetchFromReportsVin(vin, type = "carfax") {
   console.log(`[Reports.VIN] ✓ Report payload for ${vin} (${html.length} chars)`);
   // B64-DOUBLE FIX: coerce instead of blindly re-encoding
   return coerceReportToBase64(html);
+  }
+
+  // Every attempt returned a transient "unavailable" signal.
+  throw new Error("RV_UNAVAILABLE:" + (lastTransient || "Report Not Available!"));
 }
 
 // ── fetchFromCfc alias — kept for any internal callers ───────────────────────
@@ -454,6 +544,24 @@ const fetchFromCfc = fetchFromReportsVin;
 ================================================================ */
 async function getCfcApiLimits() {
   try {
+    if (REPORT_PROVIDER === "cheapcarfax") {
+      if (!CHEAPCARFAX_KEY) return null;
+      // Best-effort: CheapCARFAX exposes user/limits info under panel.cheapcarfax.net.
+      for (const p of ["/api/user/limits", "/api/user"]) {
+        try {
+          const r = await axios.get(`${CHEAPCARFAX_BASE}${p}`, { headers: { "x-api-key": CHEAPCARFAX_KEY }, timeout: 8000, validateStatus: () => true });
+          if (r.status === 200 && r.data && typeof r.data === "object") {
+            const d = r.data;
+            return {
+              credits:                   d.credits ?? d.balance ?? d.credits_remaining ?? d.remaining ?? null,
+              carfax_reports_left_today: d.daily_remaining ?? d.reports_left_today ?? d.dailyRemaining ?? null,
+              daily_limit:               d.daily_limit ?? d.dailyLimit ?? (process.env.CCF_DAILY_HARD_LIMIT ? Number(process.env.CCF_DAILY_HARD_LIMIT) : null),
+            };
+          }
+        } catch (_) { /* try next path */ }
+      }
+      return null;
+    }
     const key = process.env.REPORTSVIN_API_KEY;
     if (!key) return null;
     const r = await axios.get(`${CCF_BASE}/balance`, {
@@ -1216,8 +1324,8 @@ const lookupLimiter = rateLimit({
 reconcileStalePendingCharges();
 
 // Log provider configuration on startup
-console.log(`[Provider] Reports.VIN configured: ${!!process.env.REPORTSVIN_API_KEY}`);
-console.log(`[Provider] Reports.VIN ready — daily limit: ${process.env.CCF_DAILY_HARD_LIMIT || "none"}`);
+console.log(`[Provider] Active provider: ${REPORT_PROVIDER} — key configured: ${providerHasKey()}`);
+console.log(`[Provider] Ready — daily limit: ${process.env.CCF_DAILY_HARD_LIMIT || "none"}`);
 
 /* ================================================================
    Stripe Checkout
@@ -1644,35 +1752,53 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
       return res.status(401).json({ error: "auth_required", message: "Please log in to run reports." });
     }
 
-    // 3. Check cache
+    // 3. Check shared cache (TTL-bound — used for non-owners / fast path)
     let raw = await getReportData(targetVin, type);
 
-    // 4. Check ownership
+    // 4. Check ownership. A signed-in owner keeps access to their purchased copy
+    // FOREVER — we load their stored report directly, bypassing the 20-day TTL.
+    // `refresh:true` is a VOLUNTARY re-pull for newer data (charged 1 credit).
+    const forceRefresh = req.body?.refresh === true && allowLive;
+    let ownedAgeDays = null;
+    let ownedVehicle = null;
     if (!oneTimeSession) {
       const { user } = await getUser(req);
       currentUser = user;
       if (currentUser) {
-        const { data: past } = await supabaseService
+        const { data: ownRows } = await supabaseService
           .from("vin_queries")
-          .select("id")
+          .select("id, report_data, created_at, vehicle")
           .eq("user_id", currentUser.id)
           .eq("vin", targetVin)
           .eq("type", type)
           .eq("success", true)
-          .maybeSingle();
-        if (past) alreadyOwned = true;
+          .order("created_at", { ascending: false })
+          .limit(1);
+        const past = ownRows?.[0];
+        if (past) {
+          alreadyOwned = true;
+          ownedVehicle = past.vehicle || null;
+          if (past.created_at) ownedAgeDays = Math.floor((Date.now() - new Date(past.created_at).getTime()) / 86400000);
+          // Owner's permanent copy overrides the TTL-bound shared cache.
+          if (past.report_data && !forceRefresh) raw = past.report_data;
+        }
       }
     }
+    // Voluntary refetch: ignore any cached copy and pull fresh (charged below).
+    if (forceRefresh) raw = null;
 
     // ── 5. Deliverability ────────────────────────────────────────
-    // Nothing cached and we're not allowed to fetch live.
+    // Nothing loadable and we're not allowed to fetch live.
     if (!raw && !allowLive) {
       if (alreadyOwned) {
+        // Owner's stored copy isn't loadable right now — they own it, so re-pulling
+        // is FREE. Client should retry with allowLive:true.
         return res.status(404).json({
           error: "report_expired",
-          message: "This report has expired (20-day limit). Search the VIN again to pull a fresh copy — it will use one credit.",
+          message: "Re-opening your saved report… you own it, so this is free.",
           vin: targetVin,
           can_refetch: true,
+          owned: true,
         });
       }
       // Non-owner trying to view a report they haven't bought.
@@ -1680,10 +1806,10 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
     }
 
     // ── 6. Payment gate ──────────────────────────────────────────
-    // Free ONLY while a cached copy exists (≤20 days) AND you own it. Once it has
-    // expired (raw is null), a fresh pull is a new purchase for everyone — owner
-    // included. Non-owners always pay, even on a cache hit.
-    const freeAccess = alreadyOwned && raw;
+    // Owners view their purchased copy FREE, forever — and a free auto-recovery
+    // pull if their stored copy is ever missing. Only a VOLUNTARY refresh (for
+    // newer data) costs a credit. Non-owners always pay.
+    const freeAccess = alreadyOwned && !forceRefresh;
 
     // Anti-scrape: only brand-new (non-owned) lookups count toward the per-IP
     // unique-VIN limit. Re-opening reports you already own never trips it.
@@ -1721,10 +1847,13 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
 
     // ── 7. Live fetch (only when not already cached) ─────────────
     let justFetched = false;
+    let fetchedVehicle = null;
     if (!raw) {
       try {
-        raw = await cfcGetReport(targetVin, type);
-        justFetched = true;
+        const fetched = await cfcGetReport(targetVin, type);
+        raw           = fetched.raw;
+        fetchedVehicle = fetched.vehicle;
+        justFetched   = true;
         writeCache(targetVin, type, raw);
       } catch (e) {
         console.error(`[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`);
@@ -1733,15 +1862,26 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
           pendingChargeId = null;
         }
         const msg = String(e.message || "");
-        // Treat every "provider has no record for this format-valid VIN" signal as a
-        // friendly not-found, not a scary provider error. The pending charge was
-        // already refunded above (refundAndResolve), so the user is never charged.
+        // The pending charge was already refunded above (refundAndResolve), so the
+        // user is never charged regardless of which branch we return.
+
+        // Genuinely invalid / missing VIN — safe to tell the user to re-check it.
         const notFound =
           msg.includes("CS_404") ||
+          /invalid.*vin|vin.*not.*found|not\s*found|no\s+(record|report|data|results?)|does\s*n['o]?t\s+exist|no\s+vehicle/i.test(msg);
+
+        // Provider HAS the VIN but couldn't produce the report right now (often
+        // transient). Do NOT blame the user's VIN — be honest and suggest retry.
+        const unavailable =
+          msg.includes("RV_UNAVAILABLE") ||
           msg.includes("RV_EMPTY_RESPONSE") ||
-          /invalid.*vin|vin.*not.*found|not.?found|no\s+(record|report|data|results?)|does\s*n['o]?t\s+exist|unavailable|not\s+available|no\s+vehicle/i.test(msg);
+          /report\s+not\s+available|not\s+available|unavailable|try\s+again|still\s+(generating|processing)|in\s+progress|temporar/i.test(msg);
+
         if (notFound) {
           return res.status(422).json({ error: "invalid_vin", reason: "remote_reject", message: "VIN not found — please double-check it. You have not been charged." });
+        }
+        if (unavailable) {
+          return res.status(503).json({ error: "report_unavailable", message: "This report isn’t available for this VIN right now — our data provider couldn’t generate it. You have not been charged. Please try again in a few minutes, or try a different VIN." });
         }
         return res.status(502).json({ error: "provider_error", message: "Report generation failed. You have been refunded." });
       }
@@ -1752,6 +1892,12 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
     // ── 8. Record ownership / refresh the user's stored copy ─────
     // Store on a fresh fetch, or to create the row for a paying non-owner so they
     // own it next time. Owners re-viewing from cache skip this (no wasted write).
+    // Resolve a "YEAR Make Model" label for history search + share previews.
+    let vehicleLabel = fetchedVehicle || ownedVehicle || null;
+    if (!vehicleLabel && raw && currentUser && (justFetched || !alreadyOwned)) {
+      try { const dec = decodeReportBase64(raw); if (dec.kind === "html") vehicleLabel = extractVehicleLabel(dec.html); } catch (_) {}
+    }
+
     if (currentUser && (justFetched || !alreadyOwned)) {
       const { data: existing } = await supabaseService
         .from("vin_queries")
@@ -1759,16 +1905,25 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
         .eq("user_id", currentUser.id).eq("vin", targetVin).eq("type", type)
         .maybeSingle();
       if (existing?.id) {
-        // Bump created_at so the 20-day TTL restarts from this fresh pull.
+        // Bump created_at so the 20-day cache window restarts from this fresh pull.
+        const upd = { report_data: raw, success: true, created_at: new Date().toISOString() };
+        if (vehicleLabel) upd.vehicle = vehicleLabel;
         const { error: updErr } = await supabaseService
-          .from("vin_queries").update({ report_data: raw, success: true, created_at: new Date().toISOString() }).eq("id", existing.id);
+          .from("vin_queries").update(upd).eq("id", existing.id);
         if (updErr) console.error("[DB] Update report_data failed:", updErr.message);
       } else {
         const { error: insErr } = await supabaseService
-          .from("vin_queries").insert({ user_id: currentUser.id, vin: targetVin, type, report_data: raw, success: true });
+          .from("vin_queries").insert({ user_id: currentUser.id, vin: targetVin, type, report_data: raw, success: true, vehicle: vehicleLabel || null });
         if (insErr) console.error("[DB] Insert report failed:", insErr.message);
       }
     }
+
+    // Tell the client what we served: owner status, age of the stored copy, and the
+    // vehicle label — used to show the optional "Get updated report" button.
+    res.setHeader("X-Report-Owned", (alreadyOwned || (currentUser && justFetched)) ? "1" : "0");
+    if (ownedAgeDays != null && !justFetched) res.setHeader("X-Report-Age-Days", String(ownedAgeDays));
+    const labelForHeader = vehicleLabel || ownedVehicle;
+    if (labelForHeader) res.setHeader("X-Report-Vehicle", encodeURIComponent(labelForHeader));
 
     // 6. Deliver
     const decoded = decodeReportBase64(raw);
@@ -1928,7 +2083,7 @@ app.get("/api/history", async (req, res) => {
 
     const { data, error } = await supabaseService
       .from("vin_queries")
-      .select("vin, type, success, created_at")
+      .select("vin, type, success, created_at, vehicle")
       .eq("user_id", user.id)
       .eq("success", true)
       .order("created_at", { ascending: false })
@@ -1958,17 +2113,21 @@ app.post("/api/share", async (req, res) => {
     // Only the owner of a report may create a share link for it.
     const { data: owned } = await supabaseService
       .from("vin_queries")
-      .select("id")
+      .select("id, report_data, vehicle")
       .eq("user_id", user.id).eq("vin", vinU).eq("type", typeL).eq("success", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
     if (!owned) return res.status(403).json({ error: "report_not_owned" });
 
-    const raw = await getReportData(vinU, typeL);
+    // Owner's permanent copy (no TTL); fall back to the shared cache.
+    const raw = owned.report_data || await getReportData(vinU, typeL);
     if (!raw) return res.status(404).json({ error: "not_cached" });
 
-    // Resolve the real vehicle (year/make/model) for the link preview — decode the
-    // VIN authoritatively (NHTSA), falling back to the report's embedded data.
-    let vehicle = await decodeVinLabel(vinU);
+    // Prefer the stored "YEAR Make Model" label (authoritative from the provider);
+    // else decode the VIN (NHTSA), else parse the report's embedded data.
+    let vehicle = owned.vehicle || null;
+    if (!vehicle) vehicle = await decodeVinLabel(vinU);
     if (!vehicle) {
       const dec = decodeReportBase64(raw);
       if (dec?.kind === "html") vehicle = extractVehicleLabel(dec.html);
@@ -1983,7 +2142,20 @@ app.get("/view/:token", async (req, res) => {
   try {
     const meta = await getShareToken(req.params.token);
     if (!meta) return res.status(404).send("Link expired or not found");
-    const raw = await getReportData(meta.vin, meta.type);
+    // Shared links stay valid for the token's lifetime even past the 20-day cache
+    // TTL — fall back to the latest stored copy for this VIN/type.
+    let raw = await getReportData(meta.vin, meta.type);
+    if (!raw) {
+      const { data: stored } = await supabaseService
+        .from("vin_queries")
+        .select("report_data")
+        .eq("vin", meta.vin).eq("type", meta.type)
+        .not("report_data", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      raw = stored?.report_data || null;
+    }
     if (!raw)  return res.status(404).send("Report not found");
     const decoded = decodeReportBase64(raw);
     if (decoded.kind === "html") {
@@ -2052,7 +2224,7 @@ app.get("/api/admin/history", requireAdmin, async (_req, res) => {
     const [queriesRes, creditsRes] = await Promise.all([
       supabaseService
         .from("vin_queries")
-        .select("id, user_id, vin, type, success, created_at")
+        .select("id, user_id, vin, type, success, created_at, vehicle")
         .order("created_at", { ascending: false })
         .limit(1000),
       supabaseService
@@ -2091,7 +2263,7 @@ app.get("/api/dashboard", async (req, res) => {
 
     const { data: queries } = await supabaseService
       .from("vin_queries")
-      .select("vin, type, success, created_at")
+      .select("vin, type, success, created_at, vehicle")
       .eq("user_id", user.id)
       .eq("success", true)
       .order("created_at", { ascending: false })
@@ -2252,7 +2424,7 @@ app.get("/api/cfc-dashboard", async (req, res) => {
     // All-time report stats
     const { data: allReports } = await supabaseService
       .from("vin_queries")
-      .select("vin, type, success, created_at, user_id")
+      .select("vin, type, success, created_at, user_id, vehicle")
       .eq("success", true)
       .order("created_at", { ascending: false })
       .limit(1000);
@@ -2340,7 +2512,7 @@ app.post("/api/chat", async (req, res) => {
           .from("credits").select("balance").eq("user_id", user.id).maybeSingle();
         const { data: recent } = await supabaseService
           .from("vin_queries")
-          .select("vin, type, success, created_at")
+          .select("vin, type, success, created_at, vehicle")
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(5);
