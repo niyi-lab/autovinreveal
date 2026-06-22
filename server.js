@@ -343,7 +343,8 @@ function prettyVehicle(s) {
   const out = s.trim().split(/\s+/).map((w) => {
     if (/^\d{4}$/.test(w)) return w;                       // year
     if (/\d/.test(w)) return w.toUpperCase();              // X3, F-150, RX350
-    if (w.length <= 3 && !/[aeiou]/i.test(w)) return w.toUpperCase(); // BMW, GMC, RX, GLE
+    const bare = w.replace(/[^a-z]/gi, "");                // ignore hyphens for the check
+    if (bare.length <= 3 && !/[aeiou]/i.test(bare)) return w.toUpperCase(); // BMW, GMC, CR-V, GT-R
     return w[0].toUpperCase() + w.slice(1).toLowerCase();
   }).join(" ");
   return out || null;
@@ -661,7 +662,37 @@ async function getReportData(vin, type) {
     }
   } catch (err) { console.error("DB cache fetch failed:", err); }
 
+  // 3. Global guest cache — guest purchases have no owner row, so they live here.
+  try {
+    const { data: gc } = await supabaseService
+      .from("report_cache")
+      .select("report_data, created_at")
+      .eq("vin", v).eq("type", t)
+      .maybeSingle();
+    if (gc?.report_data) {
+      const age = Date.now() - new Date(gc.created_at).getTime();
+      if (age < MAX_AGE_MS) {
+        try { writeCache(v, t, gc.report_data); } catch (_) {}
+        return gc.report_data;
+      }
+    }
+  } catch (err) { console.error("report_cache fetch failed:", err.message); }
+
   return null;
+}
+
+// Global dedup cache, written on a GUEST purchase (guests have no vin_queries row).
+// Lets the next buyer of the same VIN reuse it instead of re-paying the provider.
+async function writeGlobalCache(vin, type, raw, vehicle = null) {
+  try {
+    await supabaseService.from("report_cache").upsert({
+      vin:         (vin  || "").toUpperCase(),
+      type:        (type || "carfax").toLowerCase(),
+      report_data: raw,
+      vehicle:     vehicle || null,
+      created_at:  new Date().toISOString(),
+    }, { onConflict: "vin,type" });
+  } catch (err) { console.error("writeGlobalCache failed:", err.message); }
 }
 
 function decodeReportBase64(rawB64) {
@@ -828,6 +859,20 @@ function injectReportChrome(html) {
   } else {
     out = widthPatch + out;
   }
+
+  // ── Overlay neutraliser ──────────────────────────────────────────────
+  // CARFAX/CheapCARFAX reports ship UI chrome (a full-screen .modal-root, a
+  // .mask-over-primary-content dimmer, a fixed promo banner, coachmarks) that
+  // their own JS normally hides. We strip that JS, so without this override the
+  // layers stay up and cover the report — i.e. a blank screen. Force them off.
+  const overlayFix = `<style id="avr-report-fix">` +
+    `.modal-root,.mask-over-primary-content,.overlay,.coachmark,.coachmark_indicator,.tooltip,.cip-menu,#app-promotion-banner{display:none!important}` +
+    `#app-promotion-banner-and-report-header{position:static!important}` +
+    `html,body{display:block!important;visibility:visible!important;opacity:1!important;overflow:auto!important}` +
+    `</style>`;
+  if (/<\/head>/i.test(out)) out = out.replace(/<\/head>/i, overlayFix + "</head>");
+  else if (/<\/body>/i.test(out)) out = out.replace(/<\/body>/i, overlayFix + "</body>");
+  else out += overlayFix;
 
   return out;
 }
@@ -1855,6 +1900,9 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
         fetchedVehicle = fetched.vehicle;
         justFetched   = true;
         writeCache(targetVin, type, raw);
+        // Guests have no vin_queries row — persist their fresh pull to the global
+        // cache so the next buyer of this VIN reuses it (no double provider charge).
+        if (!currentUser) await writeGlobalCache(targetVin, type, raw, fetchedVehicle);
       } catch (e) {
         console.error(`[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`);
         if (pendingChargeId) {
