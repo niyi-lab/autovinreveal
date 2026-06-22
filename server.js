@@ -747,15 +747,16 @@ function injectReportChrome(html) {
   out = out.replace(/<script\b[^>]*assets\.adobedtm[^>]*><\/script>/gi, "");
   out = out.replace(/<script\b[^>]*adobedtm[^>]*\/?>/gi, "");
 
-  // Only strip connect.carsimulcast.com (auth/tracking API endpoint).
-  // DO NOT strip static.carsimulcast.com or general carsimulcast.com scripts —
-  // those host the CARFAX React bundle that renders the report body from __INITIAL__DATA__.
-  // Stripping them = empty <body>, blank report.
-  out = out.replace(/<script\b[^>]*connect\.carsimulcast\.com[^>]*>[\s\S]*?<\/script>/gi, "");
-  out = out.replace(/<script\b[^>]*connect\.carsimulcast\.com[^>]*\/?>/gi, "");
-  out = out.replace(/<link\b[^>]*connect\.carsimulcast\.com[^>]*>/gi, "");
-  // NOTE: /report_assets/carfax scripts are KEPT — they are the CARFAX React app
-  // that renders the report body from __INITIAL__DATA__. Stripping them = blank page.
+  // Strip connect.carsimulcast.com AUTH/TRACKING resources — but KEEP anything under
+  // /report_assets/. CheapCARFAX serves the React renderer (vhr2.js) and its CSS
+  // (vhr.css) from connect.carsimulcast.com/report_assets/, and the report body is
+  // rendered ENTIRELY by that bundle from __INITIAL__DATA__. Stripping it = empty
+  // <body> = blank report. (The old provider used static.carsimulcast.com, so a
+  // blanket connect-strip happened to be safe there — it isn't for CheapCARFAX.)
+  const keepReportAsset = (m) => (/report_assets/i.test(m) ? m : "");
+  out = out.replace(/<script\b[^>]*connect\.carsimulcast\.com[^>]*>[\s\S]*?<\/script>/gi, keepReportAsset);
+  out = out.replace(/<script\b[^>]*connect\.carsimulcast\.com[^>]*\/?>/gi, keepReportAsset);
+  out = out.replace(/<link\b[^>]*connect\.carsimulcast\.com[^>]*>/gi, keepReportAsset);
   // Strip Facebook pixel (blocked by ad blockers, causes noise)
   out = out.replace(/<script\b[^>]*connect\.facebook\.net[^>]*>[\s\S]*?<\/script>/gi, "");
   out = out.replace(/<script\b[^>]*fbevents[^>]*>[\s\S]*?<\/script>/gi, "");
