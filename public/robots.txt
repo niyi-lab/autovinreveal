@@ -1,11 +1,17 @@
+# robots.txt — indexing guidance for COMPLIANT crawlers (Google, Bing, social, etc.).
+# NOTE: this does NOT block scrapers or CARFAX — robots.txt is advisory only and
+# adversarial bots ignore it. Real bot-blocking is enforced at Cloudflare.
+
 User-agent: *
 Allow: /
 
-# Keep private/app pages out of the index
-Disallow: /admin
+# Keep private/app pages and shared report links out of search results.
 Disallow: /api/
+Disallow: /admin
+Disallow: /admin-chat.html
 Disallow: /dashboard.html
 Disallow: /history.html
 Disallow: /success.html
+Disallow: /view/
 
 Sitemap: https://www.autovinreveal.com/sitemap.xml
