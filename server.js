@@ -1337,6 +1337,15 @@ async function fulfillWhopRow(row) {
     .update({ status: "fulfilling" }).eq("session_id", row.session_id).eq("status", "paid").select().maybeSingle();
   if (!claimed) return;   // already being handled / fulfilled elsewhere
   try {
+    // Pack purchase (no VIN) — grant credits, no provider fetch.
+    if (!row.vin) {
+      if (row.user_id) await addCreditsAtomic(row.user_id, row.credits || 0);
+      await supabaseService.from("whop_checkouts").update({
+        status: "fulfilled", fulfilled_at: new Date().toISOString(),
+      }).eq("session_id", row.session_id);
+      console.log(`[Whop] reconciled -> fulfilled pack (+${row.credits || 0} credits, user ${row.user_id || "none"}, session ${row.session_id})`);
+      return;
+    }
     let raw = await getReportData(row.vin, row.type), vehicle = row.vehicle || null;
     if (!raw) {
       const f = await cfcGetReport(row.vin, row.type);
@@ -1384,10 +1393,18 @@ async function reconcileWhopCheckouts() {
       const pr = await whopApi("GET", "/api/v2/payments?per=50");
       const payments = (pr.json && (pr.json.data || pr.json)) || [];
       for (const row of pendingRows) {
-        const pay = Array.isArray(payments) && payments.find((p) =>
-          (p.status === "paid" || p.paid_at) &&
-          (((p.metadata && p.metadata.vin) || "").toUpperCase() === String(row.vin).toUpperCase()) &&
-          (((p.plan && (p.plan.id || p.plan)) || p.plan_id) === row.plan_id));
+        const pay = Array.isArray(payments) && payments.find((p) => {
+          if (!(p.status === "paid" || p.paid_at)) return false;
+          const payPlanId = ((p.plan && (p.plan.id || p.plan)) || p.plan_id);
+          if (payPlanId !== row.plan_id) return false;
+          if (row.vin) {
+            // SINGLE — match by VIN in payment metadata.
+            return ((p.metadata && p.metadata.vin) || "").toUpperCase() === String(row.vin).toUpperCase();
+          }
+          // PACK (no VIN) — match by Supabase user_id in payment metadata.
+          const payUserId = (p.metadata && (p.metadata.user_id || p.metadata.userId)) || null;
+          return !!row.user_id && payUserId === row.user_id;
+        });
         if (!pay) continue;
         const email = (pay.user && pay.user.email) || pay.user_email || (await resolveWhopBuyerEmail(pay).catch(() => null));
         await supabaseService.from("whop_checkouts").update({ status: "paid", buyer_email: email })
@@ -1606,6 +1623,20 @@ app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
       row.status = "paid"; row.buyer_email = email || row.buyer_email;
     } else if (row.status !== "paid") {
       return res.status(202).json({ status: "processing" });   // 'fulfilling' — another request is on it
+    }
+
+    // Pack purchase (no VIN) — grant spendable credits, no provider fetch.
+    if (!row.vin) {
+      const { data: packClaimed } = await supabaseService.from("whop_checkouts")
+        .update({ status: "fulfilling" }).eq("session_id", row.session_id).eq("status", "paid").select().maybeSingle();
+      if (packClaimed) {
+        if (row.user_id) await addCreditsAtomic(row.user_id, row.credits || 0);
+        await supabaseService.from("whop_checkouts").update({
+          status: "fulfilled", fulfilled_at: new Date().toISOString(),
+        }).eq("session_id", row.session_id);
+        console.log(`[Whop] claim fulfilled pack (+${row.credits || 0} credits, user ${row.user_id || "none"}, session ${row.session_id})`);
+      }
+      return res.json({ status: "fulfilled", token: null, vin: null, credits: row.credits || 0 });
     }
 
     // status === "paid": atomically claim the fetch (only paid->fulfilling wins).
