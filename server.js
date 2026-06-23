@@ -1331,6 +1331,78 @@ async function sendReportEmail(to, vin, vehicle, token) {
   console.log(`[Whop] report email sent to ${to} (${vin})`);
 }
 
+// Shared fulfillment for a 'paid' row (used by the reconcile job). Atomic guard.
+async function fulfillWhopRow(row) {
+  const { data: claimed } = await supabaseService.from("whop_checkouts")
+    .update({ status: "fulfilling" }).eq("session_id", row.session_id).eq("status", "paid").select().maybeSingle();
+  if (!claimed) return;   // already being handled / fulfilled elsewhere
+  try {
+    let raw = await getReportData(row.vin, row.type), vehicle = row.vehicle || null;
+    if (!raw) {
+      const f = await cfcGetReport(row.vin, row.type);
+      raw = f.raw; vehicle = f.vehicle;
+      try { writeCache(row.vin, row.type, raw); } catch (_) {}
+      await writeGlobalCache(row.vin, row.type, raw, vehicle);
+    }
+    const { token } = await createShareToken(row.vin, row.type, vehicle);
+    if (row.user_id) {
+      await supabaseService.from("vin_queries").upsert(
+        { user_id: row.user_id, vin: row.vin, type: row.type, success: true, report_data: raw, vehicle },
+        { onConflict: "user_id,vin,type" });
+    }
+    await supabaseService.from("whop_checkouts").update({
+      status: "fulfilled", delivered_token: token, vehicle, fulfilled_at: new Date().toISOString(),
+    }).eq("session_id", row.session_id);
+    if (row.buyer_email) await sendReportEmail(row.buyer_email, row.vin, vehicle, token).catch((e) => console.warn("[Whop] reconcile email failed:", e.message));
+    console.log(`[Whop] reconciled -> fulfilled (vin ${row.vin}, session ${row.session_id}, email ${row.buyer_email || "none"})`);
+  } catch (e) {
+    await supabaseService.from("whop_checkouts").update({ status: "paid" }).eq("session_id", row.session_id);
+    console.warn(`[Whop] reconcile fetch failed (${row.session_id}):`, e.message);
+  }
+}
+
+// Safety net: buyers who paid but never landed back on the claim (closed tab /
+// different browser, and the webhook didn't arrive). Delivers report + email.
+async function reconcileWhopCheckouts() {
+  if (!WHOP_API_KEY || !supabaseService) return;
+  const SITE = "avr";
+  try {
+    // A) Marked 'paid' (webhook/claim) but the report was never fetched.
+    const paidCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: paidRows } = await supabaseService.from("whop_checkouts")
+      .select("*").eq("site", SITE).eq("status", "paid").is("delivered_token", null)
+      .lt("created_at", paidCutoff).limit(15);
+    for (const row of (paidRows || [])) await fulfillWhopRow(row);
+
+    // B) Still 'pending' after 10 min — reconcile against recent Whop payments by VIN.
+    const pendCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const minCreated = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString();
+    const { data: pendingRows } = await supabaseService.from("whop_checkouts")
+      .select("*").eq("site", SITE).eq("status", "pending").is("delivered_token", null)
+      .lt("created_at", pendCutoff).gt("created_at", minCreated).limit(15);
+    if (pendingRows && pendingRows.length) {
+      const pr = await whopApi("GET", "/api/v2/payments?per=50");
+      const payments = (pr.json && (pr.json.data || pr.json)) || [];
+      for (const row of pendingRows) {
+        const pay = Array.isArray(payments) && payments.find((p) =>
+          (p.status === "paid" || p.paid_at) &&
+          (((p.metadata && p.metadata.vin) || "").toUpperCase() === String(row.vin).toUpperCase()) &&
+          (((p.plan && (p.plan.id || p.plan)) || p.plan_id) === row.plan_id));
+        if (!pay) continue;
+        const email = (pay.user && pay.user.email) || pay.user_email || (await resolveWhopBuyerEmail(pay).catch(() => null));
+        await supabaseService.from("whop_checkouts").update({ status: "paid", buyer_email: email })
+          .eq("session_id", row.session_id).eq("status", "pending");
+        row.status = "paid"; row.buyer_email = email;
+        await fulfillWhopRow(row);
+      }
+    }
+  } catch (e) { console.warn("[Whop] reconcile error:", e.message); }
+}
+if (process.env.WHOP_API_KEY) {
+  setInterval(reconcileWhopCheckouts, 10 * 60 * 1000);   // every 10 min
+  setTimeout(reconcileWhopCheckouts, 60 * 1000);          // once shortly after boot
+}
+
 // Resolve the buyer's email from a Whop payment payload (falls back to the member record).
 async function resolveWhopBuyerEmail(data) {
   let email = data.user_email || data.email || (data.user && data.user.email) ||
@@ -1476,7 +1548,7 @@ app.post("/api/whop/checkout", async (req, res) => {
     const { error: insErr } = await supabaseService.from("whop_checkouts").insert({
       session_id: session, claim_token: claimToken, vin: vinUp, type: typeL,
       user_id: userId, flow, plan_id: cfg.plan, credits: cfg.credits, expected_price: cfg.price,
-      status: "pending",
+      status: "pending", site: "avr",
     });
     if (insErr) { console.error("[Whop] whop_checkouts insert failed:", insErr.message); return res.status(502).json({ error: "checkout_failed" }); }
 
