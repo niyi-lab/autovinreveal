@@ -1346,7 +1346,8 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
       // Diagnostic (confirms the real payload shape on the first live delivery):
       console.log(`[Whop:dbg] type=${type} payment=${data.id} checkout_id=${checkoutId} planId=${planId} metaKeys=${Object.keys(meta).join(",")} dataKeys=${Object.keys(data).join(",")}`);
 
-      // Our checkout row is the AUTHORITATIVE source for vin/type (server-set at create).
+      // Our checkout row is AUTHORITATIVE for vin/type. Map by the ch_ session id,
+      // falling back to the most-recent pending row for the VIN.
       let row = null;
       if (checkoutId) {
         const { data: r } = await supabaseService.from("whop_checkouts").select("*").eq("session_id", checkoutId).maybeSingle();
@@ -1355,37 +1356,25 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
       const vin     = (row?.vin  || meta.vin  || "").toUpperCase();
       const type2   = (row?.type || meta.type || "carfax").toLowerCase();
       const credits = (parseInt(meta.credits, 10) || 0) || WHOP_PLAN_CREDITS[planId] || 0;
+      if (!row && vin) {
+        const { data: r2 } = await supabaseService.from("whop_checkouts")
+          .select("*").eq("vin", vin).eq("status", "pending")
+          .order("created_at", { ascending: false }).limit(1).maybeSingle();
+        row = r2 || null;
+      }
 
-      if (vin) {
-        // SINGLE report (guest or logged-in) — fulfill the report exactly once.
-        let raw = await getReportData(vin, type2), vehicle = row?.vehicle || null;
-        if (!raw) {
-          const fetched = await cfcGetReport(vin, type2);     // 1 provider credit (paid for)
-          raw = fetched.raw; vehicle = fetched.vehicle;
-          try { writeCache(vin, type2, raw); } catch (_) {}
-          await writeGlobalCache(vin, type2, raw, vehicle);
-        }
-        const { token } = await createShareToken(vin, type2, vehicle);
-        if (row) {
-          await supabaseService.from("whop_checkouts").update({
-            status: "fulfilled", delivered_token: token, vehicle, fulfilled_at: new Date().toISOString(),
-          }).eq("session_id", row.session_id);
-        }
-        if (userId) {
-          // Logged-in single → owns it permanently (no separate spendable credit).
-          await supabaseService.from("vin_queries").upsert(
-            { user_id: userId, vin, type: type2, success: true, report_data: raw, vehicle },
-            { onConflict: "user_id,vin,type" }
-          );
-          console.log(`[Whop] single fulfilled + owned by ${userId} (vin ${vin}, payment ${data.id})`);
-        } else {
-          // Guest → email the link as a safety net (covers a closed tab).
-          const email = await resolveWhopBuyerEmail(data);
-          if (email) { try { await deliverGuestReportByEmail(vin, type2, email); } catch (e) { console.warn("[Whop] guest email failed:", e.message); } }
-          console.log(`[Whop] guest single fulfilled (vin ${vin}, payment ${data.id}, email ${email || "?"})`);
-        }
+      if (vin && row) {
+        // SINGLE report — only MARK the row paid (entitled). The report itself is
+        // fetched on /api/whop/claim, where the buyer is actively waiting. This keeps
+        // the webhook fast + immune to provider latency/timeouts (the bug that left
+        // rows stuck pending). pending -> paid only; never downgrade a fulfilled row.
+        const buyerEmail = await resolveWhopBuyerEmail(data).catch(() => null);
+        await supabaseService.from("whop_checkouts")
+          .update({ status: "paid", buyer_email: buyerEmail })
+          .eq("session_id", row.session_id).eq("status", "pending");
+        console.log(`[Whop] payment confirmed -> row paid (vin ${vin}, session ${row.session_id}, payment ${data.id})`);
       } else if (userId && credits > 0) {
-        // Pack (no VIN) → grant spendable credits.
+        // Pack (no VIN) → grant spendable credits (fast, no provider call).
         await addCreditsAtomic(userId, credits);
         if (row) await supabaseService.from("whop_checkouts").update({ status: "fulfilled", fulfilled_at: new Date().toISOString() }).eq("session_id", row.session_id);
         console.log(`[Whop] +${credits} credits to ${userId} (plan ${planId}, payment ${data.id})`);
@@ -1465,9 +1454,10 @@ app.post("/api/whop/checkout", async (req, res) => {
   }
 });
 
-// ── Whop claim: redirect landing reads OUR fulfillment status (no Whop API call,
-//    no provider pull). Returns the report token once the webhook has fulfilled. ──
-const whopClaimLimiter = rateLimit({ windowMs: 60 * 1000, max: 40 });
+// ── Whop claim: the redirect landing calls this. The signed webhook marks the row
+//    'paid'; this endpoint fetches the report on demand (the buyer is waiting), with
+//    an atomic guard so exactly one fetch runs. No Whop API call. ──
+const whopClaimLimiter = rateLimit({ windowMs: 60 * 1000, max: 60 });
 app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
   try {
     const claim = String(req.body?.claim || "");
@@ -1476,13 +1466,47 @@ app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
     if (!row) return res.status(404).json({ error: "not_found" });
     if (row.created_at && (Date.now() - new Date(row.created_at).getTime()) > 35 * 24 * 3600 * 1000)
       return res.status(410).json({ error: "expired" });
-    if (row.status !== "fulfilled") return res.status(202).json({ status: "processing" });
-    return res.json({
-      status: "fulfilled",
-      token: row.delivered_token || null,                 // present for single reports
-      vin: row.vin || null,
-      credits: row.delivered_token ? 0 : (row.credits || 0),   // packs report credits added
-    });
+
+    // Already delivered → same token back (refresh / re-open safe).
+    if (row.delivered_token) return res.json({ status: "fulfilled", token: row.delivered_token, vin: row.vin || null, credits: 0 });
+    // Pack (no VIN) the webhook already fulfilled → credits added.
+    if (row.status === "fulfilled") return res.json({ status: "fulfilled", token: null, vin: row.vin || null, credits: row.credits || 0 });
+    // Payment not confirmed by the webhook yet → keep polling.
+    if (row.status !== "paid") return res.status(202).json({ status: "processing" });
+
+    // status === "paid": atomically claim the fetch (only paid->fulfilling wins).
+    const { data: claimed } = await supabaseService.from("whop_checkouts")
+      .update({ status: "fulfilling" }).eq("session_id", row.session_id).eq("status", "paid").select().maybeSingle();
+    if (!claimed) {
+      const { data: fresh } = await supabaseService.from("whop_checkouts").select("delivered_token,vin").eq("session_id", row.session_id).maybeSingle();
+      if (fresh?.delivered_token) return res.json({ status: "fulfilled", token: fresh.delivered_token, vin: fresh.vin, credits: 0 });
+      return res.status(202).json({ status: "processing" });   // another request is fetching
+    }
+    try {
+      let raw = await getReportData(row.vin, row.type), vehicle = row.vehicle || null;
+      if (!raw) {
+        const fetched = await cfcGetReport(row.vin, row.type);   // 1 provider credit (paid for)
+        raw = fetched.raw; vehicle = fetched.vehicle;
+        try { writeCache(row.vin, row.type, raw); } catch (_) {}
+        await writeGlobalCache(row.vin, row.type, raw, vehicle);
+      }
+      const { token } = await createShareToken(row.vin, row.type, vehicle);
+      const { user } = await getUser(req).catch(() => ({ user: null }));
+      if (user && row.user_id && user.id === row.user_id) {     // logged-in → own it
+        await supabaseService.from("vin_queries").upsert(
+          { user_id: user.id, vin: row.vin, type: row.type, success: true, report_data: raw, vehicle },
+          { onConflict: "user_id,vin,type" });
+      }
+      await supabaseService.from("whop_checkouts").update({
+        status: "fulfilled", delivered_token: token, vehicle, fulfilled_at: new Date().toISOString(),
+      }).eq("session_id", row.session_id);
+      console.log(`[Whop] claim fulfilled (vin ${row.vin}, session ${row.session_id})`);
+      return res.json({ status: "fulfilled", token, vin: row.vin, credits: 0 });
+    } catch (e) {
+      await supabaseService.from("whop_checkouts").update({ status: "paid" }).eq("session_id", row.session_id);  // revert so a retry works
+      console.error("[Whop] claim fetch failed:", e.message);
+      return res.status(502).json({ error: "provider_error" });
+    }
   } catch (e) {
     console.error("[Whop] /api/whop/claim error:", e.message);
     return res.status(500).json({ error: "server_error" });

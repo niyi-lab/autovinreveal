@@ -583,27 +583,29 @@ async function handleWhopReturn() {
   showToast('Payment confirmed. Preparing your report…', 'ok');
   await ensureBackendReady();
   const claim = getWhopClaim();
-  for (let attempt = 0; attempt < 12; attempt++) {          // ~30s of polling
-    const r = await apiFetch('/api/whop/claim', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ claim }),
-    }, 15_000).catch(() => null);
+  const { token: authToken } = await getSession();
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;   // so logged-in buyers own it
 
-    if (r && r.ok) {
+  for (let attempt = 0; attempt < 14; attempt++) {
+    const r = await apiFetch('/api/whop/claim', {
+      method: 'POST', headers, body: JSON.stringify({ claim }),
+    }, 35_000).catch(() => null);   // a single call may run the provider fetch inline
+
+    if (r && r.status === 200) {                 // FULFILLED (202 is NOT success — that was the bug)
       const j = await r.json().catch(() => ({}));
       clearWhopClaim(); clearPending();
-      if (j.token) {                       // single report → land on it
+      if (j.token) {                             // single report → land on it
         trackPurchase(5.99);
         window.location.replace(`/view/${j.token}`);
-      } else {                             // pack → credits added
+      } else {                                   // pack → credits added
         await refreshBalancePill();
         showToast('Credits added to your account.', 'ok');
       }
       return true;
     }
-    if (r && r.status === 202) { await new Promise(res => setTimeout(res, 2500)); continue; }   // webhook not done yet
-    if (r && (r.status === 404 || r.status === 410 || r.status === 400)) break;
+    if (r && (r.status === 404 || r.status === 410 || r.status === 400)) break;   // unrecoverable
+    // 202 (processing) / 502 (provider hiccup) / null (timeout) → wait and retry
     await new Promise(res => setTimeout(res, 2500));
   }
   showToast('Payment received — your report is taking a moment. Your purchase is safe; refresh in a few seconds. Still stuck? Email support@autovinreveal.com.', 'error');
