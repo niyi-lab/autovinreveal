@@ -1245,6 +1245,107 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
 });
 
 /* ================================================================
+   Whop Webhook — Standard Webhooks signature (HMAC-SHA256 over
+   `${webhook-id}.${webhook-timestamp}.${rawBody}`, header `webhook-signature`
+   = "v1,<base64>"). On payment.succeeded, grant credits to the Supabase
+   user passed as checkout metadata.user_id. Set WHOP_WEBHOOK_SECRET (ws_...).
+================================================================ */
+const WHOP_WEBHOOK_SECRET = process.env.WHOP_WEBHOOK_SECRET || "";
+const WHOP_PLAN_CREDITS = {                 // plan_id -> credits (fallback if no metadata.credits)
+  "plan_DvE2Z32UAeyTl": CREDITS_PER_SINGLE,  // Single Report  $5.99
+  "plan_N1GiRFY8AGfpH": CREDITS_PER_5PACK,   // 5 Report Pack  $20
+  "plan_0f5gjPm3KD8YO": CREDITS_PER_20PACK,  // 20 Report Pack $58
+};
+
+// Guest single report (no account): fetch the report and email a view-link to the
+// buyer. Lets guests buy one report on Whop without logging in.
+async function deliverGuestReportByEmail(vin, type, to) {
+  if (!mailer) { console.error("[Whop] mailer not configured — cannot deliver guest report"); return; }
+  const v = (vin || "").toUpperCase(), t = (type || "carfax").toLowerCase();
+  let raw = await getReportData(v, t), vehicle = null;
+  if (!raw) {
+    const fetched = await cfcGetReport(v, t);    // consumes 1 provider credit (paid for)
+    raw = fetched.raw; vehicle = fetched.vehicle;
+    try { writeCache(v, t, raw); } catch (_) {}
+    await writeGlobalCache(v, t, raw, vehicle);  // so /view/:token can resolve it
+  }
+  const { token } = await createShareToken(v, t, vehicle);
+  const reportUrl = `${SITE_URL}/view/${token}`;
+  await mailer.sendMail({
+    from: SMTP_FROM, to,
+    subject: `Your Vehicle History Report — ${v}`,
+    text: `Your vehicle history report for VIN ${v} is ready.\n\nView it here: ${reportUrl}\n\nTo save as PDF, open the link and press Ctrl+P (Windows) or Cmd+P (Mac).`,
+    html: `<p>Your vehicle history report for VIN <b>${v}</b> is ready.</p>`
+        + `<p><a href="${reportUrl}" style="background:#2563eb;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">View your report</a></p>`
+        + `<p>Or open this link: ${reportUrl}</p><p>To save as PDF, open it and press Ctrl+P / Cmd+P.</p>`,
+  });
+  console.log(`[Whop] guest report for ${v} emailed to ${to}`);
+}
+
+function verifyWhopWebhook(rawBody, headers) {
+  const id = headers["webhook-id"], ts = headers["webhook-timestamp"], sigHeader = headers["webhook-signature"];
+  if (!id || !ts || !sigHeader || !WHOP_WEBHOOK_SECRET) return false;
+  if (Math.abs(Math.floor(Date.now() / 1000) - Number(ts)) > 300) return false; // 5-min replay window
+  const signed = `${id}.${ts}.${rawBody.toString("utf8")}`;
+  const raw = WHOP_WEBHOOK_SECRET.replace(/^ws_/, "").replace(/^whsec_/, "");
+  // ws_ secret encoding is ambiguous — try base64 / hex / utf8 key interpretations.
+  const keys = [];
+  try { keys.push(Buffer.from(raw, "base64")); } catch (_) {}
+  try { keys.push(Buffer.from(raw, "hex")); } catch (_) {}
+  keys.push(Buffer.from(WHOP_WEBHOOK_SECRET, "utf8"), Buffer.from(raw, "utf8"));
+  const provided = sigHeader.split(/\s+/).map((p) => (p.includes(",") ? p.split(",")[1] : p));
+  for (const key of keys) {
+    if (!key || !key.length) continue;
+    const mac = crypto.createHmac("sha256", key).update(signed).digest("base64");
+    if (provided.some((s) => s === mac)) return true;
+  }
+  return false;
+}
+
+app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => {
+  if (!verifyWhopWebhook(req.body, req.headers)) {
+    console.warn(`[Whop] signature verify failed (id=${req.headers["webhook-id"]}, ts=${req.headers["webhook-timestamp"]})`);
+    return res.status(400).send("Webhook verification failed");
+  }
+  let event;
+  try { event = JSON.parse(req.body.toString("utf8")); } catch { return res.status(400).send("bad json"); }
+  const type = event.action || event.event || event.type || "";
+  const data = event.data || event || {};
+
+  try {
+    const eventId = "whop_" + (data.id || req.headers["webhook-id"] || "");
+    const { error: dupErr } = await supabaseService.from("processed_webhook_events").insert({ event_id: eventId });
+    if (dupErr && dupErr.code === "23505") return res.status(200).json({ ok: true, duplicate: true });
+
+    if (/payment\.succeeded|membership\.(went_valid|activated)/.test(type)) {
+      const meta   = data.metadata || {};
+      const userId = meta.user_id || meta.userId || null;
+      const planId = data.plan || data.plan_id || (data.membership && (data.membership.plan || data.membership.plan_id)) || null;
+      const credits = (parseInt(meta.credits, 10) || 0) || WHOP_PLAN_CREDITS[planId] || 0;
+      if (userId && credits > 0) {
+        await addCreditsAtomic(userId, credits);
+        console.log(`[Whop] +${credits} credits to user ${userId} (plan ${planId}, payment ${data.id})`);
+      } else if (meta.guest && meta.vin) {
+        // Guest single report — no account; deliver by email.
+        const buyerEmail = data.user_email || data.email || (data.user && data.user.email) ||
+                           (data.member && data.member.email) || data.receipt_email || meta.email || null;
+        if (buyerEmail) {
+          await deliverGuestReportByEmail(meta.vin, meta.type || "carfax", buyerEmail);
+        } else {
+          console.warn(`[Whop] guest single but no buyer email — vin=${meta.vin} data keys=${Object.keys(data).join(",")}`);
+        }
+      } else {
+        console.warn(`[Whop] paid but unlinked — user_id=${userId} plan=${planId} credits=${credits} meta=${JSON.stringify(meta).slice(0,140)}`);
+      }
+    }
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    console.error("[Whop] handler error:", e.message);
+    return res.status(500).json({ error: "server error" });
+  }
+});
+
+/* ================================================================
    Middleware
 ================================================================ */
 app.use(express.json());
