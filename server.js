@@ -1251,6 +1251,22 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
    user passed as checkout metadata.user_id. Set WHOP_WEBHOOK_SECRET (ws_...).
 ================================================================ */
 const WHOP_WEBHOOK_SECRET = process.env.WHOP_WEBHOOK_SECRET || "";
+const WHOP_API_KEY = process.env.WHOP_API_KEY || "";
+const WHOP_PLANS = {                        // button key -> Whop plan + credits
+  single: { plan: "plan_DvE2Z32UAeyTl", credits: CREDITS_PER_SINGLE },
+  pack5:  { plan: "plan_N1GiRFY8AGfpH", credits: CREDITS_PER_5PACK  },
+  pack20: { plan: "plan_0f5gjPm3KD8YO", credits: CREDITS_PER_20PACK },
+};
+async function whopApi(method, path, body) {
+  try {
+    const r = await fetch("https://api.whop.com" + path, {
+      method,
+      headers: { Authorization: "Bearer " + WHOP_API_KEY, Accept: "application/json", "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: r.status, json: await r.json().catch(() => null) };
+  } catch (e) { return { status: 0, json: null, error: e.message }; }
+}
 const WHOP_PLAN_CREDITS = {                 // plan_id -> credits (fallback if no metadata.credits)
   "plan_DvE2Z32UAeyTl": CREDITS_PER_SINGLE,  // Single Report  $5.99
   "plan_N1GiRFY8AGfpH": CREDITS_PER_5PACK,   // 5 Report Pack  $20
@@ -1327,8 +1343,16 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
         console.log(`[Whop] +${credits} credits to user ${userId} (plan ${planId}, payment ${data.id})`);
       } else if (meta.guest && meta.vin) {
         // Guest single report — no account; deliver by email.
-        const buyerEmail = data.user_email || data.email || (data.user && data.user.email) ||
-                           (data.member && data.member.email) || data.receipt_email || meta.email || null;
+        let buyerEmail = data.user_email || data.email || (data.user && data.user.email) ||
+                         (data.member && data.member.email) || data.receipt_email || meta.email || null;
+        if (!buyerEmail) {
+          // Resolve from the member record (payment payload only carries the user id).
+          const uid = typeof data.user === "string" ? data.user : (data.user_id || (data.user && data.user.id) || null);
+          if (uid) {
+            const m = await whopApi("GET", `/api/v2/members?user_id=${encodeURIComponent(uid)}`);
+            buyerEmail = (m.json && m.json.data && m.json.data[0] && m.json.data[0].email) || null;
+          }
+        }
         if (buyerEmail) {
           await deliverGuestReportByEmail(meta.vin, meta.type || "carfax", buyerEmail);
         } else {
@@ -1355,6 +1379,40 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 // General API rate limit
 app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
+
+// ── Whop checkout: create a hosted-checkout session with metadata + redirect ──
+// Logged-in → credits to their account; guest single → report emailed after pay.
+app.post("/api/whop/checkout", async (req, res) => {
+  try {
+    if (!WHOP_API_KEY) return res.status(500).json({ error: "whop_not_configured" });
+    const { key, vin, type } = req.body || {};
+    const cfg = WHOP_PLANS[key];
+    if (!cfg) return res.status(400).json({ error: "invalid_plan" });
+    const { user } = await getUser(req).catch(() => ({ user: null }));
+    const userId = (user && user.id) || (req.body && req.body.user_id) || null;
+    const metadata = {};
+    let redirect = `${SITE_URL}/?purchased=1`;
+    if (userId) {
+      metadata.user_id = userId;
+      metadata.credits = String(cfg.credits);
+      if (vin) metadata.vin = String(vin).toUpperCase();
+    } else if (key === "single" && vin) {
+      metadata.vin   = String(vin).toUpperCase();
+      metadata.type  = (type || "carfax").toLowerCase();
+      metadata.guest = "1";
+      redirect = `${SITE_URL}/?purchased=1&guest=1`;
+    } else {
+      return res.status(401).json({ error: "login_required" });
+    }
+    const r = await whopApi("POST", "/api/v2/checkout_sessions", { plan_id: cfg.plan, metadata, redirect_url: redirect });
+    const url = (r.json && (r.json.purchase_url || (r.json.data && r.json.data.purchase_url))) || null;
+    if (!url) { console.error("[Whop] checkout create failed:", r.status, JSON.stringify(r.json).slice(0, 200)); return res.status(502).json({ error: "checkout_failed" }); }
+    return res.json({ url });
+  } catch (e) {
+    console.error("[Whop] /api/whop/checkout error:", e.message);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
 
 // ── Anti-scraping: strict per-IP limit on /api/report ──────────────────────
 // Legitimate users run 1-5 reports. Scrapers run hundreds.

@@ -1245,36 +1245,37 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
 }
 
 /* ── Whop checkout (card / Apple Pay / Google Pay) — replaces Stripe ──
-   Sends the buyer to Whop's hosted checkout with their Supabase user_id +
-   credit amount as metadata, so /api/whop-webhook credits the right account. */
-const WHOP_PLANS = {
-  single: { plan: 'plan_DvE2Z32UAeyTl', credits: 1  },
-  pack5:  { plan: 'plan_N1GiRFY8AGfpH', credits: 5  },
-  pack20: { plan: 'plan_0f5gjPm3KD8YO', credits: 20 },
-};
+   The server creates a Whop checkout session with metadata (user_id+credits, or
+   vin+guest) and a redirect back here, then returns the hosted checkout URL.
+   Metadata set server-side is reliable (query-param metadata is dropped). */
+const WHOP_KEYS = ['single', 'pack5', 'pack20'];
 async function startWhopPurchase({ user, key, pendingReport = null }) {
-  const cfg = WHOP_PLANS[key];
-  if (!cfg) { showToast('Unknown plan', 'error'); return; }
-  const params = [];
-  if (user) {
-    // Logged in → credits posted to this account by the webhook.
-    params.push(`metadata%5Buser_id%5D=${encodeURIComponent(user.id)}`);
-    params.push(`metadata%5Bcredits%5D=${cfg.credits}`);
-    if (pendingReport?.vin) { try { localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport)); } catch {} }
-  } else if (key === 'single' && pendingReport?.vin) {
-    // Guest single report → no login; the report is emailed after payment.
-    params.push(`metadata%5Bvin%5D=${encodeURIComponent(pendingReport.vin)}`);
-    params.push(`metadata%5Btype%5D=${encodeURIComponent(pendingReport.type || 'carfax')}`);
-    params.push(`metadata%5Bguest%5D=1`);
-    try { localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport)); } catch {}
-  } else {
-    // Credit packs need an account.
-    closeBuyModal();
-    showToast('Please sign in to buy a bundle.', 'error');
-    openLogin();
-    return;
+  if (!WHOP_KEYS.includes(key)) { showToast('Unknown plan', 'error'); return; }
+  // Credit packs need an account; a single can be bought by a guest (emailed).
+  if (!user && key !== 'single') {
+    closeBuyModal(); showToast('Please sign in to buy a bundle.', 'error'); openLogin(); return;
   }
-  window.location.href = `https://whop.com/checkout/${cfg.plan}?` + params.join('&');
+  if (key === 'single' && !user && !pendingReport?.vin) {
+    showToast('Enter a VIN first — a single report is for one specific vehicle.', 'error'); return;
+  }
+  if (pendingReport?.vin) { try { localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport)); } catch {} }
+  try {
+    await ensureBackendReady();
+    const r = await apiFetch('/api/whop/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key,
+        user_id: user?.id || null,
+        vin:  pendingReport?.vin  || null,
+        type: pendingReport?.type || 'carfax',
+      }),
+    }, 12_000);
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Checkout failed'); }
+    const { url } = await r.json();
+    if (!url) throw new Error('No checkout URL returned');
+    window.location.href = url;
+  } catch (e) { showToast(e.message || 'Failed to start checkout', 'error'); }
 }
 
 $id('buy1Btn')?.addEventListener('click', async () => {
