@@ -1298,6 +1298,39 @@ async function deliverGuestReportByEmail(vin, type, to) {
   console.log(`[Whop] guest report for ${v} emailed to ${to}`);
 }
 
+// Professional, branded report email — cover banner + "view report" button.
+async function sendReportEmail(to, vin, vehicle, token) {
+  if (!mailer || !to || !token) return;
+  const reportUrl = `${SITE_URL}/view/${token}`;
+  const title = vehicle || "Your Vehicle History Report";
+  const cover = "https://www.autovinreveal.com/og-image.png";
+  const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:24px 12px;"><tr><td align="center">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.07);">
+      <tr><td style="line-height:0;"><a href="${reportUrl}"><img src="${cover}" alt="AutoVINReveal" width="600" style="display:block;width:100%;height:auto;border:0;"></a></td></tr>
+      <tr><td style="padding:32px 32px 8px;">
+        <p style="margin:0 0 10px;color:#16a34a;font-weight:700;font-size:12px;letter-spacing:.5px;text-transform:uppercase;">&#10003; Payment confirmed</p>
+        <h1 style="margin:0 0 6px;font-size:22px;line-height:1.25;color:#0f172a;">Your vehicle history report is ready</h1>
+        <p style="margin:0 0 2px;font-size:18px;font-weight:600;color:#0f172a;">${title}</p>
+        <p style="margin:0 0 26px;font-size:14px;color:#64748b;">VIN: ${vin}</p>
+        <a href="${reportUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:14px 30px;border-radius:8px;">View Your Full Report &rarr;</a>
+        <p style="margin:24px 0 0;font-size:13px;color:#94a3b8;">Or open this link:<br><a href="${reportUrl}" style="color:#2563eb;word-break:break-all;">${reportUrl}</a></p>
+      </td></tr>
+      <tr><td style="padding:0 32px;"><hr style="border:0;border-top:1px solid #eef2f7;margin:24px 0;"></td></tr>
+      <tr><td style="padding:0 32px 28px;">
+        <p style="margin:0;font-size:13px;color:#64748b;">&#128161; <b>Save a PDF copy:</b> open the report and press <b>Ctrl+P</b> (Windows) or <b>Cmd+P</b> (Mac), then choose &ldquo;Save as PDF&rdquo;.</p>
+      </td></tr>
+      <tr><td style="padding:20px 32px;background:#f8fafc;border-top:1px solid #eef2f7;">
+        <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.6;"><b style="color:#475569;">AutoVINReveal</b> &middot; Vehicle History Reports<br>Questions? Contact <a href="mailto:support@autovinreveal.com" style="color:#2563eb;">support@autovinreveal.com</a></p>
+      </td></tr>
+    </table>
+    <p style="margin:14px 0 0;font-size:11px;color:#cbd5e1;">You received this because you purchased a report at autovinreveal.com.</p>
+  </td></tr></table></body></html>`;
+  const text = `Your vehicle history report is ready.\n\n${title}\nVIN: ${vin}\n\nView your full report:\n${reportUrl}\n\nTo save as PDF, open the link and press Ctrl+P (Windows) or Cmd+P (Mac).\n\nAutoVINReveal — support@autovinreveal.com`;
+  await mailer.sendMail({ from: SMTP_FROM, to, subject: `Your Vehicle History Report — ${vehicle || vin}`, html, text });
+  console.log(`[Whop] report email sent to ${to} (${vin})`);
+}
+
 // Resolve the buyer's email from a Whop payment payload (falls back to the member record).
 async function resolveWhopBuyerEmail(data) {
   let email = data.user_email || data.email || (data.user && data.user.email) ||
@@ -1500,7 +1533,9 @@ app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
       await supabaseService.from("whop_checkouts").update({
         status: "fulfilled", delivered_token: token, vehicle, fulfilled_at: new Date().toISOString(),
       }).eq("session_id", row.session_id);
-      console.log(`[Whop] claim fulfilled (vin ${row.vin}, session ${row.session_id})`);
+      const emailTo = row.buyer_email || (user && user.email) || null;
+      if (emailTo) sendReportEmail(emailTo, row.vin, vehicle, token).catch((e) => console.warn("[Whop] report email failed:", e.message));
+      console.log(`[Whop] claim fulfilled (vin ${row.vin}, session ${row.session_id}, email ${emailTo || "none"})`);
       return res.json({ status: "fulfilled", token, vin: row.vin, credits: 0 });
     } catch (e) {
       await supabaseService.from("whop_checkouts").update({ status: "paid" }).eq("session_id", row.session_id);  // revert so a retry works
