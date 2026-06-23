@@ -1343,30 +1343,30 @@ $id('buy1Btn')?.addEventListener('click', async () => {
   }
   const btn = $id('buy1Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
   closeBuyModal();
-  await startWhopPurchase({ user, key: 'single', pendingReport: pending });
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_SINGLE', pendingReport: pending });
   restore();
 });
 $id('buy5Btn')?.addEventListener('click', async () => {
   const btn = $id('buy5Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
   const { user } = await getSession(); closeBuyModal();
-  await startWhopPurchase({ user, key: 'pack5' });
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_5PACK', requireLogin: true });
   restore();
 });
 $id('buy20Btn')?.addEventListener('click', async () => {
   const btn = $id('buy20Btn'); const restore = setBtnLoading(btn, 'Redirecting…');
   const { user } = await getSession(); closeBuyModal();
-  await startWhopPurchase({ user, key: 'pack20' });
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_20PACK', requireLogin: true });
   restore();
 });
 
 $id('buy1Sidebar')?.addEventListener('click',  () => openBuyModal());
 $id('buy5Sidebar')?.addEventListener('click',  async () => {
   const { user } = await getSession();
-  await startWhopPurchase({ user, key: 'pack5' });
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_5PACK', requireLogin: true });
 });
 $id('buy20Sidebar')?.addEventListener('click', async () => {
   const { user } = await getSession();
-  await startWhopPurchase({ user, key: 'pack20' });
+  await startStripePurchase({ user, price_id: 'STRIPE_PRICE_20PACK', requireLogin: true });
 });
 ['pricingBuy1Btn', 'pricingBuy5Btn', 'pricingBuy20Btn'].forEach(id => {
   $id(id)?.addEventListener('click', () => openBuyModal());
