@@ -3101,41 +3101,51 @@ ESCALATE: Only add ESCALATE on its own final line when the customer has a real u
     const shouldEscalate = reply.includes("ESCALATE");
     reply = reply.replace(/\nESCALATE\s*$/m, "").replace(/ESCALATE\s*$/m, "").trim();
 
-    // Persist the assistant reply; flag the conversation for the owner if it escalated.
+    // Notify the owner whenever the bot escalates OR tells a visitor to email support,
+    // so you can review the conversation. (Once per conversation to avoid repeats.)
+    const mentionsSupport = /email\s+support|support@(?:autovinreveal|cheapestcarfax)\.com/i.test(reply);
+    const shouldNotify = shouldEscalate || mentionsSupport;
+
+    let alreadyFlagged = false;
     try {
       if (conversationId) {
         await supabaseService.from("chat_messages").insert({ conversation_id: conversationId, role: "assistant", content: reply });
-        if (shouldEscalate) await supabaseService.from("chat_conversations").update({ flagged: true }).eq("id", conversationId);
+        if (shouldNotify) {
+          const { data: cf } = await supabaseService.from("chat_conversations").select("flagged").eq("id", conversationId).maybeSingle();
+          alreadyFlagged = !!(cf && cf.flagged);
+          if (!alreadyFlagged) await supabaseService.from("chat_conversations").update({ flagged: true }).eq("id", conversationId);
+        }
       }
     } catch (e) { console.warn("[chat] store reply error:", e.message); }
 
-    if (shouldEscalate && mailer) {
-      // Email the owner with the full conversation
+    if (shouldNotify && !alreadyFlagged && mailer) {
+      const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const convoLines = [
         ...history.map(m => (m.role === "user" ? "User: " : "Bot: ") + m.content),
         "User: " + message,
         "Bot: " + reply,
       ];
       const convoHtml = convoLines
-        .map(l => `<p style="margin:4px 0;${l.startsWith("User:") ? "color:#1e3a8a;font-weight:bold;" : "color:#475569;"}">${l}</p>`)
+        .map(l => `<p style="margin:4px 0;${l.startsWith("User:") ? "color:#1e3a8a;font-weight:bold;" : "color:#475569;"}">${esc(l)}</p>`)
         .join("");
+      const reason = shouldEscalate ? "escalated to a human" : "told a visitor to email support";
 
       mailer.sendMail({
         from: SMTP_FROM,
-        to: SMTP_USER,
-        subject: "AutoVINReveal: Chat needs your attention" + (userEmail ? " — " + userEmail : ""),
+        to: CFC_OWNER_EMAIL || SMTP_USER,
+        subject: `AutoVINReveal chat — bot ${shouldEscalate ? "needs you" : "sent someone to support"}${userEmail ? " · " + userEmail : ""}`,
         html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
           <div style="background:#1e3a8a;color:white;padding:16px 20px;border-radius:8px 8px 0 0;">
-            <strong>Customer needs help</strong>${userEmail ? " &mdash; " + userEmail : ""}
+            <strong>The bot ${reason}</strong>${userEmail ? " &mdash; " + esc(userEmail) : ""}
           </div>
           <div style="border:1px solid #e2e8f0;border-top:none;padding:20px;border-radius:0 0 8px 8px;background:#f8fafc;">
             <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Full conversation:</p>
             ${convoHtml}
             <hr style="margin:16px 0;border:none;border-top:1px solid #e2e8f0;"/>
-            <p style="color:#64748b;font-size:12px;">Reply directly to the customer at: <a href="mailto:${userEmail || "support@autovinreveal.com"}">${userEmail || "support@autovinreveal.com"}</a></p>
+            <p style="color:#64748b;font-size:12px;">${userEmail ? `Reply to the visitor: <a href="mailto:${esc(userEmail)}">${esc(userEmail)}</a>` : "Visitor was not signed in (no email captured)."}</p>
           </div>
         </div>`,
-      }).catch(e => console.error("[Chat escalation email failed]", e.message));
+      }).catch(e => console.error("[Chat notify email failed]", e.message));
     }
 
     res.json({ reply, escalated: shouldEscalate, conversation_id: conversationId });
