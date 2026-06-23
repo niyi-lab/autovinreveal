@@ -1313,26 +1313,43 @@ async function resolveWhopBuyerEmail(data) {
 }
 
 function verifyWhopWebhook(rawBody, headers) {
-  const id = headers["webhook-id"], ts = headers["webhook-timestamp"], sigHeader = headers["webhook-signature"];
-  if (!id || !ts || !sigHeader || !WHOP_WEBHOOK_SECRET) return false;
-  if (Math.abs(Math.floor(Date.now() / 1000) - Number(ts)) > 300) return false; // 5-min replay window
-  const signed = `${id}.${ts}.${rawBody.toString("utf8")}`;
-  const raw = WHOP_WEBHOOK_SECRET.replace(/^ws_/, "").replace(/^whsec_/, "");
-  // ws_ secret encoding is ambiguous — try base64 / hex / utf8 key interpretations.
+  if (!WHOP_WEBHOOK_SECRET) return false;
+  const pick = (names) => { for (const n of names) if (headers[n]) return headers[n]; return null; };
+  const sigHeader = pick(["webhook-signature", "whop-signature", "x-whop-signature", "whop-webhook-signature", "x-signature", "x-hub-signature-256"]);
+  if (!sigHeader) return false;
+  const id   = pick(["webhook-id", "whop-id", "x-whop-id", "svix-id"]);
+  const ts   = pick(["webhook-timestamp", "whop-timestamp", "x-whop-timestamp", "svix-timestamp"]);
+  const body = rawBody.toString("utf8");
+
+  // Candidate signed strings (Standard Webhooks `id.ts.body`, `ts.body`, or plain body).
+  const signedCandidates = [];
+  if (id && ts) signedCandidates.push(`${id}.${ts}.${body}`);
+  if (ts) signedCandidates.push(`${ts}.${body}`);
+  signedCandidates.push(body);
+
+  // Candidate secret keys (the ws_ encoding is unknown).
+  const rawSecret = WHOP_WEBHOOK_SECRET.replace(/^ws_/, "").replace(/^whsec_/, "");
   const keys = [];
-  try { keys.push(Buffer.from(raw, "base64")); } catch (_) {}
-  try { keys.push(Buffer.from(raw, "hex")); } catch (_) {}
-  keys.push(Buffer.from(WHOP_WEBHOOK_SECRET, "utf8"), Buffer.from(raw, "utf8"));
-  const provided = sigHeader.split(/\s+/).map((p) => (p.includes(",") ? p.split(",")[1] : p));
-  for (const key of keys) {
-    if (!key || !key.length) continue;
-    const mac = crypto.createHmac("sha256", key).update(signed).digest("base64");
-    if (provided.some((s) => s === mac)) return true;
+  try { keys.push(Buffer.from(rawSecret, "base64")); } catch (_) {}
+  try { keys.push(Buffer.from(rawSecret, "hex")); } catch (_) {}
+  keys.push(Buffer.from(WHOP_WEBHOOK_SECRET, "utf8"), Buffer.from(rawSecret, "utf8"));
+
+  // Provided signatures: strip `v1,`/`sha256=` prefixes, split on space/comma.
+  const provided = String(sigHeader).split(/[\s,]+/).map((p) => p.replace(/^v1[,=]?/, "").replace(/^sha256=/, "")).filter(Boolean);
+
+  for (const signed of signedCandidates) {
+    for (const key of keys) {
+      if (!key || !key.length) continue;
+      const b64 = crypto.createHmac("sha256", key).update(signed).digest("base64");
+      const hex = crypto.createHmac("sha256", key).update(signed).digest("hex");
+      if (provided.some((s) => s === b64 || s === hex)) return true;
+    }
   }
   return false;
 }
 
 app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => {
+  console.log("[Whop:hdrs] " + JSON.stringify(req.headers));   // TEMP: discover Whop's real signature header
   if (!verifyWhopWebhook(req.body, req.headers)) {
     console.warn(`[Whop] signature verify failed (id=${req.headers["webhook-id"]}, ts=${req.headers["webhook-timestamp"]})`);
     return res.status(400).send("Webhook verification failed");
