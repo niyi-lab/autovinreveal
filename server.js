@@ -1347,11 +1347,12 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
     const { error: dupErr } = await supabaseService.from("processed_webhook_events").insert({ event_id: eventId });
     if (dupErr && dupErr.code === "23505") return res.status(200).json({ ok: true, duplicate: true });
 
-    if (/payment\.succeeded|membership\.(went_valid|activated)/.test(type)) {
-      const meta       = data.metadata || {};
-      const checkoutId = data.checkout_id || data.checkout_session || (data.checkout && data.checkout.id) || meta.sid || null;
-      const userId     = meta.user_id || meta.userId || null;
-      const planId     = data.plan || data.plan_id || (data.membership && (data.membership.plan || data.membership.plan_id)) || null;
+    if (type === "payment.succeeded") {
+      const meta       = data.metadata || (data.membership && data.membership.metadata) || {};
+      // The ch_ session id lives on the membership — data.checkout_id is a different internal id.
+      const checkoutId = (data.membership && data.membership.checkout_session) || data.checkout_session || meta.sid || null;
+      const userId     = meta.user_id || meta.userId || null;   // Supabase id (NOT data.user.id, which is Whop's)
+      const planId     = (data.plan && (data.plan.id || data.plan)) || data.plan_id || (data.membership && data.membership.plan) || null;
       // Diagnostic (confirms the real payload shape on the first live delivery):
       console.log(`[Whop:dbg] type=${type} payment=${data.id} checkout_id=${checkoutId} planId=${planId} metaKeys=${Object.keys(meta).join(",")} dataKeys=${Object.keys(data).join(",")}`);
 
