@@ -534,6 +534,7 @@ const stripeSessionId = p.get('session_id') || null;
 const intentParam     = p.get('intent') || null;
 const vinParam        = (p.get('vin') || '').toUpperCase();
 const purchased       = p.get('purchased') === '1';   // Whop redirect lands here
+const whopPaymentId   = p.get('payment_id') || p.get('receipt_id') || null;
 function getWhopClaim()   { try { return localStorage.getItem('whopClaim') || null; } catch { return null; } }
 function clearWhopClaim() { try { localStorage.removeItem('whopClaim'); } catch {} }
 
@@ -589,7 +590,7 @@ async function handleWhopReturn() {
 
   for (let attempt = 0; attempt < 14; attempt++) {
     const r = await apiFetch('/api/whop/claim', {
-      method: 'POST', headers, body: JSON.stringify({ claim }),
+      method: 'POST', headers, body: JSON.stringify({ claim, payment_id: whopPaymentId }),
     }, 35_000).catch(() => null);   // a single call may run the provider fetch inline
 
     if (r && r.status === 200) {                 // FULFILLED (202 is NOT success — that was the bug)

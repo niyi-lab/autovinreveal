@@ -1487,9 +1487,27 @@ app.post("/api/whop/checkout", async (req, res) => {
   }
 });
 
-// ── Whop claim: the redirect landing calls this. The signed webhook marks the row
-//    'paid'; this endpoint fetches the report on demand (the buyer is waiting), with
-//    an atomic guard so exactly one fetch runs. No Whop API call. ──
+// Verify a Whop payment server-side (used when the webhook hasn't marked the row
+// paid — webhook delivery is unreliable). Binds payment->row by VIN + plan + amount.
+async function fetchWhopPayment(paymentId) {
+  if (!paymentId || !/^pay_/.test(paymentId)) return null;
+  const p = await whopApi("GET", `/api/v2/payments/${encodeURIComponent(paymentId)}`);
+  return (p.json && (p.json.data || p.json)) || null;
+}
+function whopPaymentMatchesRow(pd, row) {
+  if (!pd || !(pd.status === "paid" || pd.paid_at)) return false;
+  const pmVin  = ((pd.metadata && pd.metadata.vin) || (pd.membership && pd.membership.metadata && pd.membership.metadata.vin) || "").toUpperCase();
+  const planId = (pd.plan && (pd.plan.id || pd.plan)) || pd.plan_id || null;
+  const amount = parseFloat(pd.final_amount || pd.total || "0");
+  if (pmVin && row.vin && pmVin !== String(row.vin).toUpperCase()) return false;
+  if (row.plan_id && planId && planId !== row.plan_id) return false;
+  if (row.expected_price && amount && amount + 0.001 < Number(row.expected_price)) return false;
+  return true;
+}
+
+// ── Whop claim: the redirect landing calls this. Confirms payment (the webhook's
+//    'paid' flag OR direct API verification via the payment_id from the redirect),
+//    then fetches the report on demand with an atomic guard so one fetch runs. ──
 const whopClaimLimiter = rateLimit({ windowMs: 60 * 1000, max: 60 });
 app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
   try {
@@ -1504,8 +1522,19 @@ app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
     if (row.delivered_token) return res.json({ status: "fulfilled", token: row.delivered_token, vin: row.vin || null, credits: 0 });
     // Pack (no VIN) the webhook already fulfilled → credits added.
     if (row.status === "fulfilled") return res.json({ status: "fulfilled", token: null, vin: row.vin || null, credits: row.credits || 0 });
-    // Payment not confirmed by the webhook yet → keep polling.
-    if (row.status !== "paid") return res.status(202).json({ status: "processing" });
+    // Confirm payment. Fast path: the webhook already set status='paid'. Otherwise
+    // verify directly via the Whop API using the payment_id from the redirect URL —
+    // this makes the claim self-sufficient when the webhook never arrives.
+    if (row.status === "pending") {
+      const pd = await fetchWhopPayment(String(req.body?.payment_id || "")).catch(() => null);
+      if (!whopPaymentMatchesRow(pd, row)) return res.status(202).json({ status: "processing" });
+      const email = (pd.user && pd.user.email) || pd.user_email || row.buyer_email || (await resolveWhopBuyerEmail(pd).catch(() => null));
+      await supabaseService.from("whop_checkouts").update({ status: "paid", buyer_email: email || row.buyer_email })
+        .eq("session_id", row.session_id).eq("status", "pending");
+      row.status = "paid"; row.buyer_email = email || row.buyer_email;
+    } else if (row.status !== "paid") {
+      return res.status(202).json({ status: "processing" });   // 'fulfilling' — another request is on it
+    }
 
     // status === "paid": atomically claim the fetch (only paid->fulfilling wins).
     const { data: claimed } = await supabaseService.from("whop_checkouts")
