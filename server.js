@@ -1252,10 +1252,10 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
 ================================================================ */
 const WHOP_WEBHOOK_SECRET = process.env.WHOP_WEBHOOK_SECRET || "";
 const WHOP_API_KEY = process.env.WHOP_API_KEY || "";
-const WHOP_PLANS = {                        // button key -> Whop plan + credits
-  single: { plan: "plan_DvE2Z32UAeyTl", credits: CREDITS_PER_SINGLE },
-  pack5:  { plan: "plan_N1GiRFY8AGfpH", credits: CREDITS_PER_5PACK  },
-  pack20: { plan: "plan_0f5gjPm3KD8YO", credits: CREDITS_PER_20PACK },
+const WHOP_PLANS = {                        // button key -> Whop plan + credits + price
+  single: { plan: "plan_DvE2Z32UAeyTl", credits: CREDITS_PER_SINGLE, price: 5.99  },
+  pack5:  { plan: "plan_N1GiRFY8AGfpH", credits: CREDITS_PER_5PACK,  price: 20.00 },
+  pack20: { plan: "plan_0f5gjPm3KD8YO", credits: CREDITS_PER_20PACK, price: 58.00 },
 };
 async function whopApi(method, path, body) {
   try {
@@ -1298,6 +1298,20 @@ async function deliverGuestReportByEmail(vin, type, to) {
   console.log(`[Whop] guest report for ${v} emailed to ${to}`);
 }
 
+// Resolve the buyer's email from a Whop payment payload (falls back to the member record).
+async function resolveWhopBuyerEmail(data) {
+  let email = data.user_email || data.email || (data.user && data.user.email) ||
+              (data.member && data.member.email) || data.receipt_email || (data.metadata && data.metadata.email) || null;
+  if (!email) {
+    const uid = typeof data.user === "string" ? data.user : (data.user_id || (data.user && data.user.id) || null);
+    if (uid) {
+      const m = await whopApi("GET", `/api/v2/members?user_id=${encodeURIComponent(uid)}`);
+      email = (m.json && m.json.data && m.json.data[0] && m.json.data[0].email) || null;
+    }
+  }
+  return email;
+}
+
 function verifyWhopWebhook(rawBody, headers) {
   const id = headers["webhook-id"], ts = headers["webhook-timestamp"], sigHeader = headers["webhook-signature"];
   if (!id || !ts || !sigHeader || !WHOP_WEBHOOK_SECRET) return false;
@@ -1334,38 +1348,66 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
     if (dupErr && dupErr.code === "23505") return res.status(200).json({ ok: true, duplicate: true });
 
     if (/payment\.succeeded|membership\.(went_valid|activated)/.test(type)) {
-      const meta   = data.metadata || {};
-      const userId = meta.user_id || meta.userId || null;
-      const planId = data.plan || data.plan_id || (data.membership && (data.membership.plan || data.membership.plan_id)) || null;
+      const meta       = data.metadata || {};
+      const checkoutId = data.checkout_id || data.checkout_session || (data.checkout && data.checkout.id) || meta.sid || null;
+      const userId     = meta.user_id || meta.userId || null;
+      const planId     = data.plan || data.plan_id || (data.membership && (data.membership.plan || data.membership.plan_id)) || null;
+      // Diagnostic (confirms the real payload shape on the first live delivery):
+      console.log(`[Whop:dbg] type=${type} payment=${data.id} checkout_id=${checkoutId} planId=${planId} metaKeys=${Object.keys(meta).join(",")} dataKeys=${Object.keys(data).join(",")}`);
+
+      // Our checkout row is the AUTHORITATIVE source for vin/type (server-set at create).
+      let row = null;
+      if (checkoutId) {
+        const { data: r } = await supabaseService.from("whop_checkouts").select("*").eq("session_id", checkoutId).maybeSingle();
+        row = r || null;
+      }
+      const vin     = (row?.vin  || meta.vin  || "").toUpperCase();
+      const type2   = (row?.type || meta.type || "carfax").toLowerCase();
       const credits = (parseInt(meta.credits, 10) || 0) || WHOP_PLAN_CREDITS[planId] || 0;
-      if (userId && credits > 0) {
-        await addCreditsAtomic(userId, credits);
-        console.log(`[Whop] +${credits} credits to user ${userId} (plan ${planId}, payment ${data.id})`);
-      } else if (meta.guest && meta.vin) {
-        // Guest single report — no account; deliver by email.
-        let buyerEmail = data.user_email || data.email || (data.user && data.user.email) ||
-                         (data.member && data.member.email) || data.receipt_email || meta.email || null;
-        if (!buyerEmail) {
-          // Resolve from the member record (payment payload only carries the user id).
-          const uid = typeof data.user === "string" ? data.user : (data.user_id || (data.user && data.user.id) || null);
-          if (uid) {
-            const m = await whopApi("GET", `/api/v2/members?user_id=${encodeURIComponent(uid)}`);
-            buyerEmail = (m.json && m.json.data && m.json.data[0] && m.json.data[0].email) || null;
-          }
+
+      if (vin) {
+        // SINGLE report (guest or logged-in) — fulfill the report exactly once.
+        let raw = await getReportData(vin, type2), vehicle = row?.vehicle || null;
+        if (!raw) {
+          const fetched = await cfcGetReport(vin, type2);     // 1 provider credit (paid for)
+          raw = fetched.raw; vehicle = fetched.vehicle;
+          try { writeCache(vin, type2, raw); } catch (_) {}
+          await writeGlobalCache(vin, type2, raw, vehicle);
         }
-        if (buyerEmail) {
-          await deliverGuestReportByEmail(meta.vin, meta.type || "carfax", buyerEmail);
+        const { token } = await createShareToken(vin, type2, vehicle);
+        if (row) {
+          await supabaseService.from("whop_checkouts").update({
+            status: "fulfilled", delivered_token: token, vehicle, fulfilled_at: new Date().toISOString(),
+          }).eq("session_id", row.session_id);
+        }
+        if (userId) {
+          // Logged-in single → owns it permanently (no separate spendable credit).
+          await supabaseService.from("vin_queries").upsert(
+            { user_id: userId, vin, type: type2, success: true, report_data: raw, vehicle },
+            { onConflict: "user_id,vin,type" }
+          );
+          console.log(`[Whop] single fulfilled + owned by ${userId} (vin ${vin}, payment ${data.id})`);
         } else {
-          console.warn(`[Whop] guest single but no buyer email — vin=${meta.vin} data keys=${Object.keys(data).join(",")}`);
+          // Guest → email the link as a safety net (covers a closed tab).
+          const email = await resolveWhopBuyerEmail(data);
+          if (email) { try { await deliverGuestReportByEmail(vin, type2, email); } catch (e) { console.warn("[Whop] guest email failed:", e.message); } }
+          console.log(`[Whop] guest single fulfilled (vin ${vin}, payment ${data.id}, email ${email || "?"})`);
         }
+      } else if (userId && credits > 0) {
+        // Pack (no VIN) → grant spendable credits.
+        await addCreditsAtomic(userId, credits);
+        if (row) await supabaseService.from("whop_checkouts").update({ status: "fulfilled", fulfilled_at: new Date().toISOString() }).eq("session_id", row.session_id);
+        console.log(`[Whop] +${credits} credits to ${userId} (plan ${planId}, payment ${data.id})`);
       } else {
-        console.warn(`[Whop] paid but unlinked — user_id=${userId} plan=${planId} credits=${credits} meta=${JSON.stringify(meta).slice(0,140)}`);
+        console.warn(`[Whop] paid but unlinked — user=${userId} plan=${planId} vin=${vin} checkout=${checkoutId} meta=${JSON.stringify(meta).slice(0,140)}`);
       }
     }
     return res.status(200).json({ ok: true });
   } catch (e) {
     console.error("[Whop] handler error:", e.message);
-    return res.status(500).json({ error: "server error" });
+    // Roll back idempotency so Whop's retry can re-attempt fulfillment (e.g. transient provider error).
+    try { await supabaseService.from("processed_webhook_events").delete().eq("event_id", "whop_" + (data.id || req.headers["webhook-id"] || "")); } catch (_) {}
+    return res.status(500).json({ error: "server error" });   // non-200 => Whop retries
   }
 });
 
@@ -1380,8 +1422,9 @@ app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 // General API rate limit
 app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
-// ── Whop checkout: create a hosted-checkout session with metadata + redirect ──
-// Logged-in → credits to their account; guest single → report emailed after pay.
+// ── Whop checkout: create a hosted-checkout session, store a claim row ──
+// The signed webhook is the source of truth; this only sets up the session and
+// hands the browser a secret claim token (never placed in any URL).
 app.post("/api/whop/checkout", async (req, res) => {
   try {
     if (!WHOP_API_KEY) return res.status(500).json({ error: "whop_not_configured" });
@@ -1390,26 +1433,67 @@ app.post("/api/whop/checkout", async (req, res) => {
     if (!cfg) return res.status(400).json({ error: "invalid_plan" });
     const { user } = await getUser(req).catch(() => ({ user: null }));
     const userId = (user && user.id) || (req.body && req.body.user_id) || null;
+    const vinUp  = vin ? String(vin).toUpperCase() : null;
+    const typeL  = (type || "carfax").toLowerCase();
+    const flow   = userId ? "user" : "guest";
+
     const metadata = {};
-    let redirect = `${SITE_URL}/?purchased=1`;
+    const redirect = `${SITE_URL}/?purchased=1&flow=${flow}`;   // no ids in the URL
     if (userId) {
       metadata.user_id = userId;
       metadata.credits = String(cfg.credits);
-      if (vin) metadata.vin = String(vin).toUpperCase();
-    } else if (key === "single" && vin) {
-      metadata.vin   = String(vin).toUpperCase();
-      metadata.type  = (type || "carfax").toLowerCase();
-      metadata.guest = "1";
-      redirect = `${SITE_URL}/?purchased=1&guest=1`;
+      if (vinUp) { metadata.vin = vinUp; metadata.type = typeL; }   // single intent
+    } else if (key === "single" && vinUp) {
+      metadata.vin = vinUp; metadata.type = typeL; metadata.guest = "1";
     } else {
       return res.status(401).json({ error: "login_required" });
     }
+
     const r = await whopApi("POST", "/api/v2/checkout_sessions", { plan_id: cfg.plan, metadata, redirect_url: redirect });
-    const url = (r.json && (r.json.purchase_url || (r.json.data && r.json.data.purchase_url))) || null;
-    if (!url) { console.error("[Whop] checkout create failed:", r.status, JSON.stringify(r.json).slice(0, 200)); return res.status(502).json({ error: "checkout_failed" }); }
-    return res.json({ url });
+    const node    = (r.json && (r.json.data || r.json)) || {};
+    const url     = node.purchase_url || null;
+    const session = node.id || node.checkout_session || null;     // ch_...
+    if (!url || !session) {
+      console.error("[Whop] checkout create failed:", r.status, JSON.stringify(r.json).slice(0, 240));
+      return res.status(502).json({ error: "checkout_failed" });
+    }
+
+    // Capability token — returned to the buyer's browser only.
+    const claimToken = crypto.randomBytes(32).toString("hex");
+    const { error: insErr } = await supabaseService.from("whop_checkouts").insert({
+      session_id: session, claim_token: claimToken, vin: vinUp, type: typeL,
+      user_id: userId, flow, plan_id: cfg.plan, credits: cfg.credits, expected_price: cfg.price,
+      status: "pending",
+    });
+    if (insErr) { console.error("[Whop] whop_checkouts insert failed:", insErr.message); return res.status(502).json({ error: "checkout_failed" }); }
+
+    return res.json({ url, claim: claimToken });
   } catch (e) {
     console.error("[Whop] /api/whop/checkout error:", e.message);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+// ── Whop claim: redirect landing reads OUR fulfillment status (no Whop API call,
+//    no provider pull). Returns the report token once the webhook has fulfilled. ──
+const whopClaimLimiter = rateLimit({ windowMs: 60 * 1000, max: 40 });
+app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
+  try {
+    const claim = String(req.body?.claim || "");
+    if (!/^[a-f0-9]{64}$/.test(claim)) return res.status(400).json({ error: "bad_claim" });
+    const { data: row } = await supabaseService.from("whop_checkouts").select("*").eq("claim_token", claim).maybeSingle();
+    if (!row) return res.status(404).json({ error: "not_found" });
+    if (row.created_at && (Date.now() - new Date(row.created_at).getTime()) > 35 * 24 * 3600 * 1000)
+      return res.status(410).json({ error: "expired" });
+    if (row.status !== "fulfilled") return res.status(202).json({ status: "processing" });
+    return res.json({
+      status: "fulfilled",
+      token: row.delivered_token || null,                 // present for single reports
+      vin: row.vin || null,
+      credits: row.delivered_token ? 0 : (row.credits || 0),   // packs report credits added
+    });
+  } catch (e) {
+    console.error("[Whop] /api/whop/claim error:", e.message);
     return res.status(500).json({ error: "server_error" });
   }
 });

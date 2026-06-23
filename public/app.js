@@ -533,6 +533,9 @@ const p               = params();
 const stripeSessionId = p.get('session_id') || null;
 const intentParam     = p.get('intent') || null;
 const vinParam        = (p.get('vin') || '').toUpperCase();
+const purchased       = p.get('purchased') === '1';   // Whop redirect lands here
+function getWhopClaim()   { try { return localStorage.getItem('whopClaim') || null; } catch { return null; } }
+function clearWhopClaim() { try { localStorage.removeItem('whopClaim'); } catch {} }
 
 function tryLoadPending() {
   try {
@@ -575,7 +578,51 @@ async function resumePendingPurchase() {
   }
 }
 
+// ── Whop redirect-delivery: the signed webhook fulfils; we just poll OUR status. ──
+async function handleWhopReturn() {
+  showToast('Payment confirmed. Preparing your report…', 'ok');
+  await ensureBackendReady();
+  const claim = getWhopClaim();
+  for (let attempt = 0; attempt < 12; attempt++) {          // ~30s of polling
+    const r = await apiFetch('/api/whop/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ claim }),
+    }, 15_000).catch(() => null);
+
+    if (r && r.ok) {
+      const j = await r.json().catch(() => ({}));
+      clearWhopClaim(); clearPending();
+      if (j.token) {                       // single report → land on it
+        trackPurchase(5.99);
+        window.location.replace(`/view/${j.token}`);
+      } else {                             // pack → credits added
+        await refreshBalancePill();
+        showToast('Credits added to your account.', 'ok');
+      }
+      return true;
+    }
+    if (r && r.status === 202) { await new Promise(res => setTimeout(res, 2500)); continue; }   // webhook not done yet
+    if (r && (r.status === 404 || r.status === 410 || r.status === 400)) break;
+    await new Promise(res => setTimeout(res, 2500));
+  }
+  showToast('Payment received — your report is taking a moment. Your purchase is safe; refresh in a few seconds. Still stuck? Email support@autovinreveal.com.', 'error');
+  return false;
+}
+
 async function handleSuccessIfNeeded() {
+  if (purchased) {                                    // returned from Whop checkout
+    if (getWhopClaim()) {
+      await handleWhopReturn();
+    } else {
+      await refreshBalancePill();
+      showToast('Payment confirmed. If you bought credits they’ve been added; a single report is emailed to you.', 'ok');
+    }
+    const u = new URL(location.href);
+    ['purchased','flow','sid','status'].forEach(k => u.searchParams.delete(k));
+    history.replaceState({}, '', u.pathname + u.search);
+    return;
+  }
   if (!(onSuccessPage() || stripeSessionId)) return;
   if (intentParam === 'buy_report' && stripeSessionId && vinParam) {
     showToast('Payment confirmed. Preparing your report…', 'ok');
@@ -1272,8 +1319,9 @@ async function startWhopPurchase({ user, key, pendingReport = null }) {
       }),
     }, 12_000);
     if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Checkout failed'); }
-    const { url } = await r.json();
+    const { url, claim } = await r.json();
     if (!url) throw new Error('No checkout URL returned');
+    try { if (claim) localStorage.setItem('whopClaim', claim); } catch {}
     window.location.href = url;
   } catch (e) { showToast(e.message || 'Failed to start checkout', 'error'); }
 }
