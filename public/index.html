@@ -537,6 +537,36 @@
           </div>
         </section>
 
+        <!-- CARFAX comparison -->
+        <section class="mt-20 max-w-3xl mx-auto">
+          <div class="text-center mb-8">
+            <span class="inline-block bg-blue-50 text-blue-700 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider mb-3">Same data — fraction of the price</span>
+            <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">AutoVINReveal vs CARFAX&reg;</h2>
+            <p class="text-gray-500 mt-2 text-sm max-w-xl mx-auto">The exact same national-database records — you just don't pay the markup.</p>
+          </div>
+          <div class="rounded-2xl border border-gray-200 overflow-hidden shadow-lg shadow-blue-900/5 bg-white">
+            <table class="w-full text-xs sm:text-sm">
+              <thead>
+                <tr class="bg-gray-50 border-b border-gray-200">
+                  <th class="text-left p-3 sm:p-4 font-semibold text-gray-500">What you get</th>
+                  <th class="p-3 sm:p-4 text-center border-l-2 border-blue-500 bg-blue-50 font-extrabold text-blue-700">AutoVINReveal</th>
+                  <th class="p-3 sm:p-4 text-center font-semibold text-gray-400">CARFAX&reg;</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100 text-gray-700">
+                <tr><td class="p-3 sm:p-4">Accident &amp; damage history</td><td class="p-3 sm:p-4 text-center bg-blue-50/50 text-green-600 font-bold">✓</td><td class="p-3 sm:p-4 text-center text-green-600">✓</td></tr>
+                <tr><td class="p-3 sm:p-4">Title brands (salvage, flood, lemon)</td><td class="p-3 sm:p-4 text-center bg-blue-50/50 text-green-600 font-bold">✓</td><td class="p-3 sm:p-4 text-center text-green-600">✓</td></tr>
+                <tr><td class="p-3 sm:p-4">Odometer &amp; rollback check</td><td class="p-3 sm:p-4 text-center bg-blue-50/50 text-green-600 font-bold">✓</td><td class="p-3 sm:p-4 text-center text-green-600">✓</td></tr>
+                <tr><td class="p-3 sm:p-4">Open safety recalls</td><td class="p-3 sm:p-4 text-center bg-blue-50/50 text-green-600 font-bold">✓</td><td class="p-3 sm:p-4 text-center text-green-600">✓</td></tr>
+                <tr><td class="p-3 sm:p-4">Service &amp; ownership history</td><td class="p-3 sm:p-4 text-center bg-blue-50/50 text-green-600 font-bold">✓</td><td class="p-3 sm:p-4 text-center text-green-600">✓</td></tr>
+                <tr><td class="p-3 sm:p-4">No subscription needed</td><td class="p-3 sm:p-4 text-center bg-blue-50/50 text-green-600 font-bold">✓</td><td class="p-3 sm:p-4 text-center text-gray-300 font-bold">✕</td></tr>
+                <tr class="bg-gray-50"><td class="p-3 sm:p-4 font-bold text-slate-900">Price per report</td><td class="p-3 sm:p-4 text-center bg-blue-50 font-black text-blue-700 text-base sm:text-lg">$5.99</td><td class="p-3 sm:p-4 text-center font-bold text-gray-400 line-through">$44.99</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="text-center text-[11px] text-gray-400 mt-3">CARFAX&reg; is a registered trademark of CARFAX, Inc. AutoVINReveal is not affiliated with, endorsed by, or sponsored by CARFAX, Inc.</p>
+        </section>
+
         <section id="pricing" class="mt-20">
           <div class="text-center mb-8">
             <h2 class="text-3xl font-bold text-slate-900">Simple, Honest Pricing</h2>
@@ -807,7 +837,26 @@
       </div>
     </main>
 
-    <footer class="bg-slate-900 text-slate-400 mt-auto pt-14 pb-6">
+    <!-- Sticky mobile CTA (appears after scrolling past the hero) -->
+    <div id="stickyCTA" class="sm:hidden fixed bottom-0 left-0 right-0 z-[290] translate-y-full transition-transform duration-300 bg-white/95 backdrop-blur border-t border-gray-200 px-4 py-3" style="box-shadow:0 -4px 20px rgba(0,0,0,0.08)">
+      <button type="button" onclick="(function(){var i=document.querySelector('input[name=vin]');if(i){i.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(function(){i.focus();},450);}})()"
+        class="w-full bg-blue-600 hover:bg-blue-700 active:scale-[.98] text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all" style="box-shadow:0 8px 20px rgba(37,99,235,0.3)">
+        Check a VIN — $5.99
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>
+      </button>
+    </div>
+    <script>
+      (function () {
+        var bar = document.getElementById('stickyCTA');
+        if (!bar) return;
+        function upd() { if (window.scrollY > 560) bar.classList.remove('translate-y-full'); else bar.classList.add('translate-y-full'); }
+        window.addEventListener('scroll', upd, { passive: true });
+        window.addEventListener('resize', upd, { passive: true });
+        upd();
+      })();
+    </script>
+
+    <footer class="bg-slate-900 text-slate-400 mt-auto pt-14 pb-24 sm:pb-6">
       <div class="max-w-6xl mx-auto px-4">
         <div class="grid md:grid-cols-4 gap-10 mb-10">
           <!-- Brand -->
