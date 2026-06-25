@@ -234,7 +234,7 @@
         // Bar
         const bar = document.createElement('div');
         bar.className = 'bar w-full rounded-t-lg ' + (isThis ? 'bg-blue-600' : 'bg-slate-200');
-        bar.style.height = pct + '%';
+        bar.style.height = Math.round(pct * 1.3) + 'px';   // px, not % (flex parent has no fixed height)
 
         wrap.appendChild(valEl);
         wrap.appendChild(bar);
