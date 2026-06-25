@@ -3018,7 +3018,7 @@ A single report needs no account. Bundles and monthly plans need a free account.
 
 PRICING:
 Single report $5.99 (no account). 5-pack $20 ($4 each, account). 20-pack $58 ($2.90 each, account).
-Monthly plans: Starter $30/mo for 20 reports, Pro $98/mo for 100 reports, Premium $160/mo for 200 reports.
+Monthly subscription plans (reports come as credits that renew each month; unused credits roll over for one month only, then expire): Starter $39/mo for 20 reports, Dealer $89/mo for 50 reports, Pro $169/mo for 100 reports.
 Credits never expire.
 
 WHAT THE REPORT INCLUDES:
