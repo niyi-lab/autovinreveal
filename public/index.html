@@ -641,9 +641,7 @@
               <span class="inline-flex items-center justify-center h-8 px-3 bg-white border border-gray-200 rounded-md shadow-sm"><span class="italic font-extrabold text-sm" style="color:#1434CB">VISA</span></span>
               <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm"><svg width="28" height="18" viewBox="0 0 32 20" aria-hidden="true"><circle cx="13" cy="10" r="8" fill="#EB001B"/><circle cx="19" cy="10" r="8" fill="#F79E1B" fill-opacity=".85"/></svg></span>
               <span class="inline-flex items-center justify-center h-8 px-2.5 rounded-md shadow-sm" style="background:#1F72CF"><span class="font-bold text-white" style="font-size:9px;letter-spacing:.5px">AMEX</span></span>
-              <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm"><span class="italic font-bold text-xs"><span style="color:#003087">Pay</span><span style="color:#009CDE">Pal</span></span></span>
               <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm"><span class="font-bold text-gray-800" style="font-size:9px;letter-spacing:-.2px">DISC<span style="color:#FF6000">O</span>VER</span></span>
-              <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm"><svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="#0079BE"/><circle cx="10" cy="10" r="4.5" fill="#fff"/></svg></span>
             </div>
           </div>
           <p class="sm:hidden text-center text-xs text-gray-400 mt-3" id="swipeHint">← Swipe to see all plans →</p>
@@ -1393,6 +1391,7 @@
       let chatLastSeen = 0;
       let chatPollTimer = null;
       let chatImage = null; // base64 data URL of an attached screenshot
+      let chatCacheMsgs = []; // [{r,t,i}] rendered messages, mirrored to localStorage
 
       const CHAT_EMOJIS = ['😀','😅','😂','🙂','😉','😍','😎','🤔','👍','👎','🙏','👏','🔥','✨','✅','❌','❓','❗','💰','🚗','📄','🛠️','😢','🤝'];
       function toggleEmoji() {
@@ -1416,12 +1415,25 @@
       }
       function attachChatImage(file) {
         if (!/^image\//.test(file.type)) return;
-        if (file.size > 6 * 1024 * 1024) { alert('That image is too big (max 6MB).'); return; }
+        if (file.size > 25 * 1024 * 1024) { alert('That image is too big.'); return; }
         const reader = new FileReader();
         reader.onload = () => {
-          chatImage = reader.result;
-          document.getElementById('chatImgThumb').src = chatImage;
-          document.getElementById('chatImgPreview').style.display = 'block';
+          // Downscale so it always sends reliably (and the AI/vision can read it).
+          const im = new Image();
+          const show = () => { document.getElementById('chatImgThumb').src = chatImage; document.getElementById('chatImgPreview').style.display = 'block'; };
+          im.onload = () => {
+            const MAX = 1568; // Claude vision's ideal max edge
+            let w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
+            if (Math.max(w, h) > MAX) { const s = MAX / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+            try {
+              const c = document.createElement('canvas'); c.width = w; c.height = h;
+              c.getContext('2d').drawImage(im, 0, 0, w, h);
+              chatImage = c.toDataURL('image/jpeg', 0.82);
+            } catch (e) { chatImage = reader.result; }
+            show();
+          };
+          im.onerror = () => { chatImage = reader.result; show(); };
+          im.src = reader.result;
         };
         reader.readAsDataURL(file);
       }
@@ -1429,6 +1441,38 @@
         chatImage = null;
         document.getElementById('chatImgPreview').style.display = 'none';
         document.getElementById('chatImgThumb').src = '';
+      }
+
+      // ---- Temporary chat cache (localStorage, expires after 24h) ----
+      const CHAT_CACHE_KEY = 'avr_chat_v1';
+      function saveChatCache() {
+        try {
+          // keep images only for the most recent few messages to respect the storage quota
+          const msgs = chatCacheMsgs.slice(-40).map((m, i, arr) => (arr.length - i > 6 && m.i) ? { r: m.r, t: m.t, i: null } : m);
+          const payload = JSON.stringify({ ts: Date.now(), cid: chatConversationId, seen: chatLastSeen, msgs });
+          localStorage.setItem(CHAT_CACHE_KEY, payload);
+        } catch (e) {
+          try { localStorage.setItem(CHAT_CACHE_KEY, JSON.stringify({ ts: Date.now(), cid: chatConversationId, seen: chatLastSeen, msgs: chatCacheMsgs.slice(-40).map(m => ({ r: m.r, t: m.t, i: null })) })); } catch (e2) {}
+        }
+      }
+      function cacheMsg(role, text, img) { chatCacheMsgs.push({ r: role, t: text || '', i: img || null }); saveChatCache(); }
+      function restoreChatCache() {
+        try {
+          const raw = localStorage.getItem(CHAT_CACHE_KEY);
+          if (!raw) return;
+          const d = JSON.parse(raw);
+          if (!d || !Array.isArray(d.msgs) || !d.msgs.length || (Date.now() - (d.ts || 0)) > 24 * 3600 * 1000) { localStorage.removeItem(CHAT_CACHE_KEY); return; }
+          chatConversationId = d.cid || null;
+          chatLastSeen = d.seen || 0;
+          chatCacheMsgs = d.msgs;
+          chatHistory = d.msgs.filter(m => m.t).map(m => ({ role: m.r === 'user' ? 'user' : 'assistant', content: m.t }));
+          const div = document.createElement('div');
+          div.style.cssText = 'text-align:center;font-size:11px;color:#94a3b8;margin:2px 0 4px;';
+          div.textContent = '— earlier messages —';
+          document.getElementById('chatMessages').appendChild(div);
+          for (const m of d.msgs) { if (m.r === 'user') appendUserMessage(m.t, m.i); else appendMessage(m.t, m.r); }
+          if (chatConversationId) startChatPoll();
+        } catch (e) {}
       }
 
       // Voice notes via the browser's built-in speech recognition (no upload needed)
@@ -1514,6 +1558,7 @@
         input.style.height = 'auto';
         document.getElementById('chatEmojiBar').style.display = 'none';
         appendUserMessage(msg, img);
+        cacheMsg('user', msg, img);
         chatHistory.push({ role: 'user', content: msg || '[image]' });
         clearChatImage();
 
@@ -1540,6 +1585,7 @@
           if (!d.human) {
             const reply = d.reply || 'Sorry, something went wrong.';
             appendMessage(reply, 'assistant');
+            cacheMsg('assistant', reply);
             chatHistory.push({ role: 'assistant', content: reply });
 
             // If the AI escalated, notify the owner (who can also jump in live)
@@ -1575,6 +1621,7 @@
             if (m.id > chatLastSeen) chatLastSeen = m.id;
             if (m.role === 'owner') {
               appendMessage(m.content, 'owner');
+              cacheMsg('owner', m.content);
               if (!chatOpen) document.getElementById('chatUnread').style.display = 'block';
             }
           }
@@ -1584,6 +1631,8 @@
         if (chatPollTimer) return;
         chatPollTimer = setInterval(pollChat, 4000);
       }
+
+      restoreChatCache();   // bring back the visitor's recent conversation
 
       // Show greeting after 3s if user hasn't opened chat
       setTimeout(() => {

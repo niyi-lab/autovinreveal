@@ -161,7 +161,9 @@ async function loadMsgs(forceScroll) {
   box.innerHTML = messages.map(m => {
     const cls = m.role==='owner' ? 'm-owner' : (m.role==='assistant' ? 'm-assistant' : 'm-user');
     const lbl = m.role==='owner' ? 'You' : (m.role==='assistant' ? 'AI' : 'Visitor');
-    return `<div class="m ${cls}"><div class="lbl">${lbl}</div>${escapeHtml(m.content)}</div>`;
+    const txt = m.content ? escapeHtml(m.content) : '';
+    const img = m.image ? `<img src="${escapeHtml(m.image)}" alt="attachment" style="max-width:220px;max-height:240px;border-radius:8px;margin-top:${txt?'6px':'0'};display:block;cursor:zoom-in" onclick="window.open(this.src,'_blank')"/>` : '';
+    return `<div class="m ${cls}"><div class="lbl">${lbl}</div>${txt}${img}</div>`;
   }).join('');
   if (forceScroll || atBottom) box.scrollTop = box.scrollHeight;
 }

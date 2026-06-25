@@ -2961,7 +2961,7 @@ app.post("/api/chat", async (req, res) => {
         conversationId = c?.id || null;
       }
       if (conversationId) {
-        await supabaseService.from("chat_messages").insert({ conversation_id: conversationId, role: "user", content: String(message).slice(0, 4000) });
+        await supabaseService.from("chat_messages").insert({ conversation_id: conversationId, role: "user", content: String(message).slice(0, 4000), image: (image && typeof image === "string" && image.length < 2_000_000) ? image : null });
         await supabaseService.from("chat_conversations")
           .update({ last_message_at: new Date().toISOString(), ...(userEmail ? { visitor_email: userEmail } : {}) })
           .eq("id", conversationId);
@@ -3214,7 +3214,7 @@ app.get("/api/admin/chats/:id", requireOwnerMw, async (req, res) => {
       .from("chat_conversations").select("*").eq("id", req.params.id).eq("site", SITE_ID).maybeSingle();
     if (!convo) return res.status(404).json({ error: "not_found" });
     const { data: msgs } = await supabaseService
-      .from("chat_messages").select("id, role, content, created_at")
+      .from("chat_messages").select("id, role, content, created_at, image")
       .eq("conversation_id", req.params.id).order("id", { ascending: true }).limit(500);
     res.json({ conversation: convo, messages: msgs || [] });
   } catch (e) { res.status(500).json({ error: e.message }); }
