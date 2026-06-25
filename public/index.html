@@ -394,7 +394,7 @@
                 <div class="space-y-2 group">
                   <label class="block text-sm font-bold text-gray-700 flex justify-between">
                     <span>Search by VIN</span>
-                    <span class="text-xs font-normal text-blue-600 cursor-help" title="Found on the dashboard or driver's door jamb">Where is my VIN?</span>
+                    <button type="button" onclick="document.getElementById('vinHelp').classList.toggle('hidden')" class="text-xs font-normal text-blue-600 hover:underline cursor-pointer">Where is my VIN?</button>
                   </label>
                   <div class="relative flex items-center rounded-xl border border-gray-300 focus-within:border-blue-600 focus-within:ring-4 focus-within:ring-blue-600/10 transition-all bg-gray-50 group-hover:bg-white h-14">
                     <div class="pl-4 pr-3 text-gray-400">
@@ -403,6 +403,14 @@
                       </svg>
                     </div>
                     <input name="vin" maxlength="17" placeholder="VIN (17 CHARS)" class="flex-1 bg-transparent outline-none text-gray-900 placeholder-gray-400 font-mono font-medium uppercase sm:tracking-wider text-sm sm:text-base sm:text-lg min-w-0" autocomplete="off" />
+                  </div>
+                  <div id="vinHelp" class="hidden mt-2 text-xs text-gray-600 bg-blue-50 border border-blue-100 rounded-lg p-3 leading-relaxed">
+                    <p class="font-semibold text-gray-700 mb-1">Your VIN (17 characters) is usually here:</p>
+                    <ul class="list-disc pl-4 space-y-0.5">
+                      <li>Driver's-side dashboard — look through the windshield</li>
+                      <li>Driver's door jamb (open the door, check the frame sticker)</li>
+                      <li>Your registration, title, or insurance card</li>
+                    </ul>
                   </div>
                 </div>
 
@@ -423,25 +431,18 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
                   </svg>
                 </button>
-                <div class="mt-4 flex items-center justify-center gap-4 opacity-60 grayscale hover:grayscale-0 transition-all">
-                  <!-- Visa wordmark SVG -->
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 750 471" class="h-5" aria-label="Visa" role="img">
-                    <rect width="750" height="471" rx="40" fill="#1a1f71"/>
-                    <path d="M278 340l45-269h72L350 340h-72zm249-263c-14-5-37-11-65-11-71 0-121 38-122 91-1 40 35 62 62 75 28 14 37 22 37 34-1 18-22 26-43 26-29 0-44-4-68-14l-9-5-10 62c17 8 49 15 82 15 77 0 126-38 127-97 0-32-19-57-62-77-26-13-42-22-42-35 0-12 14-24 43-24 24 0 42 5 56 11l7 3 10-59zm190-6h-55c-17 0-30 5-37 23l-106 253h75l15-41h91l9 41h66L717 71zm-88 170l28-77 7-18 4 17 13 78h-52zm-410-170l-71 183-8-39c-13-44-55-92-101-116l64 237h76l113-265h-73z" fill="#fff"/>
-                    <path d="M166 71H50l-1 6c90 23 149 78 173 144L197 94c-4-18-16-22-31-23z" fill="#f9a533"/>
-                  </svg>
-                  <!-- Mastercard circles SVG -->
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152 95" class="h-6" aria-label="Mastercard" role="img">
-                    <circle cx="57" cy="47.5" r="47.5" fill="#eb001b"/>
-                    <circle cx="95" cy="47.5" r="47.5" fill="#f79e1b"/>
-                    <path d="M76 17.4a47.4 47.4 0 0 1 0 60.2A47.4 47.4 0 0 1 76 17.4z" fill="#ff5f00"/>
-                  </svg>
-                  <div class="flex items-center gap-1 text-[10px] uppercase font-bold text-gray-400 border border-gray-200 rounded px-1">
-                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                      <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path>
-                    </svg>
-                    SSL Secure
-                  </div>
+                <p class="text-center text-[11px] text-gray-400 mt-4 mb-2">Pay with</p>
+                <div class="flex flex-wrap items-center justify-center gap-2">
+                  <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm">
+                    <svg width="12" height="15" viewBox="0 0 12 15" aria-hidden="true"><path d="M9.6 7.9c0-1.5 1.2-2.2 1.3-2.3-.7-1-1.8-1.2-2.2-1.2-.9-.1-1.8.5-2.3.5s-1.2-.5-2-.5c-1 0-2 .6-2.5 1.6-1.1 1.9-.3 4.6.8 6.1.5.7 1.1 1.5 1.9 1.5.8 0 1-.5 2-.5s1.1.5 2 .5c.8 0 1.3-.7 1.8-1.4.6-.8.8-1.6.8-1.7 0 0-1.6-.6-1.6-2.4zM8.1 3.3c.4-.5.7-1.2.6-1.9-.6 0-1.3.4-1.7.9-.4.4-.7 1.1-.6 1.8.7 0 1.3-.4 1.7-.8z" fill="#000"/></svg>
+                    <span class="font-semibold text-xs text-black ml-1">Pay</span>
+                  </span>
+                  <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm text-xs font-bold"><span style="color:#4285F4">G</span><span class="text-gray-600">&nbsp;Pay</span></span>
+                  <span class="inline-flex items-center justify-center h-8 px-3 bg-white border border-gray-200 rounded-md shadow-sm"><span class="italic font-extrabold text-sm" style="color:#1434CB">VISA</span></span>
+                  <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm"><svg width="28" height="18" viewBox="0 0 32 20" aria-hidden="true"><circle cx="13" cy="10" r="8" fill="#EB001B"/><circle cx="19" cy="10" r="8" fill="#F79E1B" fill-opacity=".85"/></svg></span>
+                  <span class="inline-flex items-center justify-center h-8 px-2.5 rounded-md shadow-sm" style="background:#1F72CF"><span class="font-bold text-white" style="font-size:9px;letter-spacing:.5px">AMEX</span></span>
+                  <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm"><span class="font-bold text-gray-800" style="font-size:9px;letter-spacing:-.2px">DISC<span style="color:#FF6000">O</span>VER</span></span>
+                  <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm"><span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-white" style="background:#F7931A;font-size:11px;font-weight:700">&#8383;</span><span class="font-bold text-xs ml-1" style="color:#F7931A">Crypto</span></span>
                 </div>
               </div>
             </form>
@@ -561,7 +562,7 @@
                   <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> 1 full report</li>
                   <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> Instant PDF download</li>
                   <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> No account needed</li>
-                  <li class="flex items-center gap-2 text-gray-300"><span>—</span> Credits never expire</li>
+                  <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> Delivered in seconds</li>
                 </ul>
                 <button id="pricingBuy1Btn" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-xl transition-colors text-sm">
                   Get a Report — $5.99
@@ -628,21 +629,6 @@
             <span class="flex items-center gap-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Secure checkout</span>
             <span class="flex items-center gap-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>30-day money-back guarantee</span>
             <span class="flex items-center gap-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>Instant delivery</span>
-          </div>
-          <!-- Accepted payment methods -->
-          <div class="mt-7">
-            <p class="text-center text-xs text-gray-400 mb-3">Pay with</p>
-            <div class="flex flex-wrap items-center justify-center gap-2">
-              <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm">
-                <svg width="12" height="15" viewBox="0 0 12 15" aria-hidden="true"><path d="M9.6 7.9c0-1.5 1.2-2.2 1.3-2.3-.7-1-1.8-1.2-2.2-1.2-.9-.1-1.8.5-2.3.5s-1.2-.5-2-.5c-1 0-2 .6-2.5 1.6-1.1 1.9-.3 4.6.8 6.1.5.7 1.1 1.5 1.9 1.5.8 0 1-.5 2-.5s1.1.5 2 .5c.8 0 1.3-.7 1.8-1.4.6-.8.8-1.6.8-1.7 0 0-1.6-.6-1.6-2.4zM8.1 3.3c.4-.5.7-1.2.6-1.9-.6 0-1.3.4-1.7.9-.4.4-.7 1.1-.6 1.8.7 0 1.3-.4 1.7-.8z" fill="#000"/></svg>
-                <span class="font-semibold text-xs text-black ml-1">Pay</span>
-              </span>
-              <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm text-xs font-bold"><span style="color:#4285F4">G</span><span class="text-gray-600">&nbsp;Pay</span></span>
-              <span class="inline-flex items-center justify-center h-8 px-3 bg-white border border-gray-200 rounded-md shadow-sm"><span class="italic font-extrabold text-sm" style="color:#1434CB">VISA</span></span>
-              <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm"><svg width="28" height="18" viewBox="0 0 32 20" aria-hidden="true"><circle cx="13" cy="10" r="8" fill="#EB001B"/><circle cx="19" cy="10" r="8" fill="#F79E1B" fill-opacity=".85"/></svg></span>
-              <span class="inline-flex items-center justify-center h-8 px-2.5 rounded-md shadow-sm" style="background:#1F72CF"><span class="font-bold text-white" style="font-size:9px;letter-spacing:.5px">AMEX</span></span>
-              <span class="inline-flex items-center justify-center h-8 px-2.5 bg-white border border-gray-200 rounded-md shadow-sm"><span class="font-bold text-gray-800" style="font-size:9px;letter-spacing:-.2px">DISC<span style="color:#FF6000">O</span>VER</span></span>
-            </div>
           </div>
           <p class="sm:hidden text-center text-xs text-gray-400 mt-3" id="swipeHint">← Swipe to see all plans →</p>
         </section>

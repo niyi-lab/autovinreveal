@@ -326,10 +326,6 @@
         bar.innerHTML = `
           <span style="color:white;font-weight:bold;font-size:14px;flex-shrink:0;">Vehicle History Report</span>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button id="overlayPrintBtn"
-              style="background:transparent;color:white;border:1px solid rgba(255,255,255,0.4);padding:5px 12px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
-              🖨 Save as PDF
-            </button>
             <button id="overlayDownloadBtn"
               style="background:#2563eb;color:white;border:none;padding:5px 12px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
               ⬇ Download
@@ -352,14 +348,6 @@
         overlay.appendChild(iframe);
         document.body.appendChild(overlay);
         window.history.pushState({ reportOverlayOpen: true }, '');
-
-        // Save as PDF — opens new tab and triggers print
-        bar.querySelector('#overlayPrintBtn').addEventListener('click', () => {
-          const win = window.open('', '_blank');
-          if (!win) { showToast('Pop-ups blocked — please allow pop-ups and try again.', 'error'); return; }
-          win.document.open(); win.document.write(html); win.document.close();
-          win.addEventListener('load', () => setTimeout(() => win.print(), 500));
-        });
 
         // Download — html2pdf if available, else download HTML
         bar.querySelector('#overlayDownloadBtn').addEventListener('click', async () => {
@@ -739,12 +727,6 @@
                   class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-2 px-3 rounded-lg transition-colors">
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                   View
-                </button>
-                <button data-action="pdf"
-                  title="Open print dialog to save as PDF"
-                  class="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-2 px-3 rounded-lg transition-colors">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
-                  Save PDF
                 </button>
                 <button data-action="download"
                   title="Auto-download PDF file"
