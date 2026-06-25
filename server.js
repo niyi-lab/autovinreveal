@@ -3364,11 +3364,18 @@ app.get("/api/vin-summary/:vin", lookupLimiter, async (req, res) => {
 /* ================================================================
    Static Files & Boot
 ================================================================ */
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res, filePath) => {
+    // Never serve stale HTML — keeps old button text/copy from lingering in browsers
+    if (filePath.endsWith(".html")) res.setHeader("Cache-Control", "no-store, must-revalidate");
+  },
+}));
 app.get("/301", (_req, res) => res.redirect(301, "/"));
 app.get("*", (req, res) => {
-  if (req.accepts("html")) res.sendFile(path.join(__dirname, "public", "index.html"));
-  else res.status(404).send("Not found");
+  if (req.accepts("html")) {
+    res.setHeader("Cache-Control", "no-store, must-revalidate");
+    res.sendFile(path.join(__dirname, "public", "index.html"));
+  } else res.status(404).send("Not found");
 });
 
 app.listen(Number(PORT), HOST, () => {
