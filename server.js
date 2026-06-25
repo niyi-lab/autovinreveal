@@ -1516,7 +1516,7 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
 /* ================================================================
    Middleware
 ================================================================ */
-app.use(express.json());
+app.use(express.json({ limit: "8mb" }));   // larger limit so chat screenshots fit
 app.use(cookieParser());
 app.use(cors({ origin: ALLOWED_ORIGIN, credentials: false }));
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -2942,7 +2942,7 @@ app.get("/api/cfc-dashboard", async (req, res) => {
 ================================================================ */
 app.post("/api/chat", async (req, res) => {
   try {
-    const { message, history = [], userEmail = null, conversation_id: convoIdRaw = null } = req.body || {};
+    const { message, history = [], userEmail = null, conversation_id: convoIdRaw = null, image = null } = req.body || {};
     if (!message) return res.status(400).json({ error: "message required" });
 
     // ── Conversation persistence (enables live owner takeover) ──
@@ -3068,10 +3068,21 @@ ESCALATE: Only add ESCALATE on its own final line when the customer has a real u
       cleaned.pop();
     }
 
+    // Latest user turn — attach an image block (Claude vision) if a screenshot was sent.
+    let lastUserContent = message;
+    if (image && typeof image === "string") {
+      const m = image.match(/^data:(image\/(?:png|jpe?g|gif|webp));base64,([A-Za-z0-9+/=]+)$/);
+      if (m && m[2].length < 7_000_000) {
+        lastUserContent = [
+          { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } },
+          { type: "text", text: message || "Here's a screenshot — can you help with this?" },
+        ];
+      }
+    }
     const messages = [
       ...FEW_SHOT,
       ...cleaned,
-      { role: "user", content: message },
+      { role: "user", content: lastUserContent },
     ];
 
     const response = await axios.post(

@@ -418,7 +418,7 @@
               <div class="pt-2">
                 <!-- PATCH 3: Fixed active:scale-[0.98] → active:scale-[.98] (was invalid Tailwind value) -->
                 <button id="go" type="submit" class="glow-btn w-full bg-blue-600 hover:bg-blue-700 text-white h-14 rounded-xl font-bold text-lg shadow-xl shadow-blue-600/20 transition-all active:scale-[.98] flex items-center justify-center gap-2">
-                  <span>Get CARFAX</span>
+                  <span>Get CARFAX Report</span>
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
                   </svg>
@@ -564,7 +564,7 @@
                   <li class="flex items-center gap-2 text-gray-300"><span>—</span> Credits never expire</li>
                 </ul>
                 <button id="pricingBuy1Btn" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-xl transition-colors text-sm">
-                  Get a CARFAX — $5.99
+                  Get a CARFAX Report — $5.99
                 </button>
               </div>
             </div>
@@ -591,7 +591,7 @@
                   <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> Account required</li>
                 </ul>
                 <button id="pricingBuy5Btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl transition-all text-sm shadow-lg shadow-blue-600/25">
-                  Get 5 CARFAX — $20
+                  Get 5 CARFAX Reports — $20
                 </button>
               </div>
             </div>
@@ -618,7 +618,7 @@
                   <li class="flex items-center gap-2"><span class="text-blue-500 font-bold">✓</span> Account required</li>
                 </ul>
                 <button id="pricingBuy20Btn" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-xl transition-colors text-sm">
-                  Get 20 CARFAX — $58
+                  Get 20 CARFAX Reports — $58
                 </button>
               </div>
             </div>
@@ -1335,16 +1335,30 @@
           </div>
         </div>
 
+        <!-- Image preview (shown when a screenshot is attached) -->
+        <div id="chatImgPreview" style="display:none;padding:8px 10px 0;">
+          <div style="position:relative;display:inline-block;">
+            <img id="chatImgThumb" alt="attachment" style="max-height:64px;border-radius:8px;border:1px solid #e2e8f0;display:block;" />
+            <button type="button" onclick="clearChatImage()" aria-label="Remove" style="position:absolute;top:-7px;right:-7px;width:18px;height:18px;border-radius:50%;background:#ef4444;color:#fff;border:none;cursor:pointer;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;">×</button>
+          </div>
+        </div>
+        <!-- Emoji palette -->
+        <div id="chatEmojiBar" style="display:none;padding:6px 10px;flex-wrap:wrap;gap:2px;border-top:1px solid #f1f5f9;"></div>
         <!-- Input -->
-        <div style="border-top:1px solid #e2e8f0;padding:10px;display:flex;gap:8px;align-items:flex-end;">
-          <textarea id="chatInput" placeholder="Type a message…" rows="1"
-            style="flex:1;border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;
+        <div style="border-top:1px solid #e2e8f0;padding:8px;display:flex;gap:2px;align-items:flex-end;">
+          <input type="file" id="chatFile" accept="image/*" style="display:none" onchange="onChatFile(this)">
+          <button type="button" onclick="toggleEmoji()" aria-label="Emoji" style="width:30px;height:34px;border:none;background:transparent;cursor:pointer;font-size:17px;border-radius:8px;flex-shrink:0;">😊</button>
+          <button type="button" onclick="document.getElementById('chatFile').click()" aria-label="Attach image" style="width:30px;height:34px;border:none;background:transparent;cursor:pointer;font-size:16px;border-radius:8px;flex-shrink:0;">🖼️</button>
+          <button type="button" id="chatMicBtn" onclick="toggleVoice()" aria-label="Voice note" style="width:30px;height:34px;border:none;background:transparent;cursor:pointer;font-size:16px;border-radius:8px;flex-shrink:0;">🎤</button>
+          <textarea id="chatInput" placeholder="Message…" rows="1"
+            style="flex:1;min-width:50px;border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;
               font-size:13px;resize:none;outline:none;font-family:inherit;line-height:1.5;
               max-height:80px;overflow-y:auto;"
+            onpaste="onChatPaste(event)"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"
             oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,80)+'px'"></textarea>
           <button onclick="sendChat()" id="chatSendBtn"
-            style="width:36px;height:36px;border-radius:50%;background:#2563eb;border:none;
+            style="width:34px;height:34px;border-radius:50%;background:#2563eb;border:none;
               cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
             <svg width="16" height="16" fill="white" viewBox="0 0 24 24">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -1361,6 +1375,75 @@
       let chatConversationId = null;
       let chatLastSeen = 0;
       let chatPollTimer = null;
+      let chatImage = null; // base64 data URL of an attached screenshot
+
+      const CHAT_EMOJIS = ['😀','😅','😂','🙂','😉','😍','😎','🤔','👍','👎','🙏','👏','🔥','✨','✅','❌','❓','❗','💰','🚗','📄','🛠️','😢','🤝'];
+      function toggleEmoji() {
+        const bar = document.getElementById('chatEmojiBar');
+        if (bar.childElementCount === 0) {
+          CHAT_EMOJIS.forEach(e => {
+            const b = document.createElement('button');
+            b.type = 'button'; b.textContent = e;
+            b.style.cssText = 'border:none;background:transparent;cursor:pointer;font-size:18px;padding:2px 3px;border-radius:6px;line-height:1;';
+            b.onclick = () => { const t = document.getElementById('chatInput'); t.value += e; t.focus(); };
+            bar.appendChild(b);
+          });
+        }
+        bar.style.display = bar.style.display === 'flex' ? 'none' : 'flex';
+      }
+
+      function onChatFile(input) { const f = input.files && input.files[0]; if (f) attachChatImage(f); input.value = ''; }
+      function onChatPaste(e) {
+        const items = (e.clipboardData && e.clipboardData.items) || [];
+        for (const it of items) { if (it.type && it.type.indexOf('image') === 0) { const f = it.getAsFile(); if (f) { attachChatImage(f); e.preventDefault(); return; } } }
+      }
+      function attachChatImage(file) {
+        if (!/^image\//.test(file.type)) return;
+        if (file.size > 6 * 1024 * 1024) { alert('That image is too big (max 6MB).'); return; }
+        const reader = new FileReader();
+        reader.onload = () => {
+          chatImage = reader.result;
+          document.getElementById('chatImgThumb').src = chatImage;
+          document.getElementById('chatImgPreview').style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+      }
+      function clearChatImage() {
+        chatImage = null;
+        document.getElementById('chatImgPreview').style.display = 'none';
+        document.getElementById('chatImgThumb').src = '';
+      }
+
+      // Voice notes via the browser's built-in speech recognition (no upload needed)
+      let chatRecog = null, chatRecording = false;
+      function toggleVoice() {
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const btn = document.getElementById('chatMicBtn');
+        if (!SR) { alert("Voice input isn't supported in this browser — try Chrome."); return; }
+        if (chatRecording) { try { chatRecog && chatRecog.stop(); } catch (e) {} return; }
+        chatRecog = new SR();
+        chatRecog.lang = 'en-US'; chatRecog.interimResults = true; chatRecog.continuous = false;
+        const base = (document.getElementById('chatInput').value || '').trim();
+        chatRecog.onstart  = () => { chatRecording = true; btn.textContent = '⏺️'; btn.style.background = '#fee2e2'; };
+        chatRecog.onresult = (ev) => {
+          let txt = ''; for (let i = 0; i < ev.results.length; i++) txt += ev.results[i][0].transcript;
+          const t = document.getElementById('chatInput');
+          t.value = (base ? base + ' ' : '') + txt;
+          t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 80) + 'px';
+        };
+        chatRecog.onerror = () => {};
+        chatRecog.onend = () => { chatRecording = false; btn.textContent = '🎤'; btn.style.background = 'transparent'; document.getElementById('chatInput').focus(); };
+        try { chatRecog.start(); } catch (e) {}
+      }
+
+      function appendUserMessage(text, img) {
+        const box = document.getElementById('chatMessages');
+        const el = document.createElement('div');
+        el.style.cssText = 'background:#2563eb;color:white;border-radius:12px 12px 4px 12px;padding:8px 10px;max-width:85%;align-self:flex-end;font-size:13px;line-height:1.5;';
+        if (img) { const im = document.createElement('img'); im.src = img; im.style.cssText = 'max-width:100%;border-radius:8px;margin-bottom:6px;display:block;'; el.appendChild(im); }
+        if (text) el.appendChild(document.createTextNode(text));
+        box.appendChild(el); box.scrollTop = box.scrollHeight;
+      }
 
       function toggleChat() {
         chatOpen = !chatOpen;
@@ -1407,12 +1490,15 @@
         if (chatBusy) return;
         const input = document.getElementById('chatInput');
         const msg   = (input.value || '').trim();
-        if (!msg) return;
+        const img   = chatImage;
+        if (!msg && !img) return;
 
         input.value = '';
         input.style.height = 'auto';
-        appendMessage(msg, 'user');
-        chatHistory.push({ role: 'user', content: msg });
+        document.getElementById('chatEmojiBar').style.display = 'none';
+        appendUserMessage(msg, img);
+        chatHistory.push({ role: 'user', content: msg || '[image]' });
+        clearChatImage();
 
         chatBusy = true;
         document.getElementById('chatSendBtn').style.opacity = '0.5';
@@ -1428,7 +1514,7 @@
           const r = await fetch('/api/chat', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ message: msg, history: chatHistory.slice(-8), userEmail, conversation_id: chatConversationId }),
+            body: JSON.stringify({ message: msg, history: chatHistory.slice(-8), userEmail, conversation_id: chatConversationId, image: img }),
           });
           document.getElementById('chatTyping')?.remove();
           const d = await r.json();
