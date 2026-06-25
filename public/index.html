@@ -193,6 +193,7 @@
 
         <!-- Desktop nav (sm+) -->
         <div class="hidden sm:flex items-center gap-3">
+          <a href="#pricing" class="text-sm font-semibold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors">Pricing</a>
           <a href="/blog/" class="text-sm font-semibold text-gray-600 hover:text-blue-600 px-3 py-2 transition-colors">Blog</a>
           <a id="historyNavLink" href="/history.html"
             style="display:none"
@@ -257,6 +258,7 @@
       <div id="mobileMenu" style="display:none"
         class="sm:hidden border-t border-gray-100 bg-white px-4 pt-2 pb-4 shadow-lg space-y-1">
         <p id="mobileUserEmail" class="text-xs text-gray-400 px-2 pb-1 truncate"></p>
+        <a href="#pricing" onclick="document.getElementById('mobileMenu').style.display='none'" class="flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors">🏷️ Pricing</a>
         <a href="/blog/" class="flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors">📝 Blog</a>
         <a id="historyNavLinkMobile" href="/history.html"
           class="flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors">
@@ -567,7 +569,7 @@
           <p class="text-center text-[11px] text-gray-400 mt-3">CARFAX&reg; is a registered trademark of CARFAX, Inc. AutoVINReveal is not affiliated with, endorsed by, or sponsored by CARFAX, Inc.</p>
         </section>
 
-        <section id="pricing" class="mt-20">
+        <section id="pricing" class="mt-20 scroll-mt-24">
           <div class="text-center mb-8">
             <h2 class="text-3xl font-bold text-slate-900">Simple, Honest Pricing</h2>
             <p class="text-gray-500 mt-2">Pay as you go or save more with a monthly plan.</p>
