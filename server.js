@@ -2943,7 +2943,7 @@ app.get("/api/cfc-dashboard", async (req, res) => {
 app.post("/api/chat", async (req, res) => {
   try {
     const { message, history = [], userEmail = null, conversation_id: convoIdRaw = null, image = null } = req.body || {};
-    if (!message) return res.status(400).json({ error: "message required" });
+    if (!message && !image) return res.status(400).json({ error: "message required" });
 
     // ── Conversation persistence (enables live owner takeover) ──
     let conversationId = convoIdRaw;
