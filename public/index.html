@@ -149,10 +149,8 @@
          class-based display rules and caused the chip to not appear. */
 
       @media (max-width: 639px) {
-        .pricing-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x mandatory; }
-        .pricing-row::-webkit-scrollbar { height: 4px; }
-        .pricing-row::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
-        .pricing-col { min-width: 220px; scroll-snap-align: center; flex-shrink: 0; }
+        .pricing-row { display: flex; flex-direction: column; gap: 14px; }
+        .pricing-col { min-width: 0; width: 100%; }
       }
       @media (min-width: 640px) {
         .pricing-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
@@ -648,7 +646,6 @@
             <span class="flex items-center gap-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>30-day money-back guarantee</span>
             <span class="flex items-center gap-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>Instant delivery</span>
           </div>
-          <p class="sm:hidden text-center text-xs text-gray-400 mt-3" id="swipeHint">← Swipe to see all plans →</p>
         </section>
 
         <section class="mt-16">
