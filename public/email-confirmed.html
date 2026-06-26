@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Email confirmed · AutoVINReveal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Inter',system-ui,sans-serif;background:#f1f5f9;min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .card{background:#fff;border-radius:18px;box-shadow:0 12px 44px rgba(15,23,42,.09);max-width:420px;width:100%;padding:40px 32px;text-align:center}
+  .icon{width:72px;height:72px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 22px}
+  h1{font-size:23px;color:#0f172a;margin-bottom:10px;font-weight:800}
+  p{color:#64748b;font-size:14px;line-height:1.65;margin-bottom:26px}
+  .btn{display:inline-block;background:#2563eb;color:#fff;font-weight:700;text-decoration:none;padding:14px 30px;border-radius:12px;font-size:15px;transition:background .15s;box-shadow:0 8px 20px rgba(37,99,235,.25)}
+  .btn:hover{background:#1d4ed8}
+  .muted{font-size:12.5px;color:#94a3b8;margin-top:18px}
+  .muted a{color:#2563eb;text-decoration:none;font-weight:600}
+  .spin{width:24px;height:24px;border:3px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;animation:s .9s linear infinite}
+  @keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="icon" style="background:#eff6ff"><div class="spin"></div></div>
+    <h1>Confirming your email…</h1>
+    <p>One moment while we verify your account.</p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SB_URL  = "https://vvajqnljwvhjgdtxqzfl.supabase.co";
+    const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
+    const sb = window.supabase.createClient(SB_URL, SB_ANON);
+    const card = document.getElementById('card');
+    let done = false;
+
+    function success(email) {
+      if (done) return; done = true;
+      card.innerHTML =
+        '<div class="icon" style="background:#dcfce7"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>' +
+        '<h1>You’re all set! ✅</h1>' +
+        '<p>Your email' + (email ? ' (<strong>' + email + '</strong>)' : '') + ' is confirmed and you’re signed in. You can start checking VINs right away.</p>' +
+        '<a class="btn" href="/dashboard.html">Go to my dashboard →</a>' +
+        '<p class="muted">Or <a href="/">run a report now</a>.</p>';
+    }
+    function failure() {
+      if (done) return; done = true;
+      card.innerHTML =
+        '<div class="icon" style="background:#fee2e2"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></div>' +
+        '<h1>Link expired or already used</h1>' +
+        '<p>This confirmation link may have expired or already been used. If you’ve confirmed before, just sign in — you’re good to go.</p>' +
+        '<a class="btn" href="/">Back to sign in</a>';
+    }
+
+    (async () => {
+      try {
+        const { data } = await sb.auth.getSession();
+        if (data && data.session) { success(data.session.user && data.session.user.email); return; }
+      } catch (e) {}
+      sb.auth.onAuthStateChange((_e, session) => { if (session) success(session.user && session.user.email); });
+      // Fallback: give Supabase a moment to parse the URL hash, then decide.
+      setTimeout(async () => {
+        try { const { data } = await sb.auth.getSession(); if (data && data.session) return success(data.session.user && data.session.user.email); } catch (e) {}
+        failure();
+      }, 1800);
+    })();
+  </script>
+</body>
+</html>

@@ -719,7 +719,7 @@ async function doSignup() {
   try {
     const { data, error } = await supabase.auth.signUp({
       email, password,
-      options: { emailRedirectTo: `${location.origin}/email-confirmed` },
+      options: { emailRedirectTo: `${location.origin}/email-confirmed.html` },
     });
     if (error) {
       if (/already|registered/i.test(error.message))
