@@ -764,6 +764,16 @@ $id('googleLogin')?.addEventListener('click', async () => {
     if (error) showToast(error.message, 'error');
   } catch (e) { showToast(e.message || 'Google sign-in failed', 'error'); }
 });
+$id('appleLogin')?.addEventListener('click', async () => {
+  if (!supabase) return showToast('Auth not loaded — please refresh the page', 'error');
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'apple',
+      options: { redirectTo: location.origin },
+    });
+    if (error) showToast(/not enabled|unsupported|provider/i.test(error.message) ? 'Apple sign-in is coming soon — use Google or email for now.' : error.message, 'error');
+  } catch (e) { showToast(e.message || 'Apple sign-in failed', 'error'); }
+});
 
 let currentSession = null;
 
