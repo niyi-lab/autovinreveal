@@ -1320,6 +1320,13 @@ async function sendReportEmail(to, vin, vehicle, token) {
       <tr><td style="padding:0 32px 28px;">
         <p style="margin:0;font-size:13px;color:#64748b;">&#128161; <b>Save a PDF copy:</b> open the report and press <b>Ctrl+P</b> (Windows) or <b>Cmd+P</b> (Mac), then choose &ldquo;Save as PDF&rdquo;.</p>
       </td></tr>
+      <tr><td style="padding:0 32px 24px;">
+        <div style="background:#eff6ff;border:1px solid #dbeafe;border-radius:10px;padding:18px 20px;">
+          <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#1e3a8a;">Checking more than one car?</p>
+          <p style="margin:0 0 12px;font-size:13px;color:#475569;line-height:1.5;">Save with a bundle &mdash; credits never expire:<br><b>5 reports for $20</b> ($4 each) &middot; <b>20 reports for $58</b> ($2.90 each).</p>
+          <a href="${SITE_URL}/#pricing" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;font-weight:700;font-size:13px;padding:10px 20px;border-radius:7px;">See bundles &amp; save &rarr;</a>
+        </div>
+      </td></tr>
       <tr><td style="padding:20px 32px;background:#f8fafc;border-top:1px solid #eef2f7;">
         <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.6;"><b style="color:#475569;">AutoVINReveal</b> &middot; Vehicle History Reports<br>Questions? Contact <a href="mailto:support@autovinreveal.com" style="color:#2563eb;">support@autovinreveal.com</a></p>
       </td></tr>
