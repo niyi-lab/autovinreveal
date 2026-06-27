@@ -257,18 +257,17 @@ function showReportOverlay(html, vin, opts = {}) {
   // Push history state so Android back-button also closes the overlay
   try { window.history.pushState({ reportOverlayOpen: true }, ''); } catch (_) {}
 
-  // Download PDF — opens the report in a new tab and triggers the browser's
-  // print dialog (Save as PDF) there, so the overlay stays intact and the CARFAX
-  // page scripts can't break anything. The print engine paginates long reports
-  // and the injected @page size keeps the full width on the page, so nothing
-  // clips (unlike the old client-side html2canvas capture).
+  // Download PDF — print the report iframe that's ALREADY rendered on screen.
+  // Opening the report in a fresh tab and document.write()-ing it produced a blank
+  // page: these reports only render via a real navigation, which the blob-URL
+  // iframe already performed. We post a message into the iframe; its injected
+  // listener (see injectReportChrome on the server) calls window.print() in its
+  // own context, so the browser prints just the report — fully paginated, and the
+  // injected @page width keeps the full report from clipping on the right.
   overlay.querySelector('#overlayDownloadBtn')?.addEventListener('click', () => {
-    const win = window.open('', '_blank');
-    if (!win) { showToast('Pop-up blocked — please allow pop-ups and try again', 'error'); return; }
-    win.document.write(html);
-    win.document.close();
-    // Small delay so the page renders before print fires
-    win.addEventListener('load', () => { setTimeout(() => win.print(), 500); });
+    try { iframe.contentWindow.focus(); } catch (_) {}
+    try { iframe.contentWindow.postMessage('avr-print', '*'); }
+    catch (_) { showToast('Could not open the print dialog — please try again', 'error'); }
   });
 
   // Guest email-capture handler — POST { to, vin, type, oneTimeSession } to the
