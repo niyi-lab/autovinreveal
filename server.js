@@ -1532,12 +1532,13 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
       const vin     = (row?.vin  || meta.vin  || "").toUpperCase();
       const type2   = (row?.type || meta.type || "carfax").toLowerCase();
       const credits = (parseInt(meta.credits, 10) || 0) || WHOP_PLAN_CREDITS[planId] || 0;
-      if (!row && vin) {
-        const { data: r2 } = await supabaseService.from("whop_checkouts")
-          .select("*").eq("vin", vin).eq("status", "pending")
-          .order("created_at", { ascending: false }).limit(1).maybeSingle();
-        row = r2 || null;
-      }
+      // Bind ONLY by the exact checkout session id above. The old "most-recent
+      // pending row for this VIN" fallback was unscoped by site AND by buyer, so a
+      // payment could attach to a DIFFERENT buyer's / different site's pending
+      // checkout — stamping the wrong buyer_email and emailing that report to
+      // someone who never bought it (the 2021 Supra → wrong inbox bug). Rows the
+      // webhook can't bind here are fulfilled by the buyer's own claim (claim_token)
+      // or the reconcile job (vin-matched), so nothing legitimate is lost.
 
       if (vin && row) {
         // SINGLE report — only MARK the row paid (entitled). The report itself is
@@ -1642,7 +1643,12 @@ function whopPaymentMatchesRow(pd, row) {
   const pmVin  = ((pd.metadata && pd.metadata.vin) || (pd.membership && pd.membership.metadata && pd.membership.metadata.vin) || "").toUpperCase();
   const planId = (pd.plan && (pd.plan.id || pd.plan)) || pd.plan_id || null;
   const amount = parseFloat(pd.final_amount || pd.total || "0");
-  if (pmVin && row.vin && pmVin !== String(row.vin).toUpperCase()) return false;
+  // A vin-specific (single-report) row may ONLY be fulfilled by a payment that
+  // names that exact VIN. The old check bypassed this when the payment had no vin
+  // metadata — which let a vin-less/mismatched payment fulfill a report for the
+  // wrong car and email it to the wrong buyer. reconcile already requires the vin
+  // (matches by p.metadata.vin), so requiring it here is consistent and safe.
+  if (row.vin && pmVin !== String(row.vin).toUpperCase()) return false;
   if (row.plan_id && planId && planId !== row.plan_id) return false;
   if (row.expected_price && amount && amount + 0.001 < Number(row.expected_price)) return false;
   return true;
