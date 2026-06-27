@@ -1526,7 +1526,7 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
       // falling back to the most-recent pending row for the VIN.
       let row = null;
       if (checkoutId) {
-        const { data: r } = await supabaseService.from("whop_checkouts").select("*").eq("session_id", checkoutId).maybeSingle();
+        const { data: r } = await supabaseService.from("whop_checkouts").select("*").eq("session_id", checkoutId).eq("site", "avr").maybeSingle();
         row = r || null;
       }
       const vin     = (row?.vin  || meta.vin  || "").toUpperCase();
@@ -1594,7 +1594,7 @@ app.post("/api/whop/checkout", async (req, res) => {
     const typeL  = (type || "carfax").toLowerCase();
     const flow   = userId ? "user" : "guest";
 
-    const metadata = {};
+    const metadata = { site: "avr" };   // tag the payment with its origin brand
     const redirect = `${SITE_URL}/?purchased=1&flow=${flow}`;   // no ids in the URL
     if (userId) {
       metadata.user_id = userId;
@@ -1642,6 +1642,7 @@ function whopPaymentMatchesRow(pd, row) {
   if (!pd || !(pd.status === "paid" || pd.paid_at)) return false;
   const pmVin  = ((pd.metadata && pd.metadata.vin) || (pd.membership && pd.membership.metadata && pd.membership.metadata.vin) || "").toUpperCase();
   const planId = (pd.plan && (pd.plan.id || pd.plan)) || pd.plan_id || null;
+  const pmSite = ((pd.metadata && pd.metadata.site) || (pd.membership && pd.membership.metadata && pd.membership.metadata.site) || "").toLowerCase();
   const amount = parseFloat(pd.final_amount || pd.total || "0");
   // A vin-specific (single-report) row may ONLY be fulfilled by a payment that
   // names that exact VIN. The old check bypassed this when the payment had no vin
@@ -1649,6 +1650,10 @@ function whopPaymentMatchesRow(pd, row) {
   // wrong car and email it to the wrong buyer. reconcile already requires the vin
   // (matches by p.metadata.vin), so requiring it here is consistent and safe.
   if (row.vin && pmVin !== String(row.vin).toUpperCase()) return false;
+  // Never let one brand's payment fulfill the other brand's row (both sites share
+  // whop_checkouts). Soft: only rejects a positive mismatch, so payments created
+  // before the site tag existed still work.
+  if (row.site && pmSite && pmSite !== row.site) return false;
   if (row.plan_id && planId && planId !== row.plan_id) return false;
   if (row.expected_price && amount && amount + 0.001 < Number(row.expected_price)) return false;
   return true;
@@ -1662,7 +1667,7 @@ app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
   try {
     const claim = String(req.body?.claim || "");
     if (!/^[a-f0-9]{64}$/.test(claim)) return res.status(400).json({ error: "bad_claim" });
-    const { data: row } = await supabaseService.from("whop_checkouts").select("*").eq("claim_token", claim).maybeSingle();
+    const { data: row } = await supabaseService.from("whop_checkouts").select("*").eq("claim_token", claim).eq("site", "avr").maybeSingle();
     if (!row) return res.status(404).json({ error: "not_found" });
     if (row.created_at && (Date.now() - new Date(row.created_at).getTime()) > 35 * 24 * 3600 * 1000)
       return res.status(410).json({ error: "expired" });
