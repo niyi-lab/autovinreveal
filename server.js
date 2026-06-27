@@ -885,8 +885,16 @@ function injectReportChrome(html) {
     `<style>#avr-dlbar{position:fixed;top:14px;right:14px;z-index:2147483647}` +
     `#avr-dlbar button{display:flex;align-items:center;gap:7px;background:#2563eb;color:#fff;border:none;border-radius:10px;padding:11px 18px;font:600 14px system-ui,-apple-system,sans-serif;cursor:pointer;box-shadow:0 6px 18px rgba(37,99,235,.4)}` +
     `#avr-dlbar button:hover{background:#1d4ed8}` +
+    // Wide print page so the full-width report fits without clipping on the right
+    // (matches the Cloudflare email-PDF render width). The print engine paginates
+    // vertically, so only the page WIDTH matters for clipping.
+    `@page{size:1200px 1700px;margin:16px}` +
     `@media print{#avr-dlbar{display:none!important}}</style>` +
-    `<script>try{if(/[?&]pdf=1/.test(location.search)){var _b=document.getElementById('avr-dlbar');if(_b)_b.remove()}}catch(e){}</script>`;
+    // Remove this floating button when (a) Cloudflare renders the PDF (?pdf=1), or
+    // (b) the report is shown inside the in-app overlay iframe — the overlay toolbar
+    // already has a Download PDF button, so the floating one would be a duplicate.
+    // It stays on the standalone /view share page, which has no toolbar.
+    `<script>try{if(/[?&]pdf=1/.test(location.search)||window.self!==window.top){var _b=document.getElementById('avr-dlbar');if(_b)_b.remove()}}catch(e){}</script>`;
   if (/<\/body>/i.test(out)) out = out.replace(/<\/body>/i, dlBar + "</body>");
   else out += dlBar;
 

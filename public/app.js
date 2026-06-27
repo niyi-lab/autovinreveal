@@ -118,50 +118,6 @@ function trackPurchase(value = 5.99) {
   } catch {}
 }
 
-// Convert HTML string to PDF and download using html2pdf.js (CDN loaded on demand)
-async function convertHtmlToPdf(htmlContent, filename) {
-  // CARFAX reports are React SPAs — innerHTML into a div won't render them.
-  // We must open a real browser window so React mounts and scripts execute,
-  // then inject html2pdf.js into THAT window and convert from the live DOM.
-  const win = window.open('', '_blank', 'width=900,height=700,top=-4000,left=-4000');
-  if (!win) throw new Error('Pop-up blocked — please allow pop-ups and try again');
-
-  win.document.open();
-  win.document.write(htmlContent);
-  win.document.close();
-
-  // Wait for the page to fully load (fonts, images, React render)
-  await new Promise(r => {
-    if (win.document.readyState === 'complete') { r(); return; }
-    win.addEventListener('load', r, { once: true });
-  });
-  // Extra time for React to mount and render the report body
-  await new Promise(r => setTimeout(r, 2500));
-
-  // Inject html2pdf.js into the new window's context
-  await new Promise((resolve, reject) => {
-    const s = win.document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-    s.onload = resolve;
-    s.onerror = reject;
-    win.document.head.appendChild(s);
-  });
-
-  // Convert from within that window — html2canvas sees the fully rendered DOM
-  try {
-    await win.html2pdf(win.document.body, {
-      margin:      [8, 8, 8, 8],
-      filename,
-      image:       { type: 'jpeg', quality: 0.92 },
-      html2canvas: { scale: 1.5, useCORS: true, logging: false, allowTaint: true },
-      jsPDF:       { unit: 'mm', format: 'letter', orientation: 'portrait' },
-      pagebreak:   { mode: ['avoid-all', 'css', 'legacy'] },
-    });
-  } finally {
-    try { win.close(); } catch (_) {}
-  }
-}
-
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -253,11 +209,6 @@ function showReportOverlay(html, vin, opts = {}) {
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       ${ageNote}
       ${refreshBtn}
-      <button id="overlayPrintBtn"
-        style="background:transparent;color:white;border:1px solid rgba(255,255,255,0.4);padding:5px 12px;border-radius:6px;
-               font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
-        🖨 Print / PDF
-      </button>
       <button id="overlayDownloadBtn"
         style="background:#16a34a;color:white;border:none;padding:5px 12px;border-radius:6px;
                font-weight:bold;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;">
@@ -306,34 +257,18 @@ function showReportOverlay(html, vin, opts = {}) {
   // Push history state so Android back-button also closes the overlay
   try { window.history.pushState({ reportOverlayOpen: true }, ''); } catch (_) {}
 
-  // Save as PDF — opens the report in a new tab and triggers print dialog there
-  // so the overlay stays intact and the CARFAX page scripts can't break anything
-  overlay.querySelector('#overlayPrintBtn')?.addEventListener('click', () => {
+  // Download PDF — opens the report in a new tab and triggers the browser's
+  // print dialog (Save as PDF) there, so the overlay stays intact and the CARFAX
+  // page scripts can't break anything. The print engine paginates long reports
+  // and the injected @page size keeps the full width on the page, so nothing
+  // clips (unlike the old client-side html2canvas capture).
+  overlay.querySelector('#overlayDownloadBtn')?.addEventListener('click', () => {
     const win = window.open('', '_blank');
     if (!win) { showToast('Pop-up blocked — please allow pop-ups and try again', 'error'); return; }
     win.document.write(html);
     win.document.close();
     // Small delay so the page renders before print fires
     win.addEventListener('load', () => { setTimeout(() => win.print(), 500); });
-  });
-
-  // Download — converts HTML to PDF client-side using html2pdf.js
-  overlay.querySelector('#overlayDownloadBtn')?.addEventListener('click', async () => {
-    const btn = overlay.querySelector('#overlayDownloadBtn');
-    const orig = btn.innerHTML;
-    btn.innerHTML = '⏳ Generating…';
-    btn.disabled = true;
-    showToast('Generating PDF…', 'ok');
-    try {
-      await convertHtmlToPdf(html, (vin || 'report') + '-vehicle-history.pdf');
-      showToast('PDF downloaded!', 'ok');
-    } catch(e) {
-      showToast('PDF failed, downloading HTML instead', 'error');
-      downloadBlob(new Blob([html], { type: 'text/html' }), (vin || 'report') + '-report.html');
-    } finally {
-      btn.innerHTML = orig;
-      btn.disabled = false;
-    }
   });
 
   // Guest email-capture handler — POST { to, vin, type, oneTimeSession } to the
