@@ -930,7 +930,7 @@ async function refreshBalancePill() {
    History (localStorage)
 ================================ */
 const HISTORY_KEY = 'reportHistory';
-function loadHistory() { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } }
+function loadHistory() { try { const cut = Date.now() - 30 * 86400000; return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]').filter(it => !it.ts || it.ts > cut); } catch { return []; } }
 function saveHistory(list) { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); }
 function addToHistory(item) { const list = loadHistory(); list.unshift(item); saveHistory(list.slice(0, 20)); }
 function formatTime(ts) { return new Date(ts).toLocaleString(); }
