@@ -875,6 +875,20 @@ function injectReportChrome(html) {
   else if (/<\/body>/i.test(out)) out = out.replace(/<\/body>/i, overlayFix + "</body>");
   else out += overlayFix;
 
+  // ── Download / Save-as-PDF button (every report view, incl. guests) ──────
+  // Guests have no dashboard, so give the report page its own download. Uses the
+  // browser's print engine (Save as PDF) — it paginates long reports correctly,
+  // so nothing gets clipped (unlike client-side html2canvas capture).
+  const dlBar = `<div id="avr-dlbar"><button type="button" onclick="window.print()" aria-label="Download PDF">` +
+    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>` +
+    `Download PDF</button></div>` +
+    `<style>#avr-dlbar{position:fixed;top:14px;right:14px;z-index:2147483647}` +
+    `#avr-dlbar button{display:flex;align-items:center;gap:7px;background:#2563eb;color:#fff;border:none;border-radius:10px;padding:11px 18px;font:600 14px system-ui,-apple-system,sans-serif;cursor:pointer;box-shadow:0 6px 18px rgba(37,99,235,.4)}` +
+    `#avr-dlbar button:hover{background:#1d4ed8}` +
+    `@media print{#avr-dlbar{display:none!important}}</style>`;
+  if (/<\/body>/i.test(out)) out = out.replace(/<\/body>/i, dlBar + "</body>");
+  else out += dlBar;
+
   return out;
 }
 
