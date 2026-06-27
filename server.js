@@ -1313,7 +1313,23 @@ async function deliverGuestReportByEmail(vin, type, to) {
 }
 
 // Professional, branded report email — cover banner + "view report" button.
-async function sendReportEmail(to, vin, vehicle, token) {
+// Render the live report page to a PDF via Cloudflare Browser Rendering (real
+// Chrome that runs the report's JS). Returns a Buffer, or null on any failure.
+async function renderReportPdf(token) {
+  const acct = process.env.CF_ACCOUNT_ID, cfTok = process.env.CF_BR_TOKEN;
+  if (!acct || !cfTok) return null;
+  try {
+    const r = await axios.post(
+      `https://api.cloudflare.com/client/v4/accounts/${acct}/browser-rendering/pdf`,
+      { url: `${SITE_URL}/view/${token}`, gotoOptions: { waitUntil: "networkidle0", timeout: 30000 } },
+      { headers: { Authorization: `Bearer ${cfTok}` }, responseType: "arraybuffer", timeout: 45000 }
+    );
+    const buf = Buffer.from(r.data);
+    return buf.slice(0, 5).toString() === "%PDF-" ? buf : null;
+  } catch (e) { console.warn("[PDF] Cloudflare render failed:", e.message); return null; }
+}
+
+async function sendReportEmail(to, vin, vehicle, token, attachPdf = false) {
   if (!mailer || !to || !token) return;
   const reportUrl = `${SITE_URL}/view/${token}`;
   const title = vehicle || "Your Vehicle History Report";
@@ -1348,7 +1364,12 @@ async function sendReportEmail(to, vin, vehicle, token) {
     <p style="margin:14px 0 0;font-size:11px;color:#cbd5e1;">You received this because you purchased a report at autovinreveal.com.</p>
   </td></tr></table></body></html>`;
   const text = `Your vehicle history report is ready.\n\n${title}\nVIN: ${vin}\n\nView your full report:\n${reportUrl}\n\nTo save as PDF, open the link and press Ctrl+P (Windows) or Cmd+P (Mac).\n\nAutoVINReveal — support@autovinreveal.com`;
-  await mailer.sendMail({ from: SMTP_FROM, to, subject: `Your Vehicle History Report — ${vehicle || vin}`, html, text });
+  const mailOpts = { from: SMTP_FROM, to, subject: `Your Vehicle History Report — ${vehicle || vin}`, html, text };
+  if (attachPdf) {
+    const pdf = await renderReportPdf(token);
+    if (pdf) mailOpts.attachments = [{ filename: `${String(vehicle || vin).replace(/[^a-z0-9]+/gi, "-").slice(0, 50)}-report.pdf`, content: pdf, contentType: "application/pdf" }];
+  }
+  await mailer.sendMail(mailOpts);
   console.log(`[Whop] report email sent to ${to} (${vin})`);
 }
 
@@ -1383,7 +1404,7 @@ async function fulfillWhopRow(row) {
     await supabaseService.from("whop_checkouts").update({
       status: "fulfilled", delivered_token: token, vehicle, fulfilled_at: new Date().toISOString(),
     }).eq("session_id", row.session_id);
-    if (row.buyer_email) await sendReportEmail(row.buyer_email, row.vin, vehicle, token).catch((e) => console.warn("[Whop] reconcile email failed:", e.message));
+    if (row.buyer_email) await sendReportEmail(row.buyer_email, row.vin, vehicle, token, !row.user_id).catch((e) => console.warn("[Whop] reconcile email failed:", e.message));
     console.log(`[Whop] reconciled -> fulfilled (vin ${row.vin}, session ${row.session_id}, email ${row.buyer_email || "none"})`);
   } catch (e) {
     await supabaseService.from("whop_checkouts").update({ status: "paid" }).eq("session_id", row.session_id);
@@ -1687,7 +1708,7 @@ app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
         status: "fulfilled", delivered_token: token, vehicle, fulfilled_at: new Date().toISOString(),
       }).eq("session_id", row.session_id);
       const emailTo = row.buyer_email || (user && user.email) || null;
-      if (emailTo) sendReportEmail(emailTo, row.vin, vehicle, token).catch((e) => console.warn("[Whop] report email failed:", e.message));
+      if (emailTo) sendReportEmail(emailTo, row.vin, vehicle, token, !row.user_id).catch((e) => console.warn("[Whop] report email failed:", e.message));
       console.log(`[Whop] claim fulfilled (vin ${row.vin}, session ${row.session_id}, email ${emailTo || "none"})`);
       return res.json({ status: "fulfilled", token, vin: row.vin, credits: 0 });
     } catch (e) {
