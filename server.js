@@ -885,7 +885,8 @@ function injectReportChrome(html) {
     `<style>#avr-dlbar{position:fixed;top:14px;right:14px;z-index:2147483647}` +
     `#avr-dlbar button{display:flex;align-items:center;gap:7px;background:#2563eb;color:#fff;border:none;border-radius:10px;padding:11px 18px;font:600 14px system-ui,-apple-system,sans-serif;cursor:pointer;box-shadow:0 6px 18px rgba(37,99,235,.4)}` +
     `#avr-dlbar button:hover{background:#1d4ed8}` +
-    `@media print{#avr-dlbar{display:none!important}}</style>`;
+    `@media print{#avr-dlbar{display:none!important}}</style>` +
+    `<script>try{if(/[?&]pdf=1/.test(location.search)){var _b=document.getElementById('avr-dlbar');if(_b)_b.remove()}}catch(e){}</script>`;
   if (/<\/body>/i.test(out)) out = out.replace(/<\/body>/i, dlBar + "</body>");
   else out += dlBar;
 
@@ -1321,7 +1322,7 @@ async function renderReportPdf(token) {
   try {
     const r = await axios.post(
       `https://api.cloudflare.com/client/v4/accounts/${acct}/browser-rendering/pdf`,
-      { url: `${SITE_URL}/view/${token}`, gotoOptions: { waitUntil: "networkidle0", timeout: 30000 } },
+      { url: `${SITE_URL}/view/${token}?pdf=1`, gotoOptions: { waitUntil: "networkidle0", timeout: 30000 } },
       { headers: { Authorization: `Bearer ${cfTok}` }, responseType: "arraybuffer", timeout: 45000 }
     );
     const buf = Buffer.from(r.data);
