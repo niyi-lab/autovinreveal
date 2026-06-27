@@ -1322,7 +1322,7 @@ async function renderReportPdf(token) {
   try {
     const r = await axios.post(
       `https://api.cloudflare.com/client/v4/accounts/${acct}/browser-rendering/pdf`,
-      { url: `${SITE_URL}/view/${token}?pdf=1`, gotoOptions: { waitUntil: "networkidle0", timeout: 30000 } },
+      { url: `${SITE_URL}/view/${token}?pdf=1`, gotoOptions: { waitUntil: "networkidle0", timeout: 30000 }, viewport: { width: 1100, height: 1500, deviceScaleFactor: 2 }, emulateMediaType: "screen", pdfOptions: { width: "1140px", height: "1760px", printBackground: true } },
       { headers: { Authorization: `Bearer ${cfTok}` }, responseType: "arraybuffer", timeout: 45000 }
     );
     const buf = Buffer.from(r.data);
