@@ -1227,7 +1227,7 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
    The server creates a Whop checkout session with metadata (user_id+credits, or
    vin+guest) and a redirect back here, then returns the hosted checkout URL.
    Metadata set server-side is reliable (query-param metadata is dropped). */
-const WHOP_KEYS = ['single', 'pack5', 'pack20'];
+const WHOP_KEYS = ['single', 'pack5', 'pack20', 'sub_starter', 'sub_dealer', 'sub_pro'];
 async function startWhopPurchase({ user, key, pendingReport = null }) {
   if (!WHOP_KEYS.includes(key)) { showToast('Unknown plan', 'error'); return; }
   // Credit packs need an account; a single can be bought by a guest (emailed).
@@ -1304,6 +1304,17 @@ $id('buy20Sidebar')?.addEventListener('click', async () => {
   $id(id)?.addEventListener('click', () => openBuyModal());
 });
 $id('mobileViewPlans')?.addEventListener('click', () => openBuyModal());
+
+// Monthly subscription buttons (Membership tab + /membership page). Require login;
+// startWhopPurchase prompts sign-in for any non-single key.
+[['subStarterBtn', 'sub_starter'], ['subDealerBtn', 'sub_dealer'], ['subProBtn', 'sub_pro']].forEach(([id, key]) => {
+  $id(id)?.addEventListener('click', async () => {
+    const btn = $id(id); const restore = setBtnLoading(btn, 'Redirecting…');
+    const { user } = await getSession();
+    await startWhopPurchase({ user, key });
+    restore();
+  });
+});
 
 /* ================================
    VIN + Form gate

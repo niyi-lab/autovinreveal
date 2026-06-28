@@ -1282,7 +1282,20 @@ const WHOP_PLANS = {                        // button key -> Whop plan + credits
   single: { plan: "plan_DvE2Z32UAeyTl", credits: CREDITS_PER_SINGLE, price: 5.99  },
   pack5:  { plan: "plan_N1GiRFY8AGfpH", credits: CREDITS_PER_5PACK,  price: 20.00 },
   pack20: { plan: "plan_0f5gjPm3KD8YO", credits: CREDITS_PER_20PACK, price: 58.00 },
+  // Monthly subscriptions (recurring, dealers). Credits are granted each billing
+  // period and EXPIRE (~60 days) — stored in the shared cfc_sub_batches table and
+  // spent before the permanent balance. Logged-in only (credits need an account).
+  sub_starter: { plan: process.env.WHOP_PLAN_SUB_STARTER || "plan_Rpl9UnqCeaHOM", credits: 20,  price: 39,  recurring: true },
+  sub_dealer:  { plan: process.env.WHOP_PLAN_SUB_DEALER  || "plan_XyBtVs2UF29Kh", credits: 50,  price: 89,  recurring: true },
+  sub_pro:     { plan: process.env.WHOP_PLAN_SUB_PRO     || "plan_Y3nf6zzuYRCIF", credits: 100, price: 169, recurring: true },
 };
+// plan_id -> monthly credits, for granting on each subscription payment.
+const WHOP_SUB_CREDITS = {
+  [WHOP_PLANS.sub_starter.plan]: WHOP_PLANS.sub_starter.credits,
+  [WHOP_PLANS.sub_dealer.plan]:  WHOP_PLANS.sub_dealer.credits,
+  [WHOP_PLANS.sub_pro.plan]:     WHOP_PLANS.sub_pro.credits,
+};
+const isWhopSubPlan = (planId) => !!planId && Object.prototype.hasOwnProperty.call(WHOP_SUB_CREDITS, planId);
 async function whopApi(method, path, body) {
   try {
     const r = await fetch("https://api.whop.com" + path, {
@@ -1386,18 +1399,81 @@ async function sendReportEmail(to, vin, vehicle, token, attachPdf = false) {
 }
 
 // Shared fulfillment for a 'paid' row (used by the reconcile job). Atomic guard.
+// Grant a subscription payment's monthly credits EXACTLY ONCE. Idempotent by the
+// Whop payment id in the shared processed_webhook_events table, so the claim (instant
+// first month) and the renewal poller can't double-grant. Credits EXPIRE (~60 days):
+// stored in cfc_sub_batches, spent before the permanent balance (see /api/report).
+async function grantWhopSubPayment(paymentId, planId, userId) {
+  if (!paymentId || !userId) return 0;
+  const credits = WHOP_SUB_CREDITS[planId] || 0;
+  if (!credits) return 0;
+  const { error } = await supabaseService
+    .from("processed_webhook_events")
+    .insert({ event_id: "avrsub_" + paymentId });
+  if (error) {                          // 23505 = already granted for this payment
+    if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) return 0;
+    console.error("[Whop sub] idempotency insert error:", error.message);
+    return 0;
+  }
+  const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
+  const { error: e2 } = await supabaseService
+    .from("cfc_sub_batches")
+    .insert({ user_id: userId, remaining: credits, expires_at: expiresAt });
+  if (e2) {
+    console.error("[Whop sub] batch insert failed:", e2.message);
+    await supabaseService.from("processed_webhook_events").delete().eq("event_id", "avrsub_" + paymentId);  // allow a retry
+    return 0;
+  }
+  console.log(`[Whop sub] +${credits} expiring credits to ${userId} (plan ${planId}, payment ${paymentId}, expires ${expiresAt})`);
+  return credits;
+}
+
+// Renewals have no buyer return — poll recent Whop payments and grant each
+// subscription payment's credits once (also backstops a missed first month).
+async function grantWhopSubRenewals() {
+  if (!WHOP_API_KEY || !supabaseService) return;
+  try {
+    const pr = await whopApi("GET", "/api/v2/payments?per=50");
+    const payments = (pr.json && (pr.json.data || pr.json)) || [];
+    if (!Array.isArray(payments)) return;
+    for (const p of payments) {
+      if (!(p.status === "paid" || p.paid_at)) continue;
+      const planId = (p.plan && (p.plan.id || p.plan)) || p.plan_id || null;
+      if (!isWhopSubPlan(planId)) continue;
+      const userId = (p.metadata && (p.metadata.user_id || p.metadata.userId))
+        || (p.membership && p.membership.metadata && (p.membership.metadata.user_id || p.membership.metadata.userId))
+        || null;
+      if (!userId) { console.warn(`[Whop sub] payment ${p.id} (plan ${planId}) has no user_id metadata — skipped`); continue; }
+      await grantWhopSubPayment(p.id, planId, userId);
+    }
+  } catch (e) { console.warn("[Whop sub] renewal poll error:", e.message); }
+}
+
+// Non-expired subscription credits (added to displayed balances).
+async function getSubCreditBalance(userId) {
+  if (!supabaseService || !userId) return 0;
+  const { data: subs } = await supabaseService
+    .from("cfc_sub_batches")
+    .select("remaining")
+    .eq("user_id", userId)
+    .gt("expires_at", new Date().toISOString());
+  return Array.isArray(subs) ? subs.reduce((s, b) => s + (b.remaining || 0), 0) : 0;
+}
+
 async function fulfillWhopRow(row) {
   const { data: claimed } = await supabaseService.from("whop_checkouts")
     .update({ status: "fulfilling" }).eq("session_id", row.session_id).eq("status", "paid").select().maybeSingle();
   if (!claimed) return;   // already being handled / fulfilled elsewhere
   try {
-    // Pack purchase (no VIN) — grant credits, no provider fetch.
+    // Pack purchase (no VIN) — grant credits, no provider fetch. Subscriptions are
+    // credited per-payment by grantWhopSubRenewals() (idempotent), so never grant
+    // them here (would double-grant the first month).
     if (!row.vin) {
-      if (row.user_id) await addCreditsAtomic(row.user_id, row.credits || 0);
+      if (row.user_id && !isWhopSubPlan(row.plan_id)) await addCreditsAtomic(row.user_id, row.credits || 0);
       await supabaseService.from("whop_checkouts").update({
         status: "fulfilled", fulfilled_at: new Date().toISOString(),
       }).eq("session_id", row.session_id);
-      console.log(`[Whop] reconciled -> fulfilled pack (+${row.credits || 0} credits, user ${row.user_id || "none"}, session ${row.session_id})`);
+      console.log(`[Whop] reconciled -> fulfilled ${isWhopSubPlan(row.plan_id) ? "subscription" : "pack"} (user ${row.user_id || "none"}, session ${row.session_id})`);
       return;
     }
     let raw = await getReportData(row.vin, row.type), vehicle = row.vehicle || null;
@@ -1472,6 +1548,8 @@ async function reconcileWhopCheckouts() {
 if (process.env.WHOP_API_KEY) {
   setInterval(reconcileWhopCheckouts, 10 * 60 * 1000);   // every 10 min
   setTimeout(reconcileWhopCheckouts, 60 * 1000);          // once shortly after boot
+  setInterval(grantWhopSubRenewals, 10 * 60 * 1000);     // subscription renewals (no buyer return)
+  setTimeout(grantWhopSubRenewals, 70 * 1000);
 }
 
 // Resolve the buyer's email from a Whop payment payload (falls back to the member record).
@@ -1695,11 +1773,14 @@ app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
       const { data: packClaimed } = await supabaseService.from("whop_checkouts")
         .update({ status: "fulfilling" }).eq("session_id", row.session_id).eq("status", "paid").select().maybeSingle();
       if (packClaimed) {
-        if (row.user_id) await addCreditsAtomic(row.user_id, row.credits || 0);
+        if (row.user_id) {
+          if (isWhopSubPlan(row.plan_id)) await grantWhopSubPayment(req.body?.payment_id, row.plan_id, row.user_id);  // first month (instant, idempotent)
+          else await addCreditsAtomic(row.user_id, row.credits || 0);                                                 // one-time pack
+        }
         await supabaseService.from("whop_checkouts").update({
           status: "fulfilled", fulfilled_at: new Date().toISOString(),
         }).eq("session_id", row.session_id);
-        console.log(`[Whop] claim fulfilled pack (+${row.credits || 0} credits, user ${row.user_id || "none"}, session ${row.session_id})`);
+        console.log(`[Whop] claim fulfilled ${isWhopSubPlan(row.plan_id) ? "subscription" : "pack"} (user ${row.user_id || "none"}, session ${row.session_id})`);
       }
       return res.json({ status: "fulfilled", token: null, vin: null, credits: row.credits || 0 });
     }
@@ -2055,7 +2136,8 @@ app.get("/api/credits/:user_id", async (req, res) => {
       .maybeSingle();
 
     if (error) return res.status(500).json({ error: error.message });
-    res.json({ balance: data?.balance ?? 0 });
+    const subBal = await getSubCreditBalance(req.params.user_id);
+    res.json({ balance: (data?.balance ?? 0) + subBal });
   } catch { res.status(500).json({ error: "Server error" }); }
 });
 
@@ -2368,13 +2450,19 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
         }
       } else if (currentUser) {
         pendingChargeId = await createPendingCharge({ userId: currentUser.id, vin: targetVin });
-        const { error: rpcErr } = await supabaseForToken(
-          req.headers.authorization?.split(" ")[1]
-        ).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
-        if (rpcErr) {
-          await resolvePendingCharge(pendingChargeId);
-          pendingChargeId = null;
-          return res.status(402).json({ error: "insufficient_credits" });
+        // Spend expiring subscription credits first (so they're used before they
+        // lapse); otherwise the permanent balance via use_credit_for_vin. The report
+        // is logged to vin_queries post-fetch regardless of which credit type paid.
+        const { data: usedSub } = await supabaseService.rpc("cfc_use_sub_credit", { uid: currentUser.id });
+        if (usedSub !== true) {
+          const { error: rpcErr } = await supabaseForToken(
+            req.headers.authorization?.split(" ")[1]
+          ).rpc("use_credit_for_vin", { p_vin: targetVin, p_result_url: null });
+          if (rpcErr) {
+            await resolvePendingCharge(pendingChargeId);
+            pendingChargeId = null;
+            return res.status(402).json({ error: "insufficient_credits" });
+          }
         }
       } else {
         return res.status(401).json({ error: "purchase_required" });
@@ -2850,7 +2938,7 @@ app.get("/api/dashboard", async (req, res) => {
 
     res.json({
       ok: true,
-      balance:       credRow ? credRow.balance : 0,
+      balance:       (credRow ? credRow.balance : 0) + (await getSubCreditBalance(user.id)),
       plan,
       totalReports:  rows.length,
       thisMonth,
