@@ -191,10 +191,9 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    const sb = window.supabase.createClient(
-      window.VITE_SUPABASE_URL,
-      window.VITE_SUPABASE_ANON_KEY
-    );
+    let sb = null;
+    try { sb = window.supabase.createClient(window.VITE_SUPABASE_URL, window.VITE_SUPABASE_ANON_KEY); }
+    catch (e) { console.error('Supabase init failed:', e); }
 
     const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -388,20 +387,54 @@
 
     // Logout
     $id('logoutBtn')?.addEventListener('click', async () => {
-      await sb.auth.signOut();
+      try { if (sb) await sb.auth.signOut(); } catch(e){}
       window.location.href = '/';
     });
 
+    // supabase-js getSession() can hang forever on navigator.locks — race it and
+    // fall back to reading the token from localStorage so the page never spins.
+    async function getSessionSafe() {
+      if (!sb) return null;
+      let timer;
+      const timeout = new Promise(r => { timer = setTimeout(() => r('__timeout__'), 6000); });
+      try {
+        const res = await Promise.race([ sb.auth.getSession().then(x => x?.data?.session || null), timeout ]);
+        clearTimeout(timer);
+        if (res !== '__timeout__') return res;
+      } catch (e) { clearTimeout(timer); }
+      try {
+        const raw = localStorage.getItem('sb-vvajqnljwvhjgdtxqzfl-auth-token');
+        if (raw) { const j = JSON.parse(raw); if (j?.access_token) return { access_token: j.access_token, user: j.user }; }
+      } catch (e) {}
+      return null;
+    }
+    function showFatal(msg) {
+      const ls = $id('loadingState');
+      if (ls) ls.innerHTML = '<div class="text-center py-20"><p class="text-red-500 font-semibold mb-3">'+msg+'</p><button onclick="location.reload()" class="text-white bg-blue-600 px-4 py-2 rounded-lg text-sm font-semibold mr-2">Retry</button><a href="/" class="text-blue-600 text-sm hover:underline">Home</a></div>';
+    }
+    const _watchdog = setTimeout(() => {
+      const ls = $id('loadingState');
+      if (ls && !ls.classList.contains('hidden')) showFatal('This is taking longer than usual.');
+    }, 12000);
+
     // Auth check
     (async () => {
-      const { data } = await sb.auth.getSession();
-      const session  = data?.session;
-      if (!session) {
-        $id('loadingState').classList.add('hidden');
-        $id('authGate').classList.remove('hidden');
-        return;
+      try {
+        if (!sb) throw new Error('Sign-in service failed to load — please reload.');
+        const session = await getSessionSafe();
+        if (!session) {
+          clearTimeout(_watchdog);
+          $id('loadingState').classList.add('hidden');
+          $id('authGate').classList.remove('hidden');
+          return;
+        }
+        await loadDashboard(session.access_token, session.user?.email);
+        clearTimeout(_watchdog);
+      } catch (err) {
+        clearTimeout(_watchdog);
+        console.error('Dashboard init error:', err);
+        showFatal("Couldn't load your dashboard. " + (err.message || ''));
       }
-      await loadDashboard(session.access_token, session.user?.email);
     })();
   </script>
 </body>
