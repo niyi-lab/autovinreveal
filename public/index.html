@@ -365,7 +365,7 @@
                 <div class="space-y-2 group">
                   <label class="block text-sm font-bold text-gray-700 flex justify-between">
                     <span>Search by VIN</span>
-                    <button type="button" onclick="document.getElementById('vinHelp').classList.toggle('hidden')" class="text-xs font-normal text-blue-600 hover:underline cursor-pointer">Where is my VIN?</button>
+                    <button type="button" onclick="document.getElementById('vinWhereHelp').classList.toggle('hidden')" class="text-xs font-normal text-blue-600 hover:underline cursor-pointer">Where is my VIN?</button>
                   </label>
                   <div class="relative flex items-center rounded-xl border border-gray-300 focus-within:border-blue-600 focus-within:ring-4 focus-within:ring-blue-600/10 transition-all bg-gray-50 group-hover:bg-white h-14">
                     <div class="pl-4 pr-3 text-gray-400">
@@ -375,7 +375,7 @@
                     </div>
                     <input name="vin" maxlength="17" placeholder="VIN (17 CHARS)" class="flex-1 bg-transparent outline-none text-gray-900 placeholder-gray-400 font-mono font-medium uppercase sm:tracking-wider text-sm sm:text-base sm:text-lg min-w-0" autocomplete="off" />
                   </div>
-                  <div id="vinHelp" class="hidden mt-2 text-xs text-gray-600 bg-blue-50 border border-blue-100 rounded-lg p-3 leading-relaxed">
+                  <div id="vinWhereHelp" class="hidden mt-2 text-xs text-gray-600 bg-blue-50 border border-blue-100 rounded-lg p-3 leading-relaxed">
                     <p class="font-semibold text-gray-700 mb-1">Your VIN (17 characters) is usually here:</p>
                     <ul class="list-disc pl-4 space-y-0.5">
                       <li>Driver's-side dashboard — look through the windshield</li>
