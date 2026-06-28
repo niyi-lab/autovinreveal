@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Report History | AutoVINReveal</title>
+    <title>Dashboard | AutoVINReveal</title>
     <meta name="robots" content="noindex, nofollow" />
     <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32" />
     <meta name="theme-color" content="#1e3a8a" />
@@ -53,10 +53,27 @@
     <main class="max-w-5xl mx-auto px-4 sm:px-6 py-10">
 
       <!-- Page header -->
-      <div class="mb-8">
-        <h1 class="text-3xl font-bold text-slate-900">Report History</h1>
-        <p class="text-gray-500 mt-1 text-sm">All vehicle history reports you've run. Signed-in users also see server-side records.</p>
+      <div class="mb-6">
+        <h1 class="text-3xl font-bold text-slate-900">Dashboard</h1>
+        <p class="text-gray-500 mt-1 text-sm">Your credits, activity, and every report you've run.</p>
       </div>
+
+      <!-- Stats (logged-in) -->
+      <div id="statsWrap" class="hidden">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Credits Left</div><div class="text-3xl font-black text-blue-600" id="statBalance">—</div></div>
+          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">This Month</div><div class="text-3xl font-black text-slate-900" id="statThisMonth">—</div></div>
+          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">All Time</div><div class="text-3xl font-black text-slate-900" id="statTotal">—</div></div>
+          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Saved vs CARFAX</div><div class="text-3xl font-black text-green-600" id="statSaved">—</div></div>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-200 p-5 mb-6">
+          <div class="text-sm font-bold text-slate-700">Reports per month</div>
+          <div class="text-[11px] text-gray-400 mb-4">Last 6 months</div>
+          <div class="flex items-end gap-2 h-24" id="barChart"></div>
+        </div>
+      </div>
+
+      <h2 class="text-lg font-bold text-slate-900 mb-3">Your reports</h2>
 
       <!-- Search + controls bar -->
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-6 flex flex-col sm:flex-row gap-3">
@@ -236,11 +253,49 @@
         supabase = window.supabase.createClient(SB_URL, SB_ANON);
       }
 
+      // getSession() can hang on navigator.locks — race a timeout + localStorage fallback.
       async function getSession() {
         if (!supabase) return { user: null, token: null };
-        const { data } = await supabase.auth.getSession();
-        const session = data?.session || null;
-        return { user: session?.user || null, token: session?.access_token || null };
+        let timer;
+        const timeout = new Promise(r => { timer = setTimeout(() => r('__t__'), 6000); });
+        try {
+          const res = await Promise.race([supabase.auth.getSession().then(x => x?.data?.session || null), timeout]);
+          clearTimeout(timer);
+          if (res !== '__t__') return { user: res?.user || null, token: res?.access_token || null };
+        } catch (e) { clearTimeout(timer); }
+        try { const raw = localStorage.getItem('sb-vvajqnljwvhjgdtxqzfl-auth-token'); if (raw) { const j = JSON.parse(raw); if (j?.access_token) return { user: j.user || null, token: j.access_token }; } } catch (e) {}
+        return { user: null, token: null };
+      }
+
+      // Dashboard stats (merged in from the old /dashboard page).
+      const STAT_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      function renderChart(monthly) {
+        const chart = $id('barChart'); if (!chart || !monthly) return;
+        const keys = Object.keys(monthly).sort(); const vals = keys.map(k => monthly[k]); const max = Math.max(...vals, 1);
+        chart.innerHTML = '';
+        keys.forEach((k, i) => {
+          const val = vals[i]; const pct = Math.max((val / max) * 100, val > 0 ? 12 : 4); const cur = i === keys.length - 1;
+          const col = document.createElement('div'); col.className = 'flex flex-col items-center gap-1 flex-1';
+          col.innerHTML = `<span class="text-[10px] text-gray-400">${val > 0 ? val : ''}</span><div class="w-full rounded-t" style="height:${pct}%;min-height:4px;background:${cur ? '#2563eb' : '#cbd5e1'}"></div><span class="text-[10px] ${cur ? 'text-blue-600 font-bold' : 'text-gray-400'}">${STAT_MONTHS[parseInt(k.split('-')[1]) - 1]}</span>`;
+          chart.appendChild(col);
+        });
+      }
+      async function loadStats(token) {
+        try {
+          const r = await apiFetch('/api/dashboard', { headers: { Authorization: `Bearer ${token}` } }, 15_000);
+          if (!r.ok) return;
+          const d = await r.json();
+          const bal = d.balance ?? 0, total = d.totalReports ?? d.total ?? 0, tm = d.thisMonth ?? d.this_month ?? 0;
+          if ($id('statBalance'))   $id('statBalance').textContent   = bal;
+          if ($id('statThisMonth')) $id('statThisMonth').textContent = tm;
+          if ($id('statTotal'))     $id('statTotal').textContent     = total;
+          if ($id('statSaved'))     $id('statSaved').textContent     = '$' + (total * (44.99 - 5.99)).toFixed(0);
+          const pill = $id('balancePill'), bt = $id('balanceText');
+          if (bt) bt.textContent = bal + ' credits';
+          if (pill) { pill.classList.remove('hidden'); pill.style.display = 'flex'; }
+          $id('statsWrap')?.classList.remove('hidden');
+          if (d.monthly) renderChart(d.monthly);
+        } catch (e) {}
       }
 
       function reflectAuthNav(user) {
@@ -780,19 +835,17 @@
          Init
       ============================================================ */
       async function init() {
-        // Auth
         if (!supabase) return;
-        const { data } = await supabase.auth.getSession();
-        const session = data?.session || null;
-        reflectAuthNav(session?.user || null);
+        const { user, token } = await getSession();
+        reflectAuthNav(user);
 
         supabase.auth.onAuthStateChange((_e, s) => reflectAuthNav(s?.user || null));
 
         // Show local history instantly while we wait for Supabase
         const localRows = loadLocalHistory();
 
-        if (session?.user && session?.access_token) {
-          // Logged in: show loading state, fetch ALL Supabase records first
+        if (user && token) {
+          loadStats(token);   // dashboard stats (non-blocking)
           const syncEl = $id('syncStatus');
           if (syncEl) { syncEl.classList.remove('hidden'); syncEl.style.display = 'flex'; }
 
@@ -800,7 +853,7 @@
           allItems = localRows;
           applyFilters();
 
-          const serverRows = await fetchServerHistory(session.access_token);
+          const serverRows = await fetchServerHistory(token);
 
           // Supabase is source of truth — server rows first, local fills any gaps
           allItems = mergeHistories(serverRows, localRows);
