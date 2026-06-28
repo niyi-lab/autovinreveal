@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Dealer Membership · AutoVINReveal</title>
+<meta name="description" content="Monthly dealer plans from AutoVINReveal — vehicle history reports as low as $1.69 each. Cancel anytime."/>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<style>body{font-family:'Inter',ui-sans-serif,system-ui,sans-serif}</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<nav class="bg-white border-b border-gray-200 sticky top-0 z-40">
+  <div class="max-w-5xl mx-auto px-5 h-[60px] flex items-center justify-between gap-4">
+    <a href="/" class="flex items-center gap-2 font-extrabold tracking-tight text-[17px]">
+      <span class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center"><svg class="w-4 h-4 stroke-white" fill="none" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span>
+      Auto<span class="text-blue-600">VINReveal</span>
+    </a>
+    <div class="flex items-center gap-2">
+      <a href="/" class="text-sm font-semibold text-gray-600 hover:text-blue-600 px-3 py-2 rounded-lg">Home</a>
+      <a href="/dashboard.html" class="text-sm font-semibold text-gray-600 hover:text-blue-600 px-3 py-2 rounded-lg">Dashboard</a>
+      <a href="/#pricing" class="text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg">Buy single report</a>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-5xl mx-auto px-5 pt-14 pb-8">
+  <div class="text-center max-w-2xl mx-auto">
+    <div class="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-full mb-4">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 4-6"/></svg> For dealers &amp; flippers
+    </div>
+    <h1 class="text-4xl sm:text-5xl font-black tracking-tight leading-[1.05]">Run volume? Subscribe and save.</h1>
+    <p class="text-gray-500 text-lg mt-3">Reports land as credits every month — as low as <strong class="text-slate-700">$1.69 each</strong> vs CARFAX's $44.99. Cancel anytime, right from your dashboard.</p>
+  </div>
+
+  <div class="grid md:grid-cols-3 gap-4 mt-9">
+    <!-- Starter -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6 flex flex-col">
+      <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Starter</div>
+      <div class="mt-2"><span class="text-4xl font-black">$39</span><span class="text-gray-400 text-sm">/mo</span></div>
+      <div class="text-sm text-gray-500 mt-0.5">20 reports / month · $1.95 each</div>
+      <div class="text-xs text-gray-400 mt-1.5">+ one-time $19 setup fee</div>
+      <ul class="space-y-2.5 text-sm text-slate-600 flex-1 my-5">
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> 20 full reports every month</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Credits roll over 1 month, then expire</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Cancel anytime</li>
+      </ul>
+      <button onclick="subscribe('sub_starter',this)" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-xl text-sm transition-colors">Subscribe — $39/mo</button>
+    </div>
+    <!-- Dealer -->
+    <div class="relative bg-white rounded-2xl border-2 border-blue-500 p-6 flex flex-col shadow-xl shadow-blue-600/10">
+      <div class="absolute top-4 right-4 bg-blue-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">Most Popular</div>
+      <div class="text-xs font-bold text-blue-600 uppercase tracking-widest">Dealer</div>
+      <div class="mt-2"><span class="text-4xl font-black">$89</span><span class="text-gray-400 text-sm">/mo</span></div>
+      <div class="text-sm text-gray-500 mt-0.5">50 reports / month · $1.78 each</div>
+      <div class="text-xs text-gray-400 mt-1.5">+ one-time $19 setup fee</div>
+      <ul class="space-y-2.5 text-sm text-slate-600 flex-1 my-5">
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> 50 full reports every month</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Best value for active dealers</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Credits roll over 1 month, then expire</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Cancel anytime</li>
+      </ul>
+      <button onclick="subscribe('sub_dealer',this)" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl text-sm shadow-lg shadow-blue-600/25 transition-all">Subscribe — $89/mo</button>
+    </div>
+    <!-- Pro -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6 flex flex-col">
+      <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Pro</div>
+      <div class="mt-2"><span class="text-4xl font-black">$169</span><span class="text-gray-400 text-sm">/mo</span></div>
+      <div class="text-sm text-gray-500 mt-0.5">100 reports / month · $1.69 each</div>
+      <div class="text-xs text-gray-400 mt-1.5">+ one-time $19 setup fee</div>
+      <ul class="space-y-2.5 text-sm text-slate-600 flex-1 my-5">
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> 100 full reports every month</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Lowest price per report</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Credits roll over 1 month, then expire</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Priority support</li>
+      </ul>
+      <button onclick="subscribe('sub_pro',this)" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-xl text-sm transition-colors">Subscribe — $169/mo</button>
+    </div>
+  </div>
+  <p class="text-center text-sm text-gray-500 mt-5">Prefer to pay per report? <a href="/#pricing" class="text-blue-600 font-bold hover:underline">One-time reports &amp; bundles →</a></p>
+
+  <div class="max-w-2xl mx-auto mt-16">
+    <h2 class="text-2xl font-black tracking-tight text-center mb-6">Membership FAQ</h2>
+    <div class="space-y-2.5" id="faq"></div>
+  </div>
+</div>
+
+<footer class="text-center text-gray-400 text-xs py-10 leading-7">
+  AutoVINReveal is an independent provider and is <strong>not affiliated with CARFAX, Inc.</strong><br/>
+  <a href="/terms.html" class="text-gray-500">Terms</a> · <a href="/privacy.html" class="text-gray-500">Privacy</a> · <a href="mailto:support@autovinreveal.com" class="text-gray-500">support@autovinreveal.com</a>
+</footer>
+
+<script>
+const FAQ=[
+  ["How do the monthly credits work?","Each billing period your plan tops up your account with that plan's credits (20, 50, or 100). One credit = one full vehicle history report, used automatically when you run a report."],
+  ["Do the monthly credits expire?","Subscription credits roll over one month, then expire — so a slow month isn't wasted, but they don't pile up forever. Credits from one-time bundles you buy outright never expire."],
+  ["What's the $19 setup fee?","A one-time fee charged only on your first payment when you start a plan. It keeps the monthly price low for committed members. After the first month you're only billed the monthly rate."],
+  ["Can I cancel anytime?","Yes — cancel whenever you like and you won't be billed again. You keep any non-expired credits through their rollover window. No contracts."],
+  ["Do I need an account?","Yes. Subscriptions are tied to your account so your credits and report history stay in one place. You'll be asked to sign in before checkout."],
+  ["How is this different from the bundles?","Bundles (5-pack, 20-pack) are one-time purchases and never expire — best for occasional buyers. Memberships refill every month at a lower per-report price — best if you run volume regularly."]
+];
+document.getElementById('faq').innerHTML=FAQ.map(([q,a])=>`<details class="bg-white border border-gray-200 rounded-xl overflow-hidden"><summary class="px-4 py-3.5 font-bold text-[15px] cursor-pointer flex justify-between items-center gap-2 list-none">${q}<svg class="w-4 h-4 shrink-0 transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary><div class="px-4 pb-4 text-sm text-gray-500 leading-relaxed">${a}</div></details>`).join('');
+document.querySelectorAll('details').forEach(d=>d.addEventListener('toggle',()=>{const s=d.querySelector('svg');if(s)s.style.transform=d.open?'rotate(180deg)':'';}));
+
+window.VITE_SUPABASE_URL="https://vvajqnljwvhjgdtxqzfl.supabase.co";
+window.VITE_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+let sb=null;
+try{sb=window.supabase.createClient(window.VITE_SUPABASE_URL,window.VITE_SUPABASE_ANON_KEY);}catch(e){}
+async function getSessionSafe(){
+  if(!sb)return null;
+  let t;const to=new Promise(r=>{t=setTimeout(()=>r('__t__'),6000)});
+  try{const r=await Promise.race([sb.auth.getSession().then(x=>x?.data?.session||null),to]);clearTimeout(t);if(r!=='__t__')return r;}catch(e){clearTimeout(t)}
+  try{const raw=localStorage.getItem('sb-vvajqnljwvhjgdtxqzfl-auth-token');if(raw){const j=JSON.parse(raw);if(j?.access_token)return{access_token:j.access_token,user:j.user};}}catch(e){}
+  return null;
+}
+async function subscribe(key,btn){
+  const old=btn.textContent;btn.textContent='Redirecting…';btn.style.opacity=.6;btn.disabled=true;
+  const restore=()=>{btn.textContent=old;btn.style.opacity=1;btn.disabled=false;};
+  const session=await getSessionSafe();
+  if(!session){alert('Please sign in first — subscriptions are tied to your account.');location.href='/?login=1';return;}
+  try{
+    const r=await fetch('/api/whop/checkout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({key,user_id:session.user?.id||null})});
+    const j=await r.json();
+    if(j.url){if(j.claim){try{localStorage.setItem('whopClaim',j.claim)}catch(e){}}location.href=j.url;return;}
+    alert(j.error||'Could not start checkout');restore();
+  }catch(e){alert('Could not start checkout');restore();}
+}
+</script>
+</body>
+</html>
