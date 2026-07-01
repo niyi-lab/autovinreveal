@@ -2123,6 +2123,22 @@ app.post("/api/cancel-subscription", async (req, res) => {
 /* ================================================================
    Credits endpoint
 ================================================================ */
+app.get("/api/myip", async (req, res) => {
+  const yourIp = req.headers["cf-connecting-ip"]
+    || (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
+    || req.socket.remoteAddress;
+  let serverOutboundIp = null;
+  try {
+    const r = await axios.get("https://api.ipify.org?format=json", { timeout: 8000 });
+    serverOutboundIp = r.data && r.data.ip;
+  } catch (e) { serverOutboundIp = "unavailable (" + e.message + ")"; }
+  res.json({
+    your_ip: yourIp,
+    server_outbound_ip: serverOutboundIp,
+    note: "server_outbound_ip is the IP the report provider (cheapcarfax) sees — give THIS one to them to whitelist.",
+  });
+});
+
 app.get("/api/credits/:user_id", async (req, res) => {
   try {
     const { user } = await getUser(req);
