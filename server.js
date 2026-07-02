@@ -117,7 +117,11 @@ app.use((req, res, next) => {
       return res.redirect(308, `https://${req.headers.host}${req.url}`);
     }
   }
-  if (FORCE_WWW && req.headers.host && !req.headers.host.startsWith("www.")) {
+  // Don't force www on the raw Render hostname — www.*.onrender.com doesn't
+  // exist, and cheapestcarfax.com's provider-proxy calls use it to bypass
+  // Cloudflare (whose WAF blocks server UAs like axios).
+  if (FORCE_WWW && req.headers.host && !req.headers.host.startsWith("www.")
+      && !/\.onrender\.com(:\d+)?$/i.test(req.headers.host)) {
     return res.redirect(308, `https://www.${req.headers.host}${req.url}`);
   }
   next();
