@@ -1573,7 +1573,7 @@
           div.style.cssText = 'text-align:center;font-size:11px;color:#94a3b8;margin:2px 0 4px;';
           div.textContent = '— earlier messages —';
           document.getElementById('chatMessages').appendChild(div);
-          for (const m of d.msgs) { if (m.r === 'user') appendUserMessage(m.t, m.i); else appendMessage(m.t, m.r); }
+          for (const m of d.msgs) { if (m.r === 'user') appendUserMessage(m.t, m.i); else appendMessage(m.t, m.r, m.i); }
           if (chatConversationId) startChatPoll();
         } catch (e) {}
       }
@@ -1618,7 +1618,7 @@
         if (chatOpen) setTimeout(() => document.getElementById('chatInput')?.focus(), 100);
       }
 
-      function appendMessage(text, role) {
+      function appendMessage(text, role, img) {
         const box = document.getElementById('chatMessages');
         const el  = document.createElement('div');
         if (role === 'user') {
@@ -1630,7 +1630,14 @@
           tag.style.cssText = 'font-size:10px;font-weight:700;color:#059669;margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em;';
           tag.textContent = 'Support agent';
           el.appendChild(tag);
-          el.appendChild(document.createTextNode(text));
+          if (text) el.appendChild(document.createTextNode(text));
+          if (img) {
+            const im = document.createElement('img');
+            im.src = img;
+            im.style.cssText = 'max-width:100%;border-radius:8px;margin-top:' + (text ? '6px' : '0') + ';display:block;cursor:zoom-in;';
+            im.onclick = () => window.open(img, '_blank');
+            el.appendChild(im);
+          }
         } else {
           el.style.cssText = 'background:#f1f5f9;color:#334155;border-radius:12px 12px 12px 4px;padding:10px 12px;max-width:85%;font-size:13px;line-height:1.5;';
           el.textContent = text;
@@ -1723,8 +1730,8 @@
           for (const m of (d.messages || [])) {
             if (m.id > chatLastSeen) chatLastSeen = m.id;
             if (m.role === 'owner') {
-              appendMessage(m.content, 'owner');
-              cacheMsg('owner', m.content);
+              appendMessage(m.content, 'owner', m.image);
+              cacheMsg('owner', m.content, m.image);
               if (!chatOpen) document.getElementById('chatUnread').style.display = 'block';
             }
           }

@@ -274,9 +274,10 @@
         const keys = Object.keys(monthly).sort(); const vals = keys.map(k => monthly[k]); const max = Math.max(...vals, 1);
         chart.innerHTML = '';
         keys.forEach((k, i) => {
-          const val = vals[i]; const pct = Math.max((val / max) * 100, val > 0 ? 12 : 4); const cur = i === keys.length - 1;
-          const col = document.createElement('div'); col.className = 'flex flex-col items-center gap-1 flex-1';
-          col.innerHTML = `<span class="text-[10px] text-gray-400">${val > 0 ? val : ''}</span><div class="w-full rounded-t" style="height:${pct}%;min-height:4px;background:${cur ? '#2563eb' : '#cbd5e1'}"></div><span class="text-[10px] ${cur ? 'text-blue-600 font-bold' : 'text-gray-400'}">${STAT_MONTHS[parseInt(k.split('-')[1]) - 1]}</span>`;
+          // Bar height in px — a % height can't resolve inside the auto-height column (renders flat).
+          const val = vals[i]; const px = Math.max(Math.round((val / max) * 56), val > 0 ? 7 : 3); const cur = i === keys.length - 1;
+          const col = document.createElement('div'); col.className = 'flex flex-col items-center justify-end gap-1 flex-1';
+          col.innerHTML = `<span class="text-[10px] text-gray-400">${val > 0 ? val : ''}</span><div class="w-full rounded-t" style="height:${px}px;background:${cur ? '#2563eb' : '#cbd5e1'}"></div><span class="text-[10px] ${cur ? 'text-blue-600 font-bold' : 'text-gray-400'}">${STAT_MONTHS[parseInt(k.split('-')[1]) - 1]}</span>`;
           chart.appendChild(col);
         });
       }

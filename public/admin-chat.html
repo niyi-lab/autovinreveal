@@ -138,7 +138,14 @@ async function openConv(id) {
     </div>
     <div id="msgs"></div>
     <div id="composer">
+      <div id="replyImgPreview" style="display:none;position:relative;flex-shrink:0">
+        <img id="replyImgThumb" alt="" style="height:44px;border-radius:8px;display:block"/>
+        <button type="button" onclick="clearReplyImage()" aria-label="Remove" style="position:absolute;top:-7px;right:-7px;width:18px;height:18px;border-radius:50%;background:#ef4444;color:#fff;border:none;cursor:pointer;font-size:12px;line-height:1">×</button>
+      </div>
+      <input type="file" id="replyFile" accept="image/*" style="display:none" onchange="onReplyFile(this)">
+      <button type="button" class="toggle" style="padding:8px 10px" onclick="document.getElementById('replyFile').click()" aria-label="Attach image" title="Attach image">🖼️</button>
       <textarea id="reply" rows="1" placeholder="Type a reply… (sending takes over the chat)"
+        onpaste="onReplyPaste(event)"
         onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendReply();}"></textarea>
       <button class="btn" onclick="sendReply()">Send</button>
     </div>`;
@@ -168,11 +175,44 @@ async function loadMsgs(forceScroll) {
   if (forceScroll || atBottom) box.scrollTop = box.scrollHeight;
 }
 
+// ---- Image attachment (mirrors the visitor widget: downscale to JPEG, ≤2MB data URL) ----
+let replyImage = null;
+function onReplyFile(input) { const f = input.files && input.files[0]; if (f) attachReplyImage(f); input.value = ''; }
+function onReplyPaste(e) {
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  for (const it of items) { if (it.type && it.type.indexOf('image') === 0) { const f = it.getAsFile(); if (f) { attachReplyImage(f); e.preventDefault(); return; } } }
+}
+function attachReplyImage(file) {
+  if (!/^image\//.test(file.type)) { alert('Only images can be attached.'); return; }
+  if (file.size > 25 * 1024 * 1024) { alert('That image is too big.'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const im = new Image();
+    const show = () => { const p = $('replyImgPreview'); if (p && replyImage) { $('replyImgThumb').src = replyImage; p.style.display = 'block'; } };
+    im.onload = () => {
+      try {
+        const MAXD = 1400, scale = Math.min(1, MAXD / Math.max(im.width, im.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(im.width * scale); c.height = Math.round(im.height * scale);
+        c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+        replyImage = c.toDataURL('image/jpeg', 0.82);
+      } catch (e) { replyImage = reader.result; }
+      if (replyImage.length > 1900000) { replyImage = null; alert('Image is too large even after compression.'); return; }
+      show();
+    };
+    im.onerror = () => { replyImage = reader.result.length > 1900000 ? null : reader.result; if (!replyImage) alert('Image is too large.'); show(); };
+    im.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+function clearReplyImage() { replyImage = null; const p = $('replyImgPreview'); if (p) { p.style.display = 'none'; $('replyImgThumb').src = ''; } }
+
 async function sendReply() {
-  const ta = $('reply'); const content = (ta.value || '').trim();
-  if (!content || !selId) return;
+  const ta = $('reply'); const content = (ta.value || '').trim(); const image = replyImage;
+  if ((!content && !image) || !selId) return;
   ta.value = '';
-  await api('/api/admin/chats/' + selId + '/reply', { method:'POST', body: JSON.stringify({ content }) });
+  clearReplyImage();
+  await api('/api/admin/chats/' + selId + '/reply', { method:'POST', body: JSON.stringify({ content, image }) });
   loadMsgs(true); loadList();
 }
 

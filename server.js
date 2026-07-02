@@ -2178,7 +2178,7 @@ app.get("/api/myip", async (req, res) => {
   res.json({
     your_ip: yourIp,
     server_outbound_ip: serverOutboundIp,
-    note: "server_outbound_ip is the IP the report provider (cheapcarfax) sees — give THIS one to them to whitelist.",
+    note: "",
   });
 });
 
@@ -3401,7 +3401,7 @@ app.get("/api/chat/poll", async (req, res) => {
     const { data: convo } = await supabaseService
       .from("chat_conversations").select("mode").eq("id", conversationId).eq("site", SITE_ID).maybeSingle();
     const { data: msgs } = await supabaseService
-      .from("chat_messages").select("id, role, content, created_at")
+      .from("chat_messages").select("id, role, content, created_at, image")
       .eq("conversation_id", conversationId).gt("id", after)
       .order("id", { ascending: true }).limit(50);
     res.json({ mode: convo?.mode || "ai", messages: msgs || [] });
@@ -3435,9 +3435,13 @@ app.get("/api/admin/chats/:id", requireOwnerMw, async (req, res) => {
 app.post("/api/admin/chats/:id/reply", requireOwnerMw, async (req, res) => {
   try {
     const content = String(req.body?.content || "").trim();
-    if (!content) return res.status(400).json({ error: "empty" });
+    // Optional image attachment — same data-URL format + 2MB cap as visitor uploads.
+    const image = (typeof req.body?.image === "string"
+      && /^data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(req.body.image)
+      && req.body.image.length < 2_000_000) ? req.body.image : null;
+    if (!content && !image) return res.status(400).json({ error: "empty" });
     await supabaseService.from("chat_messages")
-      .insert({ conversation_id: req.params.id, role: "owner", content: content.slice(0, 4000) });
+      .insert({ conversation_id: req.params.id, role: "owner", content: content.slice(0, 4000), image });
     await supabaseService.from("chat_conversations")
       .update({ mode: "human", flagged: false, last_message_at: new Date().toISOString() })
       .eq("id", req.params.id).eq("site", SITE_ID);
