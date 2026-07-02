@@ -260,6 +260,15 @@ const CCF_BASE         = process.env.REPORTSVIN_BASE    || "https://api.reports.
 const CHEAPCARFAX_BASE = process.env.CHEAPCARFAX_BASE   || "https://panel.cheapcarfax.net";
 const CHEAPCARFAX_KEY  = process.env.CHEAPCARFAX_API_KEY || "";
 
+// Shared secret for the CFC→AVR provider proxy (see /api/provider-proxy below).
+// cheapcarfax only whitelisted AVR's outbound IP, so cheapestcarfax.com routes its
+// provider calls through this server. Default secret = sha256 of the Supabase
+// service-role key both sites already share, so no new env var is needed.
+const PROVIDER_PROXY_SECRET = process.env.PROVIDER_PROXY_SECRET
+  || (process.env.SERVICE_ROLE_KEY
+        ? require("crypto").createHash("sha256").update(process.env.SERVICE_ROLE_KEY).digest("hex")
+        : "");
+
 const providerState = {
   cfc: { failures: 0, lastFailure: null },
 };
@@ -2121,8 +2130,38 @@ app.post("/api/cancel-subscription", async (req, res) => {
 });
 
 /* ================================================================
-   Credits endpoint
+   Provider proxy — cheapestcarfax.com fetches cheapcarfax reports
+   through this server because only OUR outbound IP (74.220.48.251)
+   is whitelisted with panel.cheapcarfax.net. Verbatim passthrough:
+   one attempt, status + JSON body relayed as-is so the caller's own
+   retry/error handling applies. Auth: x-proxy-secret header.
 ================================================================ */
+app.get("/api/provider-proxy/cheapcarfax/:vin", async (req, res) => {
+  const given = String(req.headers["x-proxy-secret"] || "");
+  const ok = PROVIDER_PROXY_SECRET
+    && given.length === PROVIDER_PROXY_SECRET.length
+    && require("crypto").timingSafeEqual(Buffer.from(given), Buffer.from(PROVIDER_PROXY_SECRET));
+  if (!ok) return res.status(401).json({ message: "Unauthorized" });
+
+  const vin = String(req.params.vin || "").trim().toUpperCase();
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) return res.status(400).json({ message: "VIN is required and must be 17 characters" });
+  if (!CHEAPCARFAX_KEY) return res.status(503).json({ message: "CHEAPCARFAX_API_KEY not set on proxy" });
+
+  try {
+    const r = await axios.get(`${CHEAPCARFAX_BASE}/api/carfax/vin/${vin}/html`, {
+      headers: { "x-api-key": CHEAPCARFAX_KEY },
+      timeout: 45000,
+      validateStatus: () => true,
+    });
+    console.log(`[ProviderProxy] cheapcarfax ${vin} → ${r.status} (for CFC)`);
+    const body = (r.data && typeof r.data === "object") ? r.data : { message: String(r.data ?? "").slice(0, 500) };
+    res.status(r.status).json(body);
+  } catch (err) {
+    console.error(`[ProviderProxy] cheapcarfax ${vin} upstream error: ${err.message}`);
+    res.status(502).json({ message: "Report Not Available! (proxy upstream error: " + err.message + ")" });
+  }
+});
+
 app.get("/api/myip", async (req, res) => {
   const yourIp = req.headers["cf-connecting-ip"]
     || (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
