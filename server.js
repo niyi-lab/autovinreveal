@@ -270,7 +270,7 @@ const CHEAPCARFAX_KEY  = process.env.CHEAPCARFAX_API_KEY || "";
 // service-role key both sites already share, so no new env var is needed.
 const PROVIDER_PROXY_SECRET = process.env.PROVIDER_PROXY_SECRET
   || (process.env.SERVICE_ROLE_KEY
-        ? require("crypto").createHash("sha256").update(process.env.SERVICE_ROLE_KEY).digest("hex")
+        ? crypto.createHash("sha256").update(process.env.SERVICE_ROLE_KEY).digest("hex")
         : "");
 
 const providerState = {
@@ -2144,7 +2144,7 @@ app.get("/api/provider-proxy/cheapcarfax/:vin", async (req, res) => {
   const given = String(req.headers["x-proxy-secret"] || "");
   const ok = PROVIDER_PROXY_SECRET
     && given.length === PROVIDER_PROXY_SECRET.length
-    && require("crypto").timingSafeEqual(Buffer.from(given), Buffer.from(PROVIDER_PROXY_SECRET));
+    && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(PROVIDER_PROXY_SECRET));
   if (!ok) return res.status(401).json({ message: "Unauthorized" });
 
   const vin = String(req.params.vin || "").trim().toUpperCase();
