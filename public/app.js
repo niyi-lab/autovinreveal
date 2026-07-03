@@ -632,6 +632,14 @@ $id('logoutBtn')?.addEventListener('click', doLogout);
 $id('loginBtn')?.addEventListener('click', openLogin);
 $id('loginBtnMobile')?.addEventListener('click', openLogin); // mobile nav
 
+// membership.html sends logged-out subscribers to /?login=1 — open the login modal
+// so that flow doesn't silently dead-end. Strip the param afterward.
+if (params().get('login') === '1') {
+  openLogin();
+  const u = new URL(location.href); u.searchParams.delete('login');
+  history.replaceState({}, '', u.pathname + u.search + u.hash);
+}
+
 $id('closeUpdatePasswordModal')?.addEventListener('click', () => {
   $id('updatePasswordModal')?.classList.add('hidden');
 });
