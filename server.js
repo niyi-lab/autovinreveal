@@ -764,6 +764,12 @@ function decodeReportBase64(rawB64) {
 function injectReportChrome(html) {
   if (!html || typeof html !== "string") return html;
 
+  // Already chromed — by this site (avr-report-fix) OR the sibling site (CFC bakes
+  // ccf-report-fix / data-ccf-chrome into HTML we may read from the SHARED
+  // report_cache/vin_queries tables). Skip so we don't double-apply the strips,
+  // nav guard, and floating download button on a cross-site cache hit.
+  if (/avr-report-fix|ccf-report-fix|data-ccf-chrome/.test(html)) return html;
+
   let out = html;
 
   // 1. Strip third-party scripts that cause CORS errors or blank pages
@@ -1082,6 +1088,16 @@ async function addCreditsAtomic(userId, delta) {
     p_delta: delta,
   });
   if (error) throw new Error(`Credit update failed: ${error.message}`);
+}
+
+// Reverse up to `amount` credits (never drives the balance below 0), logging a
+// 'refund' ledger entry. Used by the refund/chargeback handlers. Returns the number
+// of credits actually reversed.
+async function reverseCredits(userId, amount) {
+  if (!supabaseService || !userId || !amount) return 0;
+  const { data, error } = await supabaseService.rpc("refund_credits", { p_user: userId, p_amount: amount });
+  if (error) { console.error("[refund] reverseCredits error:", error.message); return 0; }
+  return data || 0;
 }
 
 /* ================================================================
@@ -1577,6 +1593,44 @@ if (process.env.WHOP_API_KEY) {
   setTimeout(grantWhopSubRenewals, 70 * 1000);
 }
 
+// Crypto reconcile — a NOWPayments IPN can be missed (network blip, deploy during
+// callback), leaving a paid order stuck 'waiting' forever with no recovery. Re-query
+// recent waiting orders and fulfill the paid ones / mark the dead ones, so a paying
+// customer isn't silently left empty-handed.
+async function reconcileCryptoPayments() {
+  if (!NP_API_KEY || !supabaseService) return;
+  try {
+    const since = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString();
+    const { data: rows } = await supabaseService.from("crypto_payments")
+      .select("payment_id, order_id, credits, user_id, status, created_at")
+      .eq("status", "waiting").gt("created_at", since).limit(50);
+    for (const row of (rows || [])) {
+      if (!row.payment_id) continue;
+      let np;
+      try {
+        const r = await axios.get(`${NP_BASE}/payment/${row.payment_id}`, { headers: { "x-api-key": NP_API_KEY }, timeout: 8000, validateStatus: () => true });
+        if (r.status !== 200) continue;
+        np = r.data;
+      } catch { continue; }
+      const st = np?.payment_status;
+      if (["finished", "confirmed"].includes(st)) {
+        // Atomically claim (waiting -> fulfilled) so we can't race the IPN, then grant.
+        const { data: claimed } = await supabaseService.from("crypto_payments")
+          .update({ status: "fulfilled", fulfilled_at: new Date().toISOString() })
+          .eq("order_id", row.order_id).neq("status", "fulfilled").select().maybeSingle();
+        if (claimed && claimed.user_id) {
+          await addCreditsAtomic(claimed.user_id, claimed.credits);
+          console.log(`[NP reconcile] fulfilled ${row.payment_id} -> +${claimed.credits} credits to ${claimed.user_id}`);
+        }
+      } else if (["failed", "expired", "refunded"].includes(st)) {
+        // Terminal failure — stop re-checking it.
+        await supabaseService.from("crypto_payments").update({ status: st }).eq("order_id", row.order_id).eq("status", "waiting");
+      }
+      // else waiting/pending/partially_paid → leave for the next sweep
+    }
+  } catch (e) { console.warn("[NP reconcile] error:", e.message); }
+}
+
 // Resolve the buyer's email from a Whop payment payload (falls back to the member record).
 async function resolveWhopBuyerEmail(data) {
   let email = data.user_email || data.email || (data.user && data.user.email) ||
@@ -1683,6 +1737,33 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
         }
       } else {
         console.warn(`[Whop] paid but unlinked — user=${userId} plan=${planId} vin=${vin} checkout=${checkoutId} meta=${JSON.stringify(meta).slice(0,140)}`);
+      }
+    } else if (/refund|dispute|charge.?back/i.test(type)) {
+      // Refund / chargeback / dispute. Whop's exact event name varies, so match broadly.
+      // Reverse a cleanly-identified one-time PACK grant (clamped so balance can't go
+      // negative) and ALWAYS email the owner — subscription/guest refunds and anything
+      // we can't match are left for manual handling so we never mis-reverse.
+      const meta       = data.metadata || (data.membership && data.membership.metadata) || {};
+      const checkoutId = (data.membership && data.membership.checkout_session) || data.checkout_session || meta.sid || null;
+      const planId     = (data.plan && (data.plan.id || data.plan)) || data.plan_id || (data.membership && data.membership.plan) || null;
+      let row = null;
+      if (checkoutId) { const { data: r } = await supabaseService.from("whop_checkouts").select("*").eq("session_id", checkoutId).eq("site", "avr").maybeSingle(); row = r || null; }
+      const uid     = meta.user_id || meta.userId || row?.user_id || null;
+      const credits = row?.credits || WHOP_PLAN_CREDITS[planId] || parseInt(meta.credits, 10) || 0;
+      const isSub   = isWhopSubPlan(planId || row?.plan_id);
+      let reversed  = 0;
+      if (uid && credits > 0 && !isSub) {
+        reversed = await reverseCredits(uid, credits);
+        if (row) await supabaseService.from("whop_checkouts").update({ status: "refunded" }).eq("session_id", row.session_id);
+      }
+      console.log(`[Whop] ${type} — reversed ${reversed} credits (user ${uid || "?"}, plan ${planId}, sub=${isSub}, payment ${data.id})`);
+      if (mailer) {
+        const ownerTo = CFC_OWNER_EMAIL || SMTP_USER;
+        if (ownerTo) mailer.sendMail({
+          from: SMTP_FROM, to: ownerTo,
+          subject: `AutoVINReveal Whop ${type} — payment ${data.id}`,
+          text: `A Whop "${type}" event arrived.\n\nPayment: ${data.id}\nUser: ${uid || "unknown"}\nPlan: ${planId}\nCredits auto-reversed: ${reversed}${isSub ? "\n\nNOTE: subscription — expiring sub credits were NOT auto-reversed; adjust manually if needed." : ""}\n\nVerify in the Whop dashboard; adjust manually if the reversal looks wrong.`,
+        }).catch(e => console.error("[Whop refund email]", e.message));
       }
     }
     return res.status(200).json({ ok: true });
@@ -2251,6 +2332,12 @@ function sortObjectKeys(obj) {
   return Object.keys(obj).sort().reduce((acc, k) => { acc[k] = sortObjectKeys(obj[k]); return acc; }, {});
 }
 
+// Schedule the crypto reconcile sweep (defined above; NP_API_KEY is in scope here).
+if (NP_API_KEY) {
+  setInterval(reconcileCryptoPayments, 10 * 60 * 1000);
+  setTimeout(reconcileCryptoPayments, 80 * 1000);
+}
+
 app.post("/api/crypto/create-payment", async (req, res) => {
   try {
     if (!NP_API_KEY) return res.status(503).json({ error: "Crypto payments not configured" });
@@ -2371,6 +2458,21 @@ app.post("/api/crypto/ipn", async (req, res) => {
         });
       }
     } catch (e) { console.warn("[NP IPN] owner alert failed:", e.message); }
+  }
+
+  // Chargeback/refund — reverse a previously-granted crypto purchase (clamped so the
+  // balance never goes negative), and mark the row so a redelivered event won't
+  // double-reverse. Only fulfilled orders have credits to reverse.
+  if (["refunded", "failed"].includes(payment_status) && supabaseService) {
+    try {
+      const { data: row } = await supabaseService.from("crypto_payments")
+        .select("user_id, credits, status, order_id").eq("payment_id", String(payment_id)).maybeSingle();
+      if (row && row.status === "fulfilled") {
+        const rev = row.user_id ? await reverseCredits(row.user_id, row.credits) : 0;
+        await supabaseService.from("crypto_payments").update({ status: payment_status }).eq("order_id", row.order_id).eq("status", "fulfilled");
+        console.log(`[NP IPN] ${payment_status} — reversed ${rev} credits from ${row.user_id || "guest"} (order ${row.order_id})`);
+      }
+    } catch (e) { console.warn("[NP IPN] refund reversal failed:", e.message); }
   }
 
   if (!["finished", "confirmed"].includes(payment_status)) {
