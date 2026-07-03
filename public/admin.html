@@ -46,8 +46,34 @@
 
     <!-- Tabs -->
     <div id="tabs" class="tabs hidden">
-      <div class="tab active" data-tab="cache">Cache</div>
+      <div class="tab active" data-tab="users">Users</div>
+      <div class="tab" data-tab="cache">Cache</div>
       <div class="tab" data-tab="history">History</div>
+    </div>
+
+    <!-- Users & subscriptions (covers BOTH sites — shared backend) -->
+    <div id="view-users" class="pad hidden">
+      <div class="row" id="userStats" style="margin-bottom:4px">
+        <span class="pill">Loading…</span>
+      </div>
+      <div class="row">
+        <input id="userSearch" type="text" placeholder="Search by email…" />
+        <button id="userSearchBtn" class="primary">Search</button>
+        <button id="userSubsBtn">Subscribers only</button>
+        <button id="userClearBtn">All users</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Email</th><th>Joined</th><th>Last sign-in</th>
+              <th class="right">Credits</th><th>Subscription</th>
+              <th class="right">Reports</th><th>Last report</th>
+            </tr>
+          </thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Cache -->
@@ -107,14 +133,14 @@
       loginBox.classList.add('hidden');
       tabs.classList.remove('hidden');
       logoutBtn.classList.remove('hidden');
-      activateTab('cache');
-      loadCache();
+      activateTab('users');
     }
     function showSignedOutUI() {
       statusPill.textContent = 'signed out';
       loginBox.classList.remove('hidden');
       tabs.classList.add('hidden');
       logoutBtn.classList.add('hidden');
+      $('view-users').classList.add('hidden');
       $('view-cache').classList.add('hidden');
       $('view-history').classList.add('hidden');
     }
@@ -140,14 +166,72 @@
       document.querySelectorAll('.tab').forEach(t=>{
         t.classList.toggle('active', t.dataset.tab===name);
       });
+      $('view-users').classList.toggle('hidden', name!=='users');
       $('view-cache').classList.toggle('hidden', name!=='cache');
       $('view-history').classList.toggle('hidden', name!=='history');
+      if (name==='users') loadUsers();
       if (name==='cache') loadCache();
       if (name==='history') loadHistory();
     }
     document.querySelectorAll('.tab').forEach(t=>{
       t.addEventListener('click', ()=>activateTab(t.dataset.tab));
     });
+
+    // Users & subscriptions
+    const escapeHtml = (s)=>String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const fmtDate = (d)=>{ if (!d) return '—'; try { return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); } catch { return '—'; } };
+    let usersCache = [];
+    let subsOnly = false;
+
+    async function loadUsers(){
+      const body = $('usersBody');
+      body.innerHTML = '<tr><td colspan="7" class="muted">Loading…</td></tr>';
+      try {
+        const q = $('userSearch').value.trim();
+        const r = await fetch('/api/admin/users?limit=1000' + (q ? '&search=' + encodeURIComponent(q) : ''));
+        if (!r.ok) throw 0;
+        const { users=[] } = await r.json();
+        usersCache = users;
+        renderUsers();
+      } catch {
+        body.innerHTML = '<tr><td colspan="7" class="muted">Failed to load users.</td></tr>';
+      }
+    }
+
+    function renderUsers(){
+      const body = $('usersBody');
+      const rows = subsOnly ? usersCache.filter(u=>u.sub_active) : usersCache;
+
+      const totalCredits = usersCache.reduce((s,u)=>s+(u.balance||0)+Number(u.sub_credits||0),0);
+      const totalSubs    = usersCache.filter(u=>u.sub_active).length;
+      const totalReports = usersCache.reduce((s,u)=>s+Number(u.reports||0),0);
+      $('userStats').innerHTML =
+        `<span class="pill"><b>${usersCache.length}</b> users${subsOnly?` (showing ${rows.length} subscribers)`:''}</span>`+
+        `<span class="pill"><b>${totalSubs}</b> active subscriptions</span>`+
+        `<span class="pill"><b>${totalCredits.toLocaleString()}</b> credits outstanding</span>`+
+        `<span class="pill"><b>${totalReports.toLocaleString()}</b> reports delivered</span>`;
+
+      if (!rows.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No users found.</td></tr>'; return; }
+      body.innerHTML = '';
+      for (const u of rows) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${escapeHtml(u.email)}</td>
+          <td class="muted">${fmtDate(u.created_at)}</td>
+          <td class="muted">${fmtDate(u.last_sign_in_at)}</td>
+          <td class="right"><b>${u.balance ?? 0}</b>${Number(u.sub_credits||0) > 0 ? ` <span class="muted">+${u.sub_credits} sub</span>` : ''}</td>
+          <td>${u.sub_active ? '<span class="pill" style="color:#16a34a;border-color:#16a34a">active</span>' : '<span class="muted">—</span>'}</td>
+          <td class="right">${u.reports ?? 0}</td>
+          <td class="muted">${fmtDate(u.last_report_at)}</td>
+        `;
+        body.appendChild(tr);
+      }
+    }
+
+    $('userSearchBtn').addEventListener('click', loadUsers);
+    $('userSearch').addEventListener('keydown', (e)=>{ if (e.key==='Enter') loadUsers(); });
+    $('userSubsBtn').addEventListener('click', ()=>{ subsOnly = true; renderUsers(); });
+    $('userClearBtn').addEventListener('click', ()=>{ subsOnly = false; $('userSearch').value=''; loadUsers(); });
 
     // Cache data
     async function loadCache(){

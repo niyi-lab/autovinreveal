@@ -2931,6 +2931,34 @@ app.get("/api/admin/history", requireAdmin, async (_req, res) => {
   }
 });
 
+// admin.html calls these on load / logout — they must exist or the page
+// treats every visit as signed-out (and the cookie never clears).
+app.get("/api/admin/whoami", (req, res) => {
+  res.json({ admin: verifyAdminToken(req.cookies?.admin_session || "") });
+});
+
+app.post("/api/admin/logout", (_req, res) => {
+  res.clearCookie("admin_session", { httpOnly: true, secure: true, sameSite: "strict", path: "/" });
+  res.json({ ok: true });
+});
+
+// Users & subscriptions dashboard — every account across BOTH sites (shared
+// Supabase), with balance, subscription, report count, and activity times.
+app.get("/api/admin/users", requireAdmin, async (req, res) => {
+  try {
+    const search = String(req.query.search || "").trim() || null;
+    const limit  = Math.min(Math.max(parseInt(req.query.limit, 10) || 500, 1), 1000);
+    const { data, error } = await supabaseService.rpc("admin_list_users", {
+      p_search: search, p_limit: limit, p_offset: 0,
+    });
+    if (error) throw error;
+    res.json({ ok: true, users: data || [] });
+  } catch (e) {
+    console.error("Admin users error:", e.message);
+    res.status(500).json({ ok: false, error: "users_failed" });
+  }
+});
+
 app.get("/admin", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
 
 /* ================================================================
@@ -3150,6 +3178,146 @@ app.get("/api/cfc-dashboard", async (req, res) => {
 });
 
 /* ================================================================
+   Owner admin AI — when the authenticated OWNER uses the chat widget,
+   the assistant switches to an admin persona with read-only DB tools
+   (backed by the admin_* RPCs in the shared Supabase, so it covers
+   BOTH autovinreveal.com and cheapestcarfax.com customers).
+================================================================ */
+function buildChatTurns(history, message, image) {
+  // De-dupe: the client pushes the latest user turn into `history` AND sends it
+  // as `message`; drop a trailing user turn equal to message to avoid a double turn.
+  const cleaned = (history || []).slice(-8).map(m => ({
+    role: m.role === "assistant" ? "assistant" : "user",
+    content: String(m.content || ""),
+  }));
+  while (cleaned.length && cleaned[cleaned.length - 1].role === "user" && cleaned[cleaned.length - 1].content === message) {
+    cleaned.pop();
+  }
+  let lastUserContent = message;
+  if (image && typeof image === "string") {
+    const m = image.match(/^data:(image\/(?:png|jpe?g|gif|webp));base64,([A-Za-z0-9+/=]+)$/);
+    if (m && m[2].length < 7_000_000) {
+      lastUserContent = [
+        { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } },
+        { type: "text", text: message || "Here's a screenshot — can you help with this?" },
+      ];
+    }
+  }
+  return { cleaned, lastUserContent };
+}
+
+const OWNER_ADMIN_TOOLS = [
+  {
+    name: "lookup_user",
+    description: "Look up ONE customer by exact email (case-insensitive). Returns account info (created, last sign-in, email confirmed), credit balance, Stripe customer/subscription ids, delivered/failed report counts, the 10 most recent reports, recent credit-ledger entries (positive delta = credits added, negative = used), and recent purchases. Call this whenever the owner asks about a specific customer.",
+    input_schema: { type: "object", properties: { email: { type: "string", description: "The customer's email address" } }, required: ["email"] },
+  },
+  {
+    name: "list_users",
+    description: "List users newest-first, optionally filtered by partial email. Per user: email, created_at, last_sign_in_at, credit balance, stripe_subscription_id, delivered report count, last report time. Use for questions like 'who signed up this week', 'find the user with gmail …', 'who still has credits'.",
+    input_schema: { type: "object", properties: { search: { type: "string", description: "Partial email filter (optional)" }, limit: { type: "integer", description: "Max rows, default 50, max 200" } }, required: [] },
+  },
+  {
+    name: "site_stats",
+    description: "Business stats for the last N days across the shared backend (covers BOTH sites): total/new users, reports delivered/failed, active report users, credits granted/spent, outstanding credit balance, active Stripe subscriptions, fulfilled Whop purchases by site, open chats by site.",
+    input_schema: { type: "object", properties: { days: { type: "integer", description: "Window in days, default 7, max 365" } }, required: [] },
+  },
+  {
+    name: "recent_reports",
+    description: "Most recent report runs across ALL users: VIN, type, vehicle, success, time, and the user's email (or 'guest'). Use for 'what ran today' or 'any failures lately'.",
+    input_schema: { type: "object", properties: { limit: { type: "integer", description: "Max rows, default 20, max 100" }, only_failures: { type: "boolean", description: "true = only failed runs" } }, required: [] },
+  },
+];
+
+async function execOwnerAdminTool(name, input) {
+  if (name === "lookup_user") {
+    const { data, error } = await supabaseService.rpc("admin_user_detail", { p_email: String(input?.email || "").trim() });
+    if (error) throw new Error(error.message);
+    return data ? JSON.stringify(data) : "No user found with that email. Try list_users with a partial search.";
+  }
+  if (name === "list_users") {
+    const { data, error } = await supabaseService.rpc("admin_list_users", {
+      p_search: String(input?.search || "").trim() || null,
+      p_limit: Math.min(Math.max(parseInt(input?.limit, 10) || 50, 1), 200),
+      p_offset: 0,
+    });
+    if (error) throw new Error(error.message);
+    return JSON.stringify(data || []);
+  }
+  if (name === "site_stats") {
+    const { data, error } = await supabaseService.rpc("admin_site_stats", {
+      p_days: Math.min(Math.max(parseInt(input?.days, 10) || 7, 1), 365),
+    });
+    if (error) throw new Error(error.message);
+    return JSON.stringify(data);
+  }
+  if (name === "recent_reports") {
+    const limit = Math.min(Math.max(parseInt(input?.limit, 10) || 20, 1), 100);
+    let q = supabaseService.from("vin_queries")
+      .select("vin, type, vehicle, success, created_at, user_id")
+      .order("created_at", { ascending: false }).limit(limit);
+    if (input?.only_failures) q = q.eq("success", false);
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    const rows = data || [];
+    const ids = [...new Set(rows.map(r => r.user_id).filter(Boolean))];
+    const emails = {};
+    if (ids.length) {
+      const { data: em } = await supabaseService.from("credits").select("user_id, email").in("user_id", ids);
+      for (const e of (em || [])) emails[e.user_id] = e.email;
+    }
+    return JSON.stringify(rows.map(r => ({
+      vin: r.vin, type: r.type, vehicle: r.vehicle, success: r.success, at: r.created_at,
+      user: r.user_id ? (emails[r.user_id] || r.user_id) : "guest",
+    })));
+  }
+  return "Unknown tool: " + name;
+}
+
+// Tool-use loop against the Messages API (same raw-HTTP style as the visitor chat).
+async function runOwnerAdminChat({ apiKey, history, message, image }) {
+  const sys = `You are the private ADMIN assistant for the owner of AutoVINReveal (autovinreveal.com) and CheapestCarFax (cheapestcarfax.com). Both sites share ONE backend, so your tools cover users, credits, reports, and purchases of BOTH sites.
+
+You are talking to the OWNER — their identity was verified by server-side login, so answer freely about any customer or business data. Always use the tools instead of guessing; if one lookup comes back empty, try list_users with a partial search before giving up.
+
+STYLE: plain text only, no markdown or bullets. Be concise but give real numbers, emails, and dates (like "Jun 28, 2026"). Short multi-line summaries are fine. If asked something that needs no data (or general support questions), just answer normally.`;
+  const { cleaned, lastUserContent } = buildChatTurns(history, message, image);
+  const messages = [...cleaned, { role: "user", content: lastUserContent }];
+
+  let reply = "";
+  for (let turn = 0; turn < 6; turn++) {
+    const r = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      {
+        model: "claude-opus-4-8",
+        max_tokens: 1500,
+        system: [{ type: "text", text: sys, cache_control: { type: "ephemeral" } }],
+        tools: OWNER_ADMIN_TOOLS,
+        messages,
+      },
+      { headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" }, timeout: 60000 }
+    );
+    const data = r.data || {};
+    const blocks = data.content || [];
+    const text = blocks.filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+    const toolUses = blocks.filter(b => b.type === "tool_use");
+    if (data.stop_reason !== "tool_use" || !toolUses.length) { reply = text || reply; break; }
+
+    messages.push({ role: "assistant", content: blocks });
+    const results = [];
+    for (const tu of toolUses) {
+      let out, isErr = false;
+      try { out = await execOwnerAdminTool(tu.name, tu.input || {}); }
+      catch (e) { out = "Tool error: " + e.message; isErr = true; }
+      console.log(`[AdminChat] tool ${tu.name} → ${isErr ? "ERROR" : String(out).length + " chars"}`);
+      results.push({ type: "tool_result", tool_use_id: tu.id, content: String(out).slice(0, 30000), ...(isErr ? { is_error: true } : {}) });
+    }
+    messages.push({ role: "user", content: results });
+  }
+  return reply || "Sorry, I couldn't complete that lookup — try rephrasing.";
+}
+
+/* ================================================================
    AI Chat Widget
 ================================================================ */
 app.post("/api/chat", async (req, res) => {
@@ -3180,19 +3348,37 @@ app.post("/api/chat", async (req, res) => {
       }
     } catch (e) { console.warn("[chat] persistence error:", e.message); }
 
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+
+    // ── Owner admin mode ──
+    // Identity comes from the verified Supabase token (getUser), NEVER from the
+    // client-supplied userEmail field (spoofable). Runs even if the conversation
+    // is in human mode — the owner always talks to the admin AI.
+    let authedUser = null;
+    try { ({ user: authedUser } = await getUser(req)); } catch (_) {}
+    if (authedUser && CFC_OWNER_EMAIL && (authedUser.email || "").toLowerCase() === CFC_OWNER_EMAIL.toLowerCase()) {
+      if (!apiKey) return res.status(500).json({ error: "Chat not configured", conversation_id: conversationId });
+      const reply = await runOwnerAdminChat({ apiKey, history, message, image });
+      try {
+        if (conversationId) {
+          await supabaseService.from("chat_messages").insert({ conversation_id: conversationId, role: "assistant", content: reply });
+        }
+      } catch (e) { console.warn("[chat] store admin reply error:", e.message); }
+      return res.json({ reply, conversation_id: conversationId, admin: true });
+    }
+
     // If the owner has taken over, the AI stays silent — the widget polls for owner replies.
     if (convoMode === "human") {
       return res.json({ conversation_id: conversationId, human: true });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return res.status(500).json({ error: "Chat not configured", conversation_id: conversationId });
 
     // Account context for signed-in users so the assistant can answer
     // balance / "where's my report" questions directly.
     let acctContext = "";
     try {
-      const { user } = await getUser(req);
+      const user = authedUser;
       if (user) {
         const { data: credRow } = await supabaseService
           .from("credits").select("balance").eq("user_id", user.id).maybeSingle();
@@ -3272,27 +3458,7 @@ ESCALATE: Only add ESCALATE on its own final line when the customer has a real u
       { role: "assistant", content: "Yep! It's USDT on the BSC network - just pick the Pay with crypto option in the payment box, and send only USDT on BSC so nothing gets lost. Card, Apple Pay, and Google Pay work too." },
     ];
 
-    // De-dupe: the client pushes the latest user turn into `history` AND sends it
-    // as `message`; drop a trailing user turn equal to message to avoid a double turn.
-    const cleaned = history.slice(-8).map(m => ({
-      role: m.role === "assistant" ? "assistant" : "user",
-      content: String(m.content || ""),
-    }));
-    while (cleaned.length && cleaned[cleaned.length - 1].role === "user" && cleaned[cleaned.length - 1].content === message) {
-      cleaned.pop();
-    }
-
-    // Latest user turn — attach an image block (Claude vision) if a screenshot was sent.
-    let lastUserContent = message;
-    if (image && typeof image === "string") {
-      const m = image.match(/^data:(image\/(?:png|jpe?g|gif|webp));base64,([A-Za-z0-9+/=]+)$/);
-      if (m && m[2].length < 7_000_000) {
-        lastUserContent = [
-          { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } },
-          { type: "text", text: message || "Here's a screenshot — can you help with this?" },
-        ];
-      }
-    }
+    const { cleaned, lastUserContent } = buildChatTurns(history, message, image);
     const messages = [
       ...FEW_SHOT,
       ...cleaned,
