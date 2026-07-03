@@ -1444,6 +1444,7 @@
               Online · Powered by AI
             </div>
           </div>
+          <button id="chatExpand" type="button" onclick="toggleChatSize()" aria-label="Resize chat" title="Bigger" style="margin-left:auto;background:none;border:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:15px;line-height:1;padding:5px;border-radius:7px;">⤢</button>
         </div>
 
         <!-- Messages -->
@@ -1606,6 +1607,7 @@
         el.style.cssText = 'background:#2563eb;color:white;border-radius:12px 12px 4px 12px;padding:8px 10px;max-width:85%;align-self:flex-end;font-size:13px;line-height:1.5;';
         if (img) { const im = document.createElement('img'); im.src = img; im.style.cssText = 'max-width:100%;border-radius:8px;margin-bottom:6px;display:block;'; el.appendChild(im); }
         if (text) el.appendChild(document.createTextNode(text));
+        el.style.whiteSpace = 'pre-wrap'; el.style.wordBreak = 'break-word';
         box.appendChild(el); box.scrollTop = box.scrollHeight;
       }
 
@@ -1616,6 +1618,19 @@
         document.getElementById('chatIconClose').style.display = chatOpen ? 'block' : 'none';
         document.getElementById('chatUnread').style.display    = 'none';
         if (chatOpen) setTimeout(() => document.getElementById('chatInput')?.focus(), 100);
+      }
+
+      // Let users enlarge the chat window (useful for the owner's admin answers).
+      function toggleChatSize() {
+        const w = document.getElementById('chatWindow');
+        const m = document.getElementById('chatMessages');
+        const b = document.getElementById('chatExpand');
+        const on = w.getAttribute('data-max') !== '1';
+        w.setAttribute('data-max', on ? '1' : '0');
+        w.style.width = on ? 'min(560px, calc(100vw - 32px))' : '320px';
+        if (m) m.style.height = on ? 'min(60vh, 520px)' : '300px';
+        if (b) { b.textContent = on ? '⤡' : '⤢'; b.title = on ? 'Smaller' : 'Bigger'; }
+        if (m) m.scrollTop = m.scrollHeight;
       }
 
       function appendMessage(text, role, img) {
@@ -1642,6 +1657,7 @@
           el.style.cssText = 'background:#f1f5f9;color:#334155;border-radius:12px 12px 12px 4px;padding:10px 12px;max-width:85%;font-size:13px;line-height:1.5;';
           el.textContent = text;
         }
+        el.style.whiteSpace = 'pre-wrap'; el.style.wordBreak = 'break-word';
         box.appendChild(el);
         box.scrollTop = box.scrollHeight;
         return el;
