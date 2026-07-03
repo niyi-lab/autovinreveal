@@ -117,6 +117,7 @@
               <tbody id="ownerBody"></tbody>
             </table>
           </div>
+          <div id="ownerMore" class="hidden border-t border-gray-100 p-3 text-center"></div>
         </div>
       </div>
 
@@ -349,7 +350,8 @@
       /* ---- Owner-only users & subscriptions panel ----
          Backed by /api/owner/users (server enforces owner via the Supabase
          token). Non-owners get 403 and the panel simply stays hidden. */
-      let ownerToken = null, ownerUsers = [], ownerSubsOnly = false;
+      const OWNER_PAGE = 8, OWNER_STEP = 20;   // start collapsed at 8, reveal +20 per click
+      let ownerToken = null, ownerUsers = [], ownerSubsOnly = false, ownerShown = OWNER_PAGE;
       const ownEsc  = (s)=>String(s ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
       const ownDate = (d)=>{ if (!d) return '—'; try { return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); } catch { return '—'; } };
       async function loadOwnerPanel(token) {
@@ -361,6 +363,7 @@
           if (!r.ok) return; // 403 for non-owner → panel stays hidden
           const d = await r.json();
           ownerUsers = d.users || [];
+          ownerShown = OWNER_PAGE;   // reset pagination on each fresh load / search
           $id('ownerPanel')?.classList.remove('hidden');
           renderOwner();
         } catch (e) {}
@@ -385,8 +388,14 @@
           card('Credits out', totCredits.toLocaleString(), 'text-blue-600') +
           card('Reports', totReports.toLocaleString(), 'text-green-600');
         paintOwnerFilter();
-        if (!rows.length) { body.innerHTML = '<tr><td colspan="7" class="py-6 px-4 text-center text-gray-400">No users found.</td></tr>'; return; }
-        body.innerHTML = rows.map(u=>`
+        const more = $id('ownerMore');
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="7" class="py-6 px-4 text-center text-gray-400">No users found.</td></tr>';
+          if (more) more.classList.add('hidden');
+          return;
+        }
+        const visible = rows.slice(0, ownerShown);
+        body.innerHTML = visible.map(u=>`
           <tr class="border-t border-gray-100 hover:bg-gray-50/60 transition-colors">
             <td class="py-3 px-4 font-medium text-slate-800">${ownEsc(u.email)}</td>
             <td class="py-3 px-3 text-gray-500 whitespace-nowrap">${ownDate(u.created_at)}</td>
@@ -396,10 +405,25 @@
             <td class="py-3 px-3 text-right text-gray-700">${u.reports ?? 0}</td>
             <td class="py-3 px-4 text-gray-500 whitespace-nowrap">${ownDate(u.last_report_at)}</td>
           </tr>`).join('');
+        if (more) {
+          if (rows.length > OWNER_PAGE) {
+            more.classList.remove('hidden');
+            const allShown = ownerShown >= rows.length;
+            more.innerHTML = allShown
+              ? `<button id="ownerMoreBtn" class="text-sm font-semibold text-gray-500 hover:text-gray-700">Show less</button>`
+              : `<button id="ownerMoreBtn" class="text-sm font-semibold text-indigo-600 hover:text-indigo-700">Show more <span class="text-gray-400 font-normal">(${visible.length} of ${rows.length})</span></button>`;
+            $id('ownerMoreBtn').onclick = () => {
+              ownerShown = (ownerShown >= rows.length) ? OWNER_PAGE : Math.min(ownerShown + OWNER_STEP, rows.length);
+              renderOwner();
+            };
+          } else {
+            more.classList.add('hidden');
+          }
+        }
       }
       $id('ownerSearchBtn')?.addEventListener('click', ()=>loadOwnerPanel(ownerToken));
       $id('ownerSearch')?.addEventListener('keydown', e=>{ if (e.key==='Enter') loadOwnerPanel(ownerToken); });
-      $id('ownerSubsBtn')?.addEventListener('click', ()=>{ ownerSubsOnly = true; renderOwner(); });
+      $id('ownerSubsBtn')?.addEventListener('click', ()=>{ ownerSubsOnly = true; ownerShown = OWNER_PAGE; renderOwner(); });
       $id('ownerAllBtn')?.addEventListener('click', ()=>{ ownerSubsOnly = false; if ($id('ownerSearch')) $id('ownerSearch').value=''; loadOwnerPanel(ownerToken); });
 
       function reflectAuthNav(user) {
