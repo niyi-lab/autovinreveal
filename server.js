@@ -87,7 +87,9 @@ const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || SITE_URL;
 const FORCE_WWW      = process.env.FORCE_WWW === "1";
 
 const APP_SECRET     = process.env.APP_SECRET    || "change_me_in_env_file";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
+// Fail closed: no default password. If ADMIN_PASSWORD is unset, admin login is
+// disabled entirely (a "changeme" default silently opened the cross-site panel).
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const ADMIN_SESSION_TTL_SECONDS = Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 12);
 
 if (!APP_SECRET || APP_SECRET === "change_me_in_env_file") {
@@ -101,6 +103,16 @@ if (!APP_SECRET || APP_SECRET === "change_me_in_env_file") {
    Security / redirects
 ================================================================ */
 app.set("trust proxy", 1);
+
+// True client IP behind Cloudflare (orange-cloud) + Render. cf-connecting-ip is set
+// by Cloudflare to the real client and can't be forged; the LEFTMOST X-Forwarded-For
+// entry CAN be (an attacker prepends a fake and Cloudflare appends the real one), so
+// never key rate limits / blocklists off XFF alone.
+function clientIp(req) {
+  return (req.headers["cf-connecting-ip"]
+    || (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
+    || req.ip || "").toString();
+}
 const WEBHOOK_PATHS = new Set(["/api/stripe-webhook", "/api/stripe-webhook/", "/api/crypto/ipn"]);
 
 function isLocalHost(host) {
@@ -1641,11 +1653,34 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
           .update({ status: "paid", buyer_email: buyerEmail })
           .eq("session_id", row.session_id).eq("status", "pending");
         console.log(`[Whop] payment confirmed -> row paid (vin ${vin}, session ${row.session_id}, payment ${data.id})`);
-      } else if (userId && credits > 0) {
-        // Pack (no VIN) → grant spendable credits (fast, no provider call).
-        await addCreditsAtomic(userId, credits);
-        if (row) await supabaseService.from("whop_checkouts").update({ status: "fulfilled", fulfilled_at: new Date().toISOString() }).eq("session_id", row.session_id);
-        console.log(`[Whop] +${credits} credits to ${userId} (plan ${planId}, payment ${data.id})`);
+      } else if (userId && (isWhopSubPlan(planId) || credits > 0)) {
+        // No-VIN purchase (pack or subscription). The buyer's /api/whop/claim can
+        // ALSO fulfill this, so atomically claim the checkout row first and grant
+        // only if THIS call flipped it. Previously this granted UNCONDITIONALLY:
+        //   • a claim+webhook race double-granted packs, and
+        //   • subscriptions were wrongly given PERMANENT credits here on top of the
+        //     EXPIRING credits from grantWhopSubPayment()/the renewal poller.
+        let mayGrant = true;
+        if (row) {
+          const { data: claimed } = await supabaseService.from("whop_checkouts")
+            .update({ status: "fulfilled", fulfilled_at: new Date().toISOString() })
+            .eq("session_id", row.session_id).neq("status", "fulfilled").neq("status", "fulfilling")
+            .select().maybeSingle();
+          mayGrant = !!claimed;
+        }
+        if (mayGrant) {
+          if (isWhopSubPlan(planId)) {
+            // Subscription → EXPIRING credits only, idempotent by payment id (shared
+            // with the claim + renewal poller). Never permanent.
+            await grantWhopSubPayment(data.id, planId, userId);
+            console.log(`[Whop] subscription payment -> expiring credits (user ${userId}, plan ${planId}, payment ${data.id})`);
+          } else {
+            await addCreditsAtomic(userId, credits);
+            console.log(`[Whop] +${credits} credits to ${userId} (pack, plan ${planId}, payment ${data.id})`);
+          }
+        } else {
+          console.log(`[Whop] no-VIN already fulfilled elsewhere (session ${row?.session_id})`);
+        }
       } else {
         console.warn(`[Whop] paid but unlinked — user=${userId} plan=${planId} vin=${vin} checkout=${checkoutId} meta=${JSON.stringify(meta).slice(0,140)}`);
       }
@@ -1844,10 +1879,7 @@ app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
 const reportRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000,   // 1 hour window
   max: 30,                     // anonymous guests only (logged-in users are skipped below)
-  keyGenerator: (req) => {
-    // Use forwarded IP (Render passes real IP in x-forwarded-for)
-    return req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip;
-  },
+  keyGenerator: (req) => clientIp(req),
   message: { error: "rate_limited", message: "Too many requests. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -2167,19 +2199,18 @@ app.get("/api/provider-proxy/cheapcarfax/:vin", async (req, res) => {
 });
 
 app.get("/api/myip", async (req, res) => {
-  const yourIp = req.headers["cf-connecting-ip"]
-    || (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
-    || req.socket.remoteAddress;
+  const yourIp = clientIp(req) || req.socket.remoteAddress;
+  // The server's outbound IP is infra detail (whitelisted with the report provider).
+  // Only reveal it to an authenticated ops caller (?key = the provider-proxy secret);
+  // the public just gets their own IP.
+  const authed = PROVIDER_PROXY_SECRET && req.query.key === PROVIDER_PROXY_SECRET;
+  if (!authed) return res.json({ your_ip: yourIp });
   let serverOutboundIp = null;
   try {
     const r = await axios.get("https://api.ipify.org?format=json", { timeout: 8000 });
     serverOutboundIp = r.data && r.data.ip;
   } catch (e) { serverOutboundIp = "unavailable (" + e.message + ")"; }
-  res.json({
-    your_ip: yourIp,
-    server_outbound_ip: serverOutboundIp,
-    note: "",
-  });
+  res.json({ your_ip: yourIp, server_outbound_ip: serverOutboundIp });
 });
 
 app.get("/api/credits/:user_id", async (req, res) => {
@@ -2296,8 +2327,14 @@ app.get("/api/crypto/status/:payment_id", async (req, res) => {
 });
 
 app.post("/api/crypto/ipn", async (req, res) => {
-  // Verify NOWPayments signature (HMAC-SHA512 over the sorted JSON body)
-  if (NP_IPN_SECRET) {
+  // Verify NOWPayments signature (HMAC-SHA512 over the sorted JSON body).
+  // FAIL CLOSED: with no secret configured this is a credit-minting endpoint anyone
+  // could POST a forged "finished" to, so refuse rather than trust an unsigned body.
+  if (!NP_IPN_SECRET) {
+    console.error("[NP IPN] NOWPAYMENTS_IPN_SECRET not set — refusing to process (fail closed).");
+    return res.status(503).send("IPN not configured");
+  }
+  {
     const sig = req.headers["x-nowpayments-sig"];
     if (!sig) return res.status(400).send("Missing signature");
     const expected = crypto.createHmac("sha512", NP_IPN_SECRET)
@@ -2353,15 +2390,22 @@ app.post("/api/crypto/ipn", async (req, res) => {
       pending = data || null;
     }
     if (!pending) { console.warn(`[NP IPN] No pending payment for order ${order_id} / id ${payment_id}`); return res.status(200).json({ ok: true }); }
-    if (pending.status === "fulfilled") return res.status(200).json({ ok: true }); // idempotent
 
-    if (pending.user_id) {
-      await addCreditsAtomic(pending.user_id, pending.credits);
-      console.log(`[NP IPN] +${pending.credits} credits → user ${pending.user_id}`);
-    }
-    await supabaseService.from("crypto_payments")
+    // Atomically CLAIM the row (non-fulfilled -> fulfilled) BEFORE granting.
+    // Concurrent confirmed+finished callbacks race here; Postgres row-locks the
+    // update so only the one that actually flips the row grants — never twice.
+    const { data: claimed } = await supabaseService.from("crypto_payments")
       .update({ status: "fulfilled", fulfilled_at: new Date().toISOString() })
-      .eq("order_id", pending.order_id);
+      .eq("order_id", pending.order_id)
+      .neq("status", "fulfilled")
+      .select()
+      .maybeSingle();
+    if (!claimed) return res.status(200).json({ ok: true }); // already fulfilled/claimed
+
+    if (claimed.user_id) {
+      await addCreditsAtomic(claimed.user_id, claimed.credits);
+      console.log(`[NP IPN] +${claimed.credits} credits → user ${claimed.user_id}`);
+    }
 
     res.status(200).json({ ok: true });
   } catch (e) {
@@ -2404,20 +2448,20 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
     targetVin = v.vin;
 
     // 2b. Anti-scraping checks
-    const clientIp = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip;
+    const clientIp2 = clientIp(req);
     const ua = req.headers["user-agent"] || "";
 
     // Block missing or bot-like User-Agents
     const suspiciousUA = !ua ||
       /python-requests|curl|wget|scrapy|go-http|java\/|libwww|axios\/[0-9]|node-fetch|bot|spider|crawl/i.test(ua);
     if (suspiciousUA) {
-      console.warn(`[AntiScrape] Blocked suspicious UA from ${clientIp}: "${ua.slice(0, 80)}"`);
+      console.warn(`[AntiScrape] Blocked suspicious UA from ${clientIp2}: "${ua.slice(0, 80)}"`);
       return res.status(403).json({ error: "forbidden", message: "Access denied." });
     }
 
     // Block known CARFAX/investigator IPs silently — return fake success with no data
-    if (isBlockedIp(clientIp)) {
-      console.warn(`[AntiCAR] Blocked known investigator IP: ${clientIp} VIN: ${targetVin}`);
+    if (isBlockedIp(clientIp2)) {
+      console.warn(`[AntiCAR] Blocked known investigator IP: ${clientIp2} VIN: ${targetVin}`);
       // Return fake 200 so they don't know they're blocked
       return res.status(200).send("<html><body><p>Report loading...</p></body></html>");
     }
@@ -2490,7 +2534,7 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
 
     // Anti-scrape: only brand-new (non-owned) lookups count toward the per-IP
     // unique-VIN limit. Re-opening reports you already own never trips it.
-    if (!freeAccess && trackSuspicion(clientIp, targetVin)) {
+    if (!freeAccess && trackSuspicion(clientIp2, targetVin)) {
       return res.status(429).json({ error: "rate_limited", message: "Too many requests. Please try again later." });
     }
 
@@ -2892,6 +2936,9 @@ function requireAdmin(req, res, next) {
 }
 
 app.post("/api/admin/login", (req, res) => {
+  // Fail closed — with no password configured, an empty provided password would
+  // timing-safe-match an empty expected and log the attacker in.
+  if (!ADMIN_PASSWORD) return res.status(503).json({ error: "admin_disabled" });
   const provided = req.body?.password || "";
   const expected = ADMIN_PASSWORD;
   // FIX-1: timingSafeEqual only — no plain === short-circuit

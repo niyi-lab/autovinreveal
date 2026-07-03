@@ -243,6 +243,12 @@ function showReportOverlay(html, vin, opts = {}) {
 
   const iframe = document.createElement('iframe');
   iframe.style.cssText = 'flex:1;border:none;width:100%;';
+  // Sandbox WITHOUT allow-same-origin so the report's provider scripts run in an
+  // opaque origin and can't read the app's Supabase auth token from top-window
+  // localStorage. The code documented this above but never set the attribute;
+  // CFC has shipped the identical sandbox with the same cheapcarfax provider, so
+  // the report renders fine under it.
+  iframe.sandbox = 'allow-scripts allow-popups allow-forms allow-modals';
   // Use blob URL instead of srcdoc — Chrome blocks many things in srcdoc context
   const _blob = new Blob([html], { type: 'text/html' });
   const _blobUrl = URL.createObjectURL(_blob);

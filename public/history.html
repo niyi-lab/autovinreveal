@@ -521,6 +521,9 @@
 
         const iframe = document.createElement('iframe');
         iframe.style.cssText = 'flex:1;border:none;width:100%;';
+        // Sandbox WITHOUT allow-same-origin so report scripts can't read the Supabase
+        // auth token from top-window localStorage (CFC ships the same sandbox).
+        iframe.sandbox = 'allow-scripts allow-popups allow-forms allow-modals';
         // Use blob URL — avoids about:srcdoc ERR_INVALID_URL in Chrome
         const blob = new Blob([html], { type: 'text/html' });
         const blobUrl = URL.createObjectURL(blob);
