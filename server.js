@@ -2931,6 +2931,25 @@ app.get("/api/admin/history", requireAdmin, async (_req, res) => {
   }
 });
 
+// Owner dashboard (in the signed-in user's own Dashboard page) — gated by the
+// VERIFIED Supabase token = CFC_OWNER_EMAIL (requireOwnerMw), so it's for the
+// owner alone, not the shared admin password. Covers BOTH sites (shared DB).
+app.get("/api/owner/users", requireOwnerMw, async (req, res) => {
+  try {
+    const search = String(req.query.search || "").trim() || null;
+    const limit  = Math.min(Math.max(parseInt(req.query.limit, 10) || 1000, 1), 1000);
+    const [usersR, statsR] = await Promise.all([
+      supabaseService.rpc("admin_list_users", { p_search: search, p_limit: limit, p_offset: 0 }),
+      supabaseService.rpc("admin_site_stats", { p_days: 30 }),
+    ]);
+    if (usersR.error) throw usersR.error;
+    res.json({ ok: true, users: usersR.data || [], stats: statsR.data || null });
+  } catch (e) {
+    console.error("Owner users error:", e.message);
+    res.status(500).json({ ok: false, error: "users_failed" });
+  }
+});
+
 // admin.html calls these on load / logout — they must exist or the page
 // treats every visit as signed-out (and the cookie never clears).
 app.get("/api/admin/whoami", (req, res) => {
