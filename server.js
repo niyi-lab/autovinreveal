@@ -3747,7 +3747,7 @@ app.get("/api/admin/chats", requireOwnerMw, async (_req, res) => {
   try {
     const { data } = await supabaseService
       .from("chat_conversations")
-      .select("id, visitor_email, mode, flagged, status, last_message_at")
+      .select("id, visitor_email, mode, flagged, status, last_message_at, owner_read_at")
       .eq("site", SITE_ID).eq("status", "open")
       .order("last_message_at", { ascending: false }).limit(100);
     res.json({ conversations: data || [] });
@@ -3762,6 +3762,10 @@ app.get("/api/admin/chats/:id", requireOwnerMw, async (req, res) => {
     const { data: msgs } = await supabaseService
       .from("chat_messages").select("id, role, content, created_at, image")
       .eq("conversation_id", req.params.id).order("id", { ascending: true }).limit(500);
+    // Mark read for the owner so the inbox can flag conversations with newer messages.
+    await supabaseService.from("chat_conversations")
+      .update({ owner_read_at: new Date().toISOString() })
+      .eq("id", req.params.id).eq("site", SITE_ID);
     res.json({ conversation: convo, messages: msgs || [] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

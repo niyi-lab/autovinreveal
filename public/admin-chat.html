@@ -24,6 +24,9 @@
   .conv .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
   .conv .who{font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .conv .t{font-size:10px;color:#94a3b8;margin-top:3px}
+  .conv.unread{background:#f0f7ff;box-shadow:inset 3px 0 0 #2563eb}
+  .conv.unread:hover{background:#e6f1ff}
+  .unread-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#2563eb;margin-right:6px;vertical-align:middle;flex-shrink:0}
   .badge{font-size:9px;font-weight:800;padding:2px 7px;border-radius:999px;text-transform:uppercase;letter-spacing:.04em;flex-shrink:0}
   .b-flag{background:#fee2e2;color:#b91c1c}
   .b-human{background:#dcfce7;color:#166534}
@@ -120,8 +123,11 @@ async function loadList() {
   el.innerHTML = conversations.map(c => {
     const badge = c.flagged ? '<span class="badge b-flag">needs you</span>'
       : (c.mode==='human' ? '<span class="badge b-human">live</span>' : '<span class="badge b-ai">ai</span>');
-    return `<div class="conv ${c.id===selId?'sel':''}" onclick="openConv('${c.id}')">
-      <div class="top"><span class="who">${escapeHtml(c.visitor_email || 'Guest visitor')}</span>${badge}</div>
+    const unread = c.id!==selId && c.last_message_at &&
+      (!c.owner_read_at || new Date(c.last_message_at) > new Date(c.owner_read_at));
+    const dot = unread ? '<span class="unread-dot" title="New messages"></span>' : '';
+    return `<div class="conv ${c.id===selId?'sel':''} ${unread?'unread':''}" onclick="openConv('${c.id}')">
+      <div class="top"><span class="who">${dot}${escapeHtml(c.visitor_email || 'Guest visitor')}</span>${badge}</div>
       <div class="t">${fmtTime(c.last_message_at)}</div>
     </div>`;
   }).join('');
