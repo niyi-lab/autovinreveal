@@ -761,20 +761,20 @@ function decodeReportBase64(rawB64) {
       "undefined" navigations from other scripts.
    4. Inject dealer-hide CSS.
 ================================================================ */
-// Dynamic print-fit — measures the report's real content width right before any
-// print (Download button, avr-print/ccf-print postMessage, in-frame Ctrl+P, or
-// the ?pdf=1 Cloudflare render) and sizes @page to match, so reports wider than
-// the static 1240px fallback (e.g. extra owner columns) never clip on the right.
-// Width is measured with <html> temporarily narrowed to 800px; viewport-sized
-// boxes (100vw wrappers, which don't shrink with <html> and would inflate the
-// page with dead whitespace) are ignored and only substantial content blocks
-// (>=600px, e.g. the report tables) set the width. Injected with
-// its OWN idempotency guard, separately from the main chrome, so reports cached
-// with an older chrome (or baked by the sibling CFC site — shared cache) still
-// gain it when re-served. The dynamic <style> is appended AFTER <body> (last in
-// document order) so it wins over the static @page in the older chrome.
-// print-color-adjust keeps the report's colors even when "Background graphics"
-// is unticked in the print dialog. Keep this byte-identical with the CFC copy.
+// Print-fit — CARFAX reports carry a stale `sidebar-shown` layout class from
+// their original desktop render; it forces the summary sidebar BESIDE the
+// content at print time (~1419px total), which either clips the right side
+// (page narrower than that) or, once the shell hits its max-width cap and
+// centers, leaves a dead whitespace column (page wider). Verified in headless
+// Chrome against a real cached report: WITHOUT the class the report is fully
+// fluid and fills any width edge-to-edge. So: strip the class on beforeprint
+// (fires for the Download buttons, postMessage print, in-frame Ctrl+P alike),
+// restore it on afterprint, and let the static wide @page do the rest; also
+// strip during ?pdf=1 Cloudflare renders (no beforeprint there), and force
+// print-color-adjust so the report's colors survive "Background graphics" off.
+// Injected with its OWN idempotency guard, separately from the main chrome, so
+// reports cached with an older chrome (or baked by the sibling CFC site —
+// shared cache) still gain it when re-served. Byte-identical with the CFC copy.
 function addPrintFitScript(html) {
   if (!html || typeof html !== "string" || html.includes('id="vin-fitpage"')) return html;
   // Cross-site print messages: the shared cache means HTML baked by the sibling
@@ -784,24 +784,18 @@ function addPrintFitScript(html) {
   // prints on both sites and a same-site entry never double-prints.
   const unhandled = ["ccf-print", "avr-print"].filter((m) => !html.includes(`e.data==='${m}'`));
   const fit =
-    `<script id="vin-fitpage">(function(){if(window.__vinFitPage)return;window.__vinFitPage=1;var d=document;` +
-    `function fit(){try{var de=d.documentElement,ow=de.style.width;de.style.width='800px';` +
-    `var vw=window.innerWidth||0,sx=window.pageXOffset||de.scrollLeft||0;` +
-    `var sw=Math.max(de.scrollWidth,d.body?d.body.scrollWidth:0),w=1216;` +
-    `if(vw&&sw>=vw-2){var els=d.body?d.body.querySelectorAll('*'):[];` +
-    `for(var i=0;i<els.length;i++){var el=els[i],r=el.getBoundingClientRect();` +
-    `if(r.width>=600&&Math.abs(r.width-vw)>2&&!(el.closest&&el.closest('#ccf-dlbar,#avr-dlbar'))){var rt=r.right+sx;if(rt>w&&rt<2400)w=Math.ceil(rt)}}}` +
-    `else if(sw>w)w=sw;` +
-    `de.style.width=ow;w=Math.min(w+24,2400);` +
-    `var h=Math.max(1750,Math.round(w*1.4));var s=d.getElementById('vin-pagesize');` +
-    `if(!s){s=d.createElement('style');s.id='vin-pagesize';de.appendChild(s)}` +
-    `s.textContent='@page{size:'+w+'px '+h+'px;margin:12px}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}'}catch(e){}}` +
-    `window.addEventListener('beforeprint',fit);` +
+    `<script id="vin-fitpage">(function(){if(window.__vinFitPage)return;window.__vinFitPage=1;var d=document,st=[];` +
+    `function strip(){try{var els=d.querySelectorAll('.sidebar-shown');for(var i=0;i<els.length;i++){els[i].classList.remove('sidebar-shown');if(st.indexOf(els[i])<0)st.push(els[i])}}catch(e){}}` +
+    `function restore(){try{for(var i=0;i<st.length;i++)st[i].classList.add('sidebar-shown');st=[]}catch(e){}}` +
+    `try{var s=d.createElement('style');s.id='vin-pagesize';` +
+    `s.textContent='@page{size:1240px 1750px;margin:12px}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}';` +
+    `(d.documentElement||d.body).appendChild(s)}catch(e){}` +
+    `window.addEventListener('beforeprint',strip);window.addEventListener('afterprint',restore);` +
     (unhandled.length
-      ? `var pm=${JSON.stringify(unhandled)};window.addEventListener('message',function(e){if(e&&pm.indexOf(e.data)>=0){fit();try{window.focus()}catch(_){}try{window.print()}catch(_){}}});`
+      ? `var pm=${JSON.stringify(unhandled)};window.addEventListener('message',function(e){if(e&&pm.indexOf(e.data)>=0){try{window.focus()}catch(_){}try{window.print()}catch(_){}}});`
       : ``) +
-    `if(/[?&]pdf=1/.test(location.search)){var n=0,t=setInterval(function(){fit();if(++n>7)clearInterval(t)},700);` +
-    `if(d.readyState==='complete')fit();else window.addEventListener('load',fit)}})()</script>`;
+    `if(/[?&]pdf=1/.test(location.search)){var n=0,t=setInterval(function(){strip();if(++n>7)clearInterval(t)},700);` +
+    `if(d.readyState==='complete')strip();else window.addEventListener('load',strip)}})()</script>`;
   if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, fit + "</body>");
   return html + fit;
 }
