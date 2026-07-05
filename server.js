@@ -761,14 +761,52 @@ function decodeReportBase64(rawB64) {
       "undefined" navigations from other scripts.
    4. Inject dealer-hide CSS.
 ================================================================ */
+// Dynamic print-fit — measures the report's real content width right before any
+// print (Download button, avr-print/ccf-print postMessage, in-frame Ctrl+P, or
+// the ?pdf=1 Cloudflare render) and sizes @page to match, so reports wider than
+// the static 1240px fallback (e.g. extra owner columns) never clip on the right.
+// Width is measured by temporarily narrowing <html> to 800px so full-width
+// wrappers collapse and only the report's intrinsic width remains. Injected with
+// its OWN idempotency guard, separately from the main chrome, so reports cached
+// with an older chrome (or baked by the sibling CFC site — shared cache) still
+// gain it when re-served. The dynamic <style> is appended AFTER <body> (last in
+// document order) so it wins over the static @page in the older chrome.
+// print-color-adjust keeps the report's colors even when "Background graphics"
+// is unticked in the print dialog. Keep this byte-identical with the CFC copy.
+function addPrintFitScript(html) {
+  if (!html || typeof html !== "string" || html.includes('id="vin-fitpage"')) return html;
+  // Cross-site print messages: the shared cache means HTML baked by the sibling
+  // site (listener for its brand message only) can be served here. Add a printing
+  // listener ONLY for the brand messages this HTML provably does NOT handle (the
+  // needle matches the baked chrome's exact listener code), so a cross-site entry
+  // prints on both sites and a same-site entry never double-prints.
+  const unhandled = ["ccf-print", "avr-print"].filter((m) => !html.includes(`e.data==='${m}'`));
+  const fit =
+    `<script id="vin-fitpage">(function(){if(window.__vinFitPage)return;window.__vinFitPage=1;var d=document;` +
+    `function fit(){try{var de=d.documentElement,ow=de.style.width;de.style.width='800px';` +
+    `var w=Math.max(de.scrollWidth,d.body?d.body.scrollWidth:0,1216)+24;de.style.width=ow;w=Math.min(w,2400);` +
+    `var h=Math.max(1750,Math.round(w*1.4));var s=d.getElementById('vin-pagesize');` +
+    `if(!s){s=d.createElement('style');s.id='vin-pagesize';de.appendChild(s)}` +
+    `s.textContent='@page{size:'+w+'px '+h+'px;margin:12px}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}'}catch(e){}}` +
+    `window.addEventListener('beforeprint',fit);` +
+    (unhandled.length
+      ? `var pm=${JSON.stringify(unhandled)};window.addEventListener('message',function(e){if(e&&pm.indexOf(e.data)>=0){fit();try{window.focus()}catch(_){}try{window.print()}catch(_){}}});`
+      : ``) +
+    `if(/[?&]pdf=1/.test(location.search)){var n=0,t=setInterval(function(){fit();if(++n>7)clearInterval(t)},700);` +
+    `if(d.readyState==='complete')fit();else window.addEventListener('load',fit)}})()</script>`;
+  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, fit + "</body>");
+  return html + fit;
+}
+
 function injectReportChrome(html) {
   if (!html || typeof html !== "string") return html;
 
   // Already chromed — by this site (avr-report-fix) OR the sibling site (CFC bakes
   // ccf-report-fix / data-ccf-chrome into HTML we may read from the SHARED
   // report_cache/vin_queries tables). Skip so we don't double-apply the strips,
-  // nav guard, and floating download button on a cross-site cache hit.
-  if (/avr-report-fix|ccf-report-fix|data-ccf-chrome/.test(html)) return html;
+  // nav guard, and floating download button on a cross-site cache hit — but still
+  // add the print-fit script (it has its own guard and is chrome-agnostic).
+  if (/avr-report-fix|ccf-report-fix|data-ccf-chrome/.test(html)) return addPrintFitScript(html);
 
   let out = html;
 
@@ -932,7 +970,7 @@ function injectReportChrome(html) {
   if (/<\/body>/i.test(out)) out = out.replace(/<\/body>/i, dlBar + "</body>");
   else out += dlBar;
 
-  return out;
+  return addPrintFitScript(out);
 }
 
 /* ================================================================
@@ -1387,7 +1425,7 @@ async function renderReportPdf(token) {
   try {
     const r = await axios.post(
       `https://api.cloudflare.com/client/v4/accounts/${acct}/browser-rendering/pdf`,
-      { url: `${SITE_URL}/view/${token}?pdf=1`, gotoOptions: { waitUntil: "networkidle0", timeout: 30000 }, viewport: { width: 1100, height: 1500, deviceScaleFactor: 2 }, emulateMediaType: "screen", pdfOptions: { width: "1140px", height: "1760px", printBackground: true } },
+      { url: `${SITE_URL}/view/${token}?pdf=1`, gotoOptions: { waitUntil: "networkidle0", timeout: 30000 }, viewport: { width: 1100, height: 1500, deviceScaleFactor: 2 }, emulateMediaType: "screen", pdfOptions: { width: "1140px", height: "1760px", printBackground: true, preferCSSPageSize: true } },
       { headers: { Authorization: `Bearer ${cfTok}` }, responseType: "arraybuffer", timeout: 45000 }
     );
     const buf = Buffer.from(r.data);
