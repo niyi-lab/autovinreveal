@@ -258,6 +258,24 @@ if (SMTP_USER && SMTP_PASS) {
 ================================================================ */
 const CFC_OWNER_EMAIL = process.env.CFC_OWNER_EMAIL || "";
 const SITE_ID = "avr"; // distinguishes this site's chats in the shared DB
+
+/* Owner alert for failed paid deliveries — fire-and-forget email to the owner.
+   Throttled per key (30 min) so a provider outage doesn't flood the inbox; the
+   one-time "stuck purchase" alerts bypass throttling naturally via unique keys. */
+const ownerAlertLast = new Map();
+function notifyOwner(key, subject, text) {
+  try {
+    const to = CFC_OWNER_EMAIL || SMTP_USER;
+    if (!mailer || !to) return;
+    const now = Date.now(), last = ownerAlertLast.get(key) || 0;
+    if (now - last < 30 * 60 * 1000) return;
+    if (ownerAlertLast.size > 500) ownerAlertLast.clear();
+    ownerAlertLast.set(key, now);
+    mailer.sendMail({ from: SMTP_FROM, to, subject, text })
+      .then(() => console.log(`[ownerAlert] sent: ${subject}`))
+      .catch((e) => console.warn("[ownerAlert] send failed:", e.message));
+  } catch (_) {}
+}
 const CFC_CREDITS_KEY = "cfc_credits_remaining";
 
 
@@ -1157,11 +1175,14 @@ async function resolvePendingCharge(chargeId) {
   await supabaseService.from("pending_charges").delete().eq("id", chargeId);
 }
 
-async function refundAndResolve(chargeId, userId, sessionId) {
+async function refundAndResolve(chargeId, userId, sessionId, reason = "") {
   try {
     if (userId) {
       await addCreditsAtomic(userId, 1);
       console.log(`[Refund] +1 credit to user ${userId} for charge ${chargeId}`);
+      notifyOwner(`refund:${userId}`,
+        `AutoVINReveal: report FAILED — credit auto-refunded`,
+        `A report delivery failed; the customer's credit was AUTO-REFUNDED.\n\nUser: ${userId}\nCharge: ${chargeId}${reason ? `\nReason: ${reason}` : ""}\n\nIf this keeps happening check provider credits / the whitelisted outbound IP.`);
     } else if (sessionId) {
       if (sessionId.startsWith("cs_")) {
         try {
@@ -1170,9 +1191,15 @@ async function refundAndResolve(chargeId, userId, sessionId) {
           if (session.payment_intent) {
             await sStripe.refunds.create({ payment_intent: session.payment_intent, reason: "requested_by_customer" });
             console.log(`[Refund] Stripe refund issued for session ${sessionId}`);
+            notifyOwner(`refund:${sessionId}`,
+              `AutoVINReveal: report FAILED — Stripe payment auto-refunded`,
+              `A guest report delivery failed; their Stripe payment was AUTO-REFUNDED.\n\nSession: ${sessionId}${reason ? `\nReason: ${reason}` : ""}`);
           }
         } catch (stripeErr) {
           console.error(`[Refund] FATAL: Stripe refund failed for ${sessionId}:`, stripeErr.message);
+          notifyOwner(`refundfail:${sessionId}`,
+            `AutoVINReveal: URGENT — auto-refund FAILED, refund manually`,
+            `A guest report delivery failed AND the automatic Stripe refund also failed.\nRefund this payment manually in the Stripe dashboard.\n\nSession: ${sessionId}\nRefund error: ${stripeErr.message}${reason ? `\nOriginal failure: ${reason}` : ""}`);
         }
       }
       await unmarkSessionConsumed(sessionId);
@@ -1196,7 +1223,8 @@ async function reconcileStalePendingCharges() {
     console.log(`[Reconcile] Found ${data.length} stale charge(s) — refunding...`);
     for (const charge of data) {
       console.log(`[Reconcile] Refunding charge ${charge.id} for VIN ${charge.vin}`);
-      await refundAndResolve(charge.id, charge.user_id, charge.session_id);
+      await refundAndResolve(charge.id, charge.user_id, charge.session_id,
+        `stale pending charge (crash recovery) for VIN ${charge.vin || "unknown"}`);
     }
   } catch (e) {
     console.error("[Reconcile] Startup reconciliation failed:", e.message);
@@ -1578,6 +1606,11 @@ async function fulfillWhopRow(row) {
   } catch (e) {
     await supabaseService.from("whop_checkouts").update({ status: "paid" }).eq("session_id", row.session_id);
     console.warn(`[Whop] reconcile fetch failed (${row.session_id}):`, e.message);
+    if (row.vin) notifyOwner(`whop-fail:${row.vin}`,
+      `AutoVINReveal: PAID Whop report fetch failed — ${row.vin}`,
+      `A customer PAID via Whop but the provider fetch failed (background retry). Auto-retry continues; ` +
+      `you'll get a one-time STUCK alert if it still hasn't delivered after 45 min.\n\n` +
+      `VIN: ${row.vin} (${row.type})\nBuyer: ${row.buyer_email || "unknown"}\nWhop session: ${row.session_id}\nError: ${e.message}`);
   }
 }
 
@@ -1623,6 +1656,29 @@ async function reconcileWhopCheckouts() {
         row.status = "paid"; row.buyer_email = email;
         await fulfillWhopRow(row);
       }
+    }
+
+    // C) Paid singles STILL undelivered after 45 min — retries haven't produced a
+    // report. Alert the owner ONCE per row (owner_alerted_at column is the guard,
+    // claimed atomically) with everything needed to refund in the Whop dashboard.
+    const stuckCutoff = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+    const { data: stuckRows } = await supabaseService.from("whop_checkouts")
+      .select("*").eq("site", SITE).in("status", ["paid", "fulfilling"])
+      .not("vin", "is", null).is("delivered_token", null).is("owner_alerted_at", null)
+      .lt("created_at", stuckCutoff).limit(10);
+    for (const row of (stuckRows || [])) {
+      const { data: marked } = await supabaseService.from("whop_checkouts")
+        .update({ owner_alerted_at: new Date().toISOString() })
+        .eq("session_id", row.session_id).is("owner_alerted_at", null).select().maybeSingle();
+      if (!marked) continue;   // another instance already alerted for this row
+      notifyOwner(`whop-stuck:${row.session_id}`,
+        `AutoVINReveal: PAID report STUCK 45+ min — ${row.vin} — buyer has NO report`,
+        `A paid single-report purchase has gone 45+ minutes with no successful delivery.\n\n` +
+        `VIN: ${row.vin} (${row.type})\nBuyer email: ${row.buyer_email || "unknown"}\n` +
+        `Whop session: ${row.session_id}\nPlan: ${row.plan_id}\nPaid at: ${row.created_at}\n\n` +
+        `The system keeps retrying every 5-10 min and will auto-deliver + email the buyer the moment the provider recovers.\n` +
+        `If it doesn't recover soon: refund the payment in the Whop dashboard (Payments — search the buyer email), ` +
+        `and consider emailing the buyer${row.buyer_email ? ` (${row.buyer_email})` : ""} an apology.`);
     }
   } catch (e) { console.warn("[Whop] reconcile error:", e.message); }
 }
@@ -1987,6 +2043,11 @@ app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
     } catch (e) {
       await supabaseService.from("whop_checkouts").update({ status: "paid" }).eq("session_id", row.session_id);  // revert so a retry works
       console.error("[Whop] claim fetch failed:", e.message);
+      notifyOwner(`whop-fail:${row.vin}`,
+        `AutoVINReveal: PAID Whop report fetch failed — ${row.vin}`,
+        `A customer PAID via Whop but the provider fetch failed. Auto-retry continues every 5-10 min; ` +
+        `you'll get a separate one-time STUCK alert if it still hasn't delivered after 45 min.\n\n` +
+        `VIN: ${row.vin} (${row.type})\nBuyer: ${row.buyer_email || "unknown"}\nWhop session: ${row.session_id}\nError: ${e.message}`);
       return res.status(502).json({ error: "provider_error" });
     }
   } catch (e) {
@@ -2730,7 +2791,8 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
       } catch (e) {
         console.error(`[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`);
         if (pendingChargeId) {
-          await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
+          await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession,
+            `provider fetch failed for VIN ${targetVin} (${type}): ${e.message}`);
           pendingChargeId = null;
         }
         const msg = String(e.message || "");
@@ -2828,7 +2890,8 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
 
     if (pendingChargeId) {
       console.error(`[Delivery Failed] User: ${currentUser?.id || "guest"} | Bad format. Refunding.`);
-      await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession);
+      await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession,
+        `provider returned unusable report format for VIN ${targetVin} (${type})`);
       pendingChargeId = null;
       return res.status(422).json({ error: "provider_error", message: "Report format error. You have been refunded." });
     }
@@ -2837,7 +2900,8 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
 
   } catch (err) {
     if (pendingChargeId) {
-      try { await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession); }
+      try { await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession,
+        `unhandled server error for VIN ${targetVin}: ${err.message}`); }
       catch (refundErr) { console.error("[Critical] Outer-catch refund failed:", refundErr.message); }
     }
     console.error("Critical server error:", err);
