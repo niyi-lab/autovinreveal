@@ -765,8 +765,10 @@ function decodeReportBase64(rawB64) {
 // print (Download button, avr-print/ccf-print postMessage, in-frame Ctrl+P, or
 // the ?pdf=1 Cloudflare render) and sizes @page to match, so reports wider than
 // the static 1240px fallback (e.g. extra owner columns) never clip on the right.
-// Width is measured by temporarily narrowing <html> to 800px so full-width
-// wrappers collapse and only the report's intrinsic width remains. Injected with
+// Width is measured with <html> temporarily narrowed to 800px; viewport-sized
+// boxes (100vw wrappers, which don't shrink with <html> and would inflate the
+// page with dead whitespace) are ignored and only substantial content blocks
+// (>=600px, e.g. the report tables) set the width. Injected with
 // its OWN idempotency guard, separately from the main chrome, so reports cached
 // with an older chrome (or baked by the sibling CFC site — shared cache) still
 // gain it when re-served. The dynamic <style> is appended AFTER <body> (last in
@@ -784,7 +786,13 @@ function addPrintFitScript(html) {
   const fit =
     `<script id="vin-fitpage">(function(){if(window.__vinFitPage)return;window.__vinFitPage=1;var d=document;` +
     `function fit(){try{var de=d.documentElement,ow=de.style.width;de.style.width='800px';` +
-    `var w=Math.max(de.scrollWidth,d.body?d.body.scrollWidth:0,1216)+24;de.style.width=ow;w=Math.min(w,2400);` +
+    `var vw=window.innerWidth||0,sx=window.pageXOffset||de.scrollLeft||0;` +
+    `var sw=Math.max(de.scrollWidth,d.body?d.body.scrollWidth:0),w=1216;` +
+    `if(vw&&sw>=vw-2){var els=d.body?d.body.querySelectorAll('*'):[];` +
+    `for(var i=0;i<els.length;i++){var el=els[i],r=el.getBoundingClientRect();` +
+    `if(r.width>=600&&Math.abs(r.width-vw)>2&&!(el.closest&&el.closest('#ccf-dlbar,#avr-dlbar'))){var rt=r.right+sx;if(rt>w&&rt<2400)w=Math.ceil(rt)}}}` +
+    `else if(sw>w)w=sw;` +
+    `de.style.width=ow;w=Math.min(w+24,2400);` +
     `var h=Math.max(1750,Math.round(w*1.4));var s=d.getElementById('vin-pagesize');` +
     `if(!s){s=d.createElement('style');s.id='vin-pagesize';de.appendChild(s)}` +
     `s.textContent='@page{size:'+w+'px '+h+'px;margin:12px}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}'}catch(e){}}` +
