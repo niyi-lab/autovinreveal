@@ -1424,11 +1424,19 @@ const WHOP_PLAN_CREDITS = {                 // plan_id -> credits (fallback if n
 /* ================================================================
    PayGate.to — alternative checkout (crypto/card -> USDC on Polygon).
    Reuses the ENTIRE existing fulfilment pipeline: a PayGate checkout writes a
-   normal whop_checkouts row (session id "pg_..."), and the PayGate callback
+   normal whop_checkouts row (session id "pg_..."), and the PayGate IPN callback
    marks it paid and calls fulfillWhopRow() — the same function the Whop
    reconcile job uses. No change to report fetch / claim / email.
-   VERIFY the two hostnames against PayGate's Postman doc before going live;
-   only these constants need editing if their paths differ.
+
+   API shape confirmed from PayGate's Postman collection:
+     1) GET wallet.php?address=<wallet>&callback=<IPN_URL>  -> { address_in, ipn_token }
+        The callback URL (with OUR query params) is BOUND here; PayGate echoes all
+        of our original params back on the IPN. So we wrap PER ORDER (no caching)
+        and embed session_id+secret in the callback.
+     2) GET process-payment.php?address=<address_in>&amount=&provider=&email=&currency=
+        -> redirects buyer to the hosted pay page. (This is the URL we send them to.)
+     3) IPN: PayGate GETs our callback with value_coin, coin, txid_in, address_in
+        + our echoed session_id & secret.
    NOTE: one-time plans only (single/pack5/pack20). Recurring subs are NOT
    supported here — PayGate is one-shot crypto, it can't rebill monthly.
 ================================================================ */
@@ -1436,15 +1444,18 @@ const PAYGATE_WALLET       = process.env.PAYGATE_WALLET || "";
 const PAYGATE_WRAP_URL     = process.env.PAYGATE_WRAP_URL     || "https://api.paygate.to/control/wallet.php";
 const PAYGATE_CHECKOUT_URL = process.env.PAYGATE_CHECKOUT_URL || "https://checkout.paygate.to/process-payment.php";
 const PAYGATE_CALLBACK_SECRET = process.env.PAYGATE_CALLBACK_SECRET || "";   // set a fixed value in prod
-let _paygateAddressIn = null;
-async function paygateAddressIn() {
-  if (_paygateAddressIn) return _paygateAddressIn;
+
+// Wrap our wallet with a per-order callback. Returns { addressIn, ipnToken }.
+// addressIn comes back already percent-encoded by PayGate — pass it through verbatim.
+async function paygateWrap(callbackUrl) {
   if (!PAYGATE_WALLET) throw new Error("PAYGATE_WALLET not set");
-  const r = await fetch(`${PAYGATE_WRAP_URL}?address=${encodeURIComponent(PAYGATE_WALLET)}`);
+  const url = `${PAYGATE_WRAP_URL}?address=${encodeURIComponent(PAYGATE_WALLET)}`
+            + `&callback=${encodeURIComponent(callbackUrl)}`;
+  const r = await fetch(url);
   const j = await r.json().catch(() => ({}));
-  const addr = j.address_in || j.addressIn || (j.data && j.data.address_in);
-  if (!addr) throw new Error("paygate wallet-wrap failed: " + JSON.stringify(j).slice(0, 200));
-  _paygateAddressIn = addr; return addr;
+  const addressIn = j.address_in || (j.data && j.data.address_in);
+  if (!addressIn) throw new Error("paygate wallet-wrap failed: " + JSON.stringify(j).slice(0, 200));
+  return { addressIn, ipnToken: j.ipn_token || null };
 }
 
 // Guest single report (no account): fetch the report and email a view-link to the
@@ -1987,15 +1998,21 @@ app.post("/api/paygate/checkout", async (req, res) => {
     });
     if (insErr) { console.error("[PayGate] insert failed:", insErr.message); return res.status(502).json({ error: "checkout_failed" }); }
 
-    const addressIn = await paygateAddressIn();
-    // Callback carries our session id + shared secret so we can trust + bind it.
+    // The callback (with our session id + secret) is BOUND into the wallet wrap;
+    // PayGate echoes these params back on the IPN. Wrap per-order (no caching).
     const callback = `${SITE_URL}/api/paygate/callback`
       + `?session_id=${encodeURIComponent(sessionId)}&secret=${encodeURIComponent(PAYGATE_CALLBACK_SECRET)}`;
-    const params = new URLSearchParams({
-      address: addressIn, amount: Number(cfg.price).toFixed(2), currency: "USD",
-      provider: "moonpay", email: buyerEmail || "", callback,
-    });
-    const url = `${PAYGATE_CHECKOUT_URL}?${params.toString()}`;
+    const { addressIn, ipnToken } = await paygateWrap(callback);
+    if (ipnToken) await supabaseService.from("whop_checkouts").update({ pg_ipn_token: ipnToken }).eq("session_id", sessionId);
+
+    // address_in is already percent-encoded by PayGate — do NOT re-encode it.
+    // Build the process-payment URL by hand so URLSearchParams can't double-encode it.
+    const q = `address=${addressIn}`
+      + `&amount=${encodeURIComponent(Number(cfg.price).toFixed(2))}`
+      + `&provider=moonpay`
+      + `&email=${encodeURIComponent(buyerEmail || "")}`
+      + `&currency=USD`;
+    const url = `${PAYGATE_CHECKOUT_URL}?${q}`;
     return res.json({ url, claim: claimToken });
   } catch (e) {
     console.error("[PayGate] /api/paygate/checkout error:", e.message);
@@ -2018,6 +2035,16 @@ app.get("/api/paygate/callback", async (req, res) => {
       .select("*").eq("session_id", sessionId).eq("site", "avr").maybeSingle();
     if (!row) return res.status(404).send("unknown");
     if (row.status === "fulfilled") return res.status(200).send("ok");   // idempotent
+
+    // Amount sanity-check: PayGate sends value_coin (USDC paid). Require >= ~98% of
+    // the expected price (small tolerance for provider fee/rounding). This blocks a
+    // spoofed/underpaid callback from unlocking a report even if the secret leaked.
+    const paidCoin = parseFloat(req.query.value_coin || "0");
+    const expected = parseFloat(row.expected_price || "0");
+    if (expected > 0 && paidCoin > 0 && paidCoin < expected * 0.98) {
+      console.warn(`[PayGate] underpaid callback ignored: session ${sessionId} paid ${paidCoin} < expected ${expected}`);
+      return res.status(200).send("ok");   // ack so PayGate stops retrying; do NOT fulfil
+    }
 
     // pending -> paid (only if still pending), then fulfil through the shared path.
     await supabaseService.from("whop_checkouts")
