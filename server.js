@@ -1421,6 +1421,32 @@ const WHOP_PLAN_CREDITS = {                 // plan_id -> credits (fallback if n
   "plan_0f5gjPm3KD8YO": CREDITS_PER_20PACK,  // 20 Report Pack $58
 };
 
+/* ================================================================
+   PayGate.to — alternative checkout (crypto/card -> USDC on Polygon).
+   Reuses the ENTIRE existing fulfilment pipeline: a PayGate checkout writes a
+   normal whop_checkouts row (session id "pg_..."), and the PayGate callback
+   marks it paid and calls fulfillWhopRow() — the same function the Whop
+   reconcile job uses. No change to report fetch / claim / email.
+   VERIFY the two hostnames against PayGate's Postman doc before going live;
+   only these constants need editing if their paths differ.
+   NOTE: one-time plans only (single/pack5/pack20). Recurring subs are NOT
+   supported here — PayGate is one-shot crypto, it can't rebill monthly.
+================================================================ */
+const PAYGATE_WALLET       = process.env.PAYGATE_WALLET || "";
+const PAYGATE_WRAP_URL     = process.env.PAYGATE_WRAP_URL     || "https://api.paygate.to/control/wallet.php";
+const PAYGATE_CHECKOUT_URL = process.env.PAYGATE_CHECKOUT_URL || "https://checkout.paygate.to/process-payment.php";
+const PAYGATE_CALLBACK_SECRET = process.env.PAYGATE_CALLBACK_SECRET || "";   // set a fixed value in prod
+let _paygateAddressIn = null;
+async function paygateAddressIn() {
+  if (_paygateAddressIn) return _paygateAddressIn;
+  if (!PAYGATE_WALLET) throw new Error("PAYGATE_WALLET not set");
+  const r = await fetch(`${PAYGATE_WRAP_URL}?address=${encodeURIComponent(PAYGATE_WALLET)}`);
+  const j = await r.json().catch(() => ({}));
+  const addr = j.address_in || j.addressIn || (j.data && j.data.address_in);
+  if (!addr) throw new Error("paygate wallet-wrap failed: " + JSON.stringify(j).slice(0, 200));
+  _paygateAddressIn = addr; return addr;
+}
+
 // Guest single report (no account): fetch the report and email a view-link to the
 // buyer. Lets guests buy one report on Whop without logging in.
 async function deliverGuestReportByEmail(vin, type, to) {
@@ -1931,6 +1957,77 @@ app.post("/api/whop/checkout", async (req, res) => {
   } catch (e) {
     console.error("[Whop] /api/whop/checkout error:", e.message);
     return res.status(500).json({ error: "server_error" });
+  }
+});
+
+// ── PayGate checkout: same row shape as Whop, but redirect to PayGate's hosted
+// pay page. Fulfilment happens in the callback below via fulfillWhopRow(). ──
+app.post("/api/paygate/checkout", async (req, res) => {
+  try {
+    if (!PAYGATE_WALLET) return res.status(500).json({ error: "paygate_not_configured" });
+    const { key, vin, type } = req.body || {};
+    const cfg = WHOP_PLANS[key];
+    if (!cfg) return res.status(400).json({ error: "invalid_plan" });
+    if (cfg.recurring) return res.status(400).json({ error: "subscriptions_not_supported" });  // PayGate is one-shot
+    const { user } = await getUser(req).catch(() => ({ user: null }));
+    const userId = (user && user.id) || (req.body && req.body.user_id) || null;
+    const vinUp  = vin ? String(vin).toUpperCase() : null;
+    const typeL  = (type || "carfax").toLowerCase();
+    const flow   = userId ? "user" : "guest";
+    // Same entitlement rules as Whop: packs require login; guest may only buy a single+VIN.
+    if (!userId && !(key === "single" && vinUp)) return res.status(401).json({ error: "login_required" });
+
+    const sessionId  = "pg_" + crypto.randomUUID();
+    const claimToken = crypto.randomBytes(32).toString("hex");
+    const buyerEmail = (user && user.email) || (req.body && req.body.email) || null;
+    const { error: insErr } = await supabaseService.from("whop_checkouts").insert({
+      session_id: sessionId, claim_token: claimToken, vin: vinUp, type: typeL,
+      user_id: userId, flow, plan_id: cfg.plan, credits: cfg.credits, expected_price: cfg.price,
+      status: "pending", site: "avr", buyer_email: buyerEmail,
+    });
+    if (insErr) { console.error("[PayGate] insert failed:", insErr.message); return res.status(502).json({ error: "checkout_failed" }); }
+
+    const addressIn = await paygateAddressIn();
+    // Callback carries our session id + shared secret so we can trust + bind it.
+    const callback = `${SITE_URL}/api/paygate/callback`
+      + `?session_id=${encodeURIComponent(sessionId)}&secret=${encodeURIComponent(PAYGATE_CALLBACK_SECRET)}`;
+    const params = new URLSearchParams({
+      address: addressIn, amount: Number(cfg.price).toFixed(2), currency: "USD",
+      provider: "moonpay", email: buyerEmail || "", callback,
+    });
+    const url = `${PAYGATE_CHECKOUT_URL}?${params.toString()}`;
+    return res.json({ url, claim: claimToken });
+  } catch (e) {
+    console.error("[PayGate] /api/paygate/checkout error:", e.message);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+// PayGate server-to-server success callback. Marks the row paid, then fulfils via
+// the shared pipeline (report fetch + email / credits). Idempotent + secret-gated.
+app.get("/api/paygate/callback", async (req, res) => {
+  try {
+    const sessionId = String(req.query.session_id || "");
+    const secret    = String(req.query.secret || "");
+    const want      = Buffer.from(PAYGATE_CALLBACK_SECRET);
+    const got       = Buffer.from(secret);
+    const secretOk  = PAYGATE_CALLBACK_SECRET && want.length === got.length && crypto.timingSafeEqual(want, got);
+    if (!sessionId.startsWith("pg_") || !secretOk) return res.status(403).send("forbidden");
+
+    const { data: row } = await supabaseService.from("whop_checkouts")
+      .select("*").eq("session_id", sessionId).eq("site", "avr").maybeSingle();
+    if (!row) return res.status(404).send("unknown");
+    if (row.status === "fulfilled") return res.status(200).send("ok");   // idempotent
+
+    // pending -> paid (only if still pending), then fulfil through the shared path.
+    await supabaseService.from("whop_checkouts")
+      .update({ status: "paid" }).eq("session_id", sessionId).eq("status", "pending");
+    const { data: fresh } = await supabaseService.from("whop_checkouts").select("*").eq("session_id", sessionId).maybeSingle();
+    await fulfillWhopRow(fresh || row);
+    return res.status(200).send("ok");
+  } catch (e) {
+    console.error("[PayGate] /api/paygate/callback error:", e.message);
+    return res.status(500).send("error");   // non-200 => PayGate retries
   }
 });
 

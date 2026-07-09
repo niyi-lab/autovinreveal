@@ -1252,14 +1252,20 @@ async function startWhopPurchase({ user, key, pendingReport = null }) {
     showToast('Enter a VIN first — a single report is for one specific vehicle.', 'error'); return;
   }
   if (pendingReport?.vin) { try { localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport)); } catch {} }
+  // PayGate handles one-time report plans (single/pack5/pack20); recurring subs
+  // stay on Whop (PayGate can't rebill). The claim/return flow is identical —
+  // both store 'whopClaim' and fulfil via the same server pipeline.
+  const isSub    = /^sub_/.test(key);
+  const endpoint = isSub ? '/api/whop/checkout' : '/api/paygate/checkout';
   try {
     await ensureBackendReady();
-    const r = await apiFetch('/api/whop/checkout', {
+    const r = await apiFetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         key,
         user_id: user?.id || null,
+        email: user?.email || null,
         vin:  pendingReport?.vin  || null,
         type: pendingReport?.type || 'carfax',
       }),
