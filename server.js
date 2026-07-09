@@ -1444,6 +1444,10 @@ const PAYGATE_WALLET       = process.env.PAYGATE_WALLET || "";
 const PAYGATE_WRAP_URL     = process.env.PAYGATE_WRAP_URL     || "https://api.paygate.to/control/wallet.php";
 const PAYGATE_CHECKOUT_URL = process.env.PAYGATE_CHECKOUT_URL || "https://checkout.paygate.to/process-payment.php";
 const PAYGATE_CALLBACK_SECRET = process.env.PAYGATE_CALLBACK_SECRET || "";   // set a fixed value in prod
+// Provider = the card onramp the buyer uses. "stripe" gives a plain USD card
+// checkout (buyer never sees "buy ETH"); "moonpay" opened a crypto-asset picker
+// that defaulted to ETH and confused buyers. Payout is USDC-Polygon regardless.
+const PAYGATE_PROVIDER     = process.env.PAYGATE_PROVIDER || "stripe";
 
 // Wrap our wallet with a per-order callback. Returns { addressIn, ipnToken }.
 // addressIn comes back already percent-encoded by PayGate — pass it through verbatim.
@@ -2009,7 +2013,7 @@ app.post("/api/paygate/checkout", async (req, res) => {
     // Build the process-payment URL by hand so URLSearchParams can't double-encode it.
     const q = `address=${addressIn}`
       + `&amount=${encodeURIComponent(Number(cfg.price).toFixed(2))}`
-      + `&provider=moonpay`
+      + `&provider=${encodeURIComponent(PAYGATE_PROVIDER)}`
       + `&email=${encodeURIComponent(buyerEmail || "")}`
       + `&currency=USD`;
     const url = `${PAYGATE_CHECKOUT_URL}?${q}`;
