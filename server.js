@@ -179,10 +179,26 @@ const stripeDefault = (!IS_PROD && STRIPE_TEST_SECRET_KEY)
   ? new Stripe(STRIPE_TEST_SECRET_KEY, { apiVersion: "2024-06-20" })
   : stripeLive;
 
-// Use test price IDs in dev if provided, otherwise fall back to live IDs
+// Use test price IDs in dev if provided, otherwise fall back to live IDs.
+// NOTE: the khlinautomotive Stripe account has no pre-created Prices — checkout
+// now builds line items with inline price_data (see ONE_TIME_PRICES below). These
+// env IDs are retained only so any legacy Price-ID line item still resolves in the
+// webhook; credits are authoritative from session.metadata.credits.
 const PRICE_SINGLE = (!IS_PROD && process.env.STRIPE_TEST_PRICE_SINGLE) ? process.env.STRIPE_TEST_PRICE_SINGLE : process.env.STRIPE_PRICE_SINGLE;
 const PRICE_5PACK  = (!IS_PROD && process.env.STRIPE_TEST_PRICE_5PACK)  ? process.env.STRIPE_TEST_PRICE_5PACK  : process.env.STRIPE_PRICE_5PACK;
 const PRICE_20PACK = (!IS_PROD && process.env.STRIPE_TEST_PRICE_20PACK) ? process.env.STRIPE_TEST_PRICE_20PACK : process.env.STRIPE_PRICE_20PACK;
+
+const CREDITS_PER_SINGLE = Number(process.env.CREDITS_PER_SINGLE || "1");
+const CREDITS_PER_5PACK  = Number(process.env.CREDITS_PER_5PACK  || "5");
+const CREDITS_PER_20PACK = Number(process.env.CREDITS_PER_20PACK || "20");
+
+// Inline price_data for one-time purchases — amount in cents, USD. Mirrors the
+// historical amounts ($5.99 / $20 / $58) so no dashboard Products are required.
+const ONE_TIME_PRICES = {
+  single: { unit_amount: 599,  credits: CREDITS_PER_SINGLE, name: "AutoVINReveal – Vehicle History Report" },
+  five:   { unit_amount: 2000, credits: CREDITS_PER_5PACK,  name: "AutoVINReveal – 5 Report Bundle" },
+  twenty: { unit_amount: 5800, credits: CREDITS_PER_20PACK, name: "AutoVINReveal – 20 Report Bundle" },
+};
 
 // Subscription price IDs
 const SUB_STARTER  = process.env.STRIPE_PRICE_SUB_STARTER;  // $30/mo  20 reports
@@ -194,10 +210,6 @@ const SUB_CREDITS = {
   [SUB_PRO]:      Number(process.env.SUB_CREDITS_PRO      || 100),
   [SUB_PREMIUM]:  Number(process.env.SUB_CREDITS_PREMIUM  || 200),
 };
-
-const CREDITS_PER_SINGLE = Number(process.env.CREDITS_PER_SINGLE || "1");
-const CREDITS_PER_5PACK  = Number(process.env.CREDITS_PER_5PACK  || "5");
-const CREDITS_PER_20PACK = Number(process.env.CREDITS_PER_20PACK || "20");
 
 function stripeForId(id) {
   const isTest = typeof id === "string" && id.startsWith("cs_test_");
@@ -1311,17 +1323,20 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
         return res.status(200).json({ ok: true });
       }
 
-      // One-time purchase
-      const sStripe   = stripeForId(session.id);
-      const lineItems = await sStripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
-
-      let creditsToAdd = 0;
-      for (const li of lineItems.data) {
-        const pid = li.price?.id;
-        const qty = li.quantity || 1;
-        if      (pid === PRICE_20PACK) creditsToAdd += qty * CREDITS_PER_20PACK;
-        else if (pid === PRICE_5PACK)  creditsToAdd += qty * CREDITS_PER_5PACK;
-        else if (pid === PRICE_SINGLE) creditsToAdd += qty * CREDITS_PER_SINGLE;
+      // One-time purchase. Credits come from session.metadata.credits (set at
+      // checkout with inline price_data). Fall back to matching legacy Price IDs
+      // for any session created before the inline-price_data switch.
+      let creditsToAdd = Number(session.metadata?.credits || 0);
+      if (!creditsToAdd) {
+        const sStripe   = stripeForId(session.id);
+        const lineItems = await sStripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
+        for (const li of lineItems.data) {
+          const pid = li.price?.id;
+          const qty = li.quantity || 1;
+          if      (pid === PRICE_20PACK) creditsToAdd += qty * CREDITS_PER_20PACK;
+          else if (pid === PRICE_5PACK)  creditsToAdd += qty * CREDITS_PER_5PACK;
+          else if (pid === PRICE_SINGLE) creditsToAdd += qty * CREDITS_PER_SINGLE;
+        }
       }
 
       const userId = session.metadata?.user_id || session.client_reference_id || null;
@@ -2361,21 +2376,24 @@ app.post("/api/create-checkout-session", async (req, res) => {
       return res.status(422).json({ error: "vin_required", message: "Please enter a VIN — single reports are for one specific vehicle." });
     }
 
-    let priceLive = PRICE_SINGLE;
-    let intent    = vin ? "buy_report" : "buy_credit_single";
-    if (isTwentyPack)    { priceLive = PRICE_20PACK; intent = "buy_credits_20pack"; }
-    else if (isFivePack) { priceLive = PRICE_5PACK;  intent = "buy_credits_5pack"; }
-
-    if (!priceLive) {
-      console.error(`[Stripe] Price ID missing — price_id:${price_id} PRICE_SINGLE:${PRICE_SINGLE} PRICE_5PACK:${PRICE_5PACK} PRICE_20PACK:${PRICE_20PACK}`);
-      return res.status(500).json({ error: "price_not_configured", message: "Payment configuration error. Please contact support." });
-    }
+    // Inline price_data (khlinautomotive account has no pre-created Prices).
+    let planKey = "single";
+    let intent  = vin ? "buy_report" : "buy_credit_single";
+    if (isTwentyPack)    { planKey = "twenty"; intent = "buy_credits_20pack"; }
+    else if (isFivePack) { planKey = "five";   intent = "buy_credits_5pack"; }
+    const plan = ONE_TIME_PRICES[planKey];
 
     const session = await stripeDefault.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
-      currency: "usd",
-      line_items: [{ price: priceLive, quantity: 1 }],
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: "usd",
+          unit_amount: plan.unit_amount,
+          product_data: { name: vin ? `AutoVINReveal – VIN ${vin}` : plan.name },
+        },
+      }],
       payment_intent_data: {
         description: vin
           ? `AutoVINReveal – VIN: ${vin}`
@@ -2391,6 +2409,10 @@ app.post("/api/create-checkout-session", async (req, res) => {
         ...(userId      ? { user_id: userId } : {}),
         ...(vin         ? { vin }              : {}),
         ...(report_type ? { report_type }      : {}),
+        // Credits are authoritative here — the webhook grants meta.credits directly
+        // (inline price_data has no stable Price ID to match against).
+        credits: String(plan.credits),
+        plan_key: planKey,
         intent,
         // Fingerprint every checkout so guest investigators are traceable
         client_ip: req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || "",
