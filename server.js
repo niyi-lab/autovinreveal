@@ -195,9 +195,9 @@ const CREDITS_PER_20PACK = Number(process.env.CREDITS_PER_20PACK || "20");
 // Inline price_data for one-time purchases — amount in cents, USD. Mirrors the
 // historical amounts ($5.99 / $20 / $58) so no dashboard Products are required.
 const ONE_TIME_PRICES = {
-  single: { unit_amount: 599,  credits: CREDITS_PER_SINGLE, name: "AVR – Single Report" },
-  five:   { unit_amount: 2000, credits: CREDITS_PER_5PACK,  name: "AVR – 5 Report Bundle" },
-  twenty: { unit_amount: 5800, credits: CREDITS_PER_20PACK, name: "AVR – 20 Report Bundle" },
+  single: { unit_amount: 599,  credits: CREDITS_PER_SINGLE, name: "AVR – Single" },
+  five:   { unit_amount: 2000, credits: CREDITS_PER_5PACK,  name: "AVR – 5 Bundle" },
+  twenty: { unit_amount: 5800, credits: CREDITS_PER_20PACK, name: "AVR – 20 Bundle" },
 };
 
 // Subscription price IDs
@@ -2405,7 +2405,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
         order_id: orderId, vin, report_type: report_type || "carfax", site: "avr",
       }).then(({ error }) => { if (error) console.warn("[order-map] insert failed:", error.message); });
     }
-    const productName = vin ? `AVR – Report (${orderId})` : plan.name;
+    const productName = vin ? `AVR – ${orderId}` : plan.name;
 
     const session = await stripeDefault.checkout.sessions.create({
       mode: "payment",
@@ -2420,10 +2420,10 @@ app.post("/api/create-checkout-session", async (req, res) => {
       }],
       payment_intent_data: {
         description: vin
-          ? `AVR – Report (${orderId})`
-          : isTwentyPack ? "AVR – 20 Report Bundle"
-          : isFivePack ? "AVR – 5 Report Bundle"
-          : "AVR – 1 Report Credit",
+          ? `AVR – ${orderId}`
+          : isTwentyPack ? "AVR – 20 Bundle"
+          : isFivePack ? "AVR – 5 Bundle"
+          : "AVR – 1 Credit",
         metadata: { ...(vin ? { order_id: orderId } : {}) },
       },
       success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ""}`,
