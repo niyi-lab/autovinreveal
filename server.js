@@ -2423,7 +2423,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
           ? `AVR – ${orderId}`
           : isTwentyPack ? "AVR – 20 Bundle"
           : isFivePack ? "AVR – 5 Bundle"
-          : "AVR – 1 Credit",
+          : "AVR – Single",
         metadata: { ...(vin ? { order_id: orderId } : {}) },
       },
       success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ""}`,
