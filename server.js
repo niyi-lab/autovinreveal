@@ -1035,6 +1035,18 @@ async function unmarkSessionConsumed(sessionId) {
   await supabaseService.from("consumed_sessions").delete().eq("session_id", sessionId);
 }
 
+// Resolve the VIN behind a Stripe order id (the VIN is never stored on Stripe —
+// only the opaque order id, mapped here). Returns the uppercased VIN or null.
+async function vinForOrderId(orderId) {
+  if (!orderId) return null;
+  const { data } = await supabaseService
+    .from("stripe_order_vins")
+    .select("vin")
+    .eq("order_id", orderId)
+    .maybeSingle();
+  return (data?.vin || "").toUpperCase() || null;
+}
+
 /* ================================================================
    Share Tokens — DB-backed
 ================================================================ */
@@ -2383,6 +2395,18 @@ app.post("/api/create-checkout-session", async (req, res) => {
     else if (isFivePack) { planKey = "five";   intent = "buy_credits_5pack"; }
     const plan = ONE_TIME_PRICES[planKey];
 
+    // The VIN must NEVER appear on Stripe. Mint a random order id and store the
+    // order_id -> VIN map on our side; Stripe only ever sees the opaque order id.
+    // (Report delivery does not read the VIN back from Stripe — the success URL
+    // carries it client-side and the webhook grants credits from metadata.)
+    const orderId = "AVR-" + crypto.randomBytes(6).toString("hex").toUpperCase();
+    if (vin) {
+      supabaseService.from("stripe_order_vins").insert({
+        order_id: orderId, vin, report_type: report_type || "carfax", site: "avr",
+      }).then(({ error }) => { if (error) console.warn("[order-map] insert failed:", error.message); });
+    }
+    const productName = vin ? `AutoVINReveal Vehicle Report (${orderId})` : plan.name;
+
     const session = await stripeDefault.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -2391,23 +2415,23 @@ app.post("/api/create-checkout-session", async (req, res) => {
         price_data: {
           currency: "usd",
           unit_amount: plan.unit_amount,
-          product_data: { name: vin ? `AutoVINReveal – VIN ${vin}` : plan.name },
+          product_data: { name: productName },
         },
       }],
       payment_intent_data: {
         description: vin
-          ? `AutoVINReveal – VIN: ${vin}`
+          ? `AutoVINReveal Vehicle Report (${orderId})`
           : isTwentyPack ? "AutoVINReveal – 20 Report Bundle"
           : isFivePack ? "AutoVINReveal – 5 Report Bundle"
           : "AutoVINReveal – 1 Report Credit",
-        metadata: { ...(vin ? { vin } : {}) },
+        metadata: { ...(vin ? { order_id: orderId } : {}) },
       },
       success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ""}`,
       cancel_url:  `${SITE_URL}/?checkout=cancel`,
       ...(userId ? { client_reference_id: userId } : {}),
       metadata: {
         ...(userId      ? { user_id: userId } : {}),
-        ...(vin         ? { vin }              : {}),
+        ...(vin         ? { order_id: orderId } : {}),
         ...(report_type ? { report_type }      : {}),
         // Credits are authoritative here — the webhook grants meta.credits directly
         // (inline price_data has no stable Price ID to match against).
@@ -3089,14 +3113,16 @@ app.post("/api/email-report", async (req, res) => {
       if (!owned) return res.status(403).json({ error: "report_not_owned" });
     } else {
       // Guest: authorize via the one-time Stripe checkout receipt. Verify the
-      // session is paid and its metadata.vin matches the requested VIN. This is a
-      // read-only Stripe check (no markSessionConsumed), so guests can resend.
+      // session is paid and the VIN bound to its order id matches the requested
+      // VIN. The VIN is not on Stripe — we resolve it from metadata.order_id via
+      // our order map. Read-only (no markSessionConsumed), so guests can resend.
       if (!oneTimeSession) return res.status(401).json({ error: "unauthorized" });
       try {
         const sStripe = stripeForId(oneTimeSession);
         const s = await sStripe.checkout.sessions.retrieve(oneTimeSession);
         if (s.payment_status !== "paid") return res.status(403).json({ error: "receipt_unpaid" });
-        if ((s.metadata?.vin || "").trim().toUpperCase() !== targetVin) {
+        const boundVin = await vinForOrderId(s.metadata?.order_id);
+        if (!boundVin || boundVin !== targetVin) {
           return res.status(403).json({ error: "receipt_vin_mismatch" });
         }
       } catch {
