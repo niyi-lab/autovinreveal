@@ -830,6 +830,26 @@ function addPrintFitScript(html) {
   return html + fit;
 }
 
+// Set a clean, professional <title> on the report HTML — this becomes the default
+// filename when the buyer saves the report as a PDF (the browser's print engine
+// uses document.title). Format: "2018 Toyota Camry CARFAX (AutoVINReveal)" with a
+// graceful fallback when the vehicle isn't known.
+const REPORT_BRAND = process.env.REPORT_BRAND || "AutoVINReveal";
+function setReportTitle(html, { vehicle = null, vin = null } = {}) {
+  if (!html || typeof html !== "string") return html;
+  const veh = (vehicle || "").replace(/\s+/g, " ").trim();
+  const core = veh ? `${veh} CARFAX` : "Vehicle History Report";
+  const title = `${core} (${REPORT_BRAND})`
+    .replace(/[\\/:*?"<>|]+/g, " ")   // strip characters browsers won't allow in a filename
+    .replace(/\s+/g, " ").trim();
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const tag = `<title>${esc(title)}</title>`;
+  if (/<title>[\s\S]*?<\/title>/i.test(html)) return html.replace(/<title>[\s\S]*?<\/title>/i, tag);
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => m + tag);
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => m + `<head>${tag}</head>`);
+  return tag + html;
+}
+
 function injectReportChrome(html) {
   if (!html || typeof html !== "string") return html;
 
@@ -3045,7 +3065,7 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
 
     if (decoded.kind === "html") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      let reportHtml = injectReportChrome(decoded.html);
+      let reportHtml = setReportTitle(injectReportChrome(decoded.html), { vehicle: labelForHeader, vin: targetVin });
 
       // ── Invisible watermark — ties every served report to the user ──────
       // Even if CARFAX screenshots or scrapes the rendered report,
@@ -3283,7 +3303,7 @@ app.get("/view/:token", async (req, res) => {
       // tokens (report-embedded data, then an authoritative VIN decode).
       const vehicle  = meta.vehicle || extractVehicleLabel(decoded.html) || await decodeVinLabel(meta.vin);
       const shareUrl = `${SITE_URL}/view/${req.params.token}`;
-      return res.send(injectShareMeta(injectReportChrome(decoded.html), { vin: meta.vin, vehicle, url: shareUrl }));
+      return res.send(setReportTitle(injectShareMeta(injectReportChrome(decoded.html), { vin: meta.vin, vehicle, url: shareUrl }), { vehicle, vin: meta.vin }));
     }
     if (decoded.kind === "pdf") {
       res.setHeader("Content-Type", "application/pdf");
@@ -3510,7 +3530,7 @@ app.get("/api/download-pdf", async (req, res) => {
     // Verify the user has run this report before (owns it)
     const { data: owned } = await supabaseService
       .from("vin_queries")
-      .select("id")
+      .select("id, vehicle")
       .eq("user_id", user.id)
       .eq("vin", vin)
       .eq("success", true)
@@ -3543,7 +3563,8 @@ app.get("/api/download-pdf", async (req, res) => {
     ].join("");
 
     const printScript = "<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},800);});<\/script>";
-    const finalHtml   = injectReportChrome(decoded.html)
+    const pdfVehicle  = owned?.vehicle || extractVehicleLabel(decoded.html) || (await decodeVinLabel(vin));
+    const finalHtml   = setReportTitle(injectReportChrome(decoded.html), { vehicle: pdfVehicle, vin })
       .replace("<body", `<body style='padding-top:0;'`)
       .replace(/<body[^>]*>/, (m) => m + banner)
       .replace("</body>", printScript + "</body>");

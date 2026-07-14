@@ -937,9 +937,11 @@ async function downloadHistoryPDF(item, btn = null) {
     if (!r.ok) { showToast('PDF failed — ' + r.status, 'error'); restore(); return; }
     const ct = r.headers.get('content-type') || '';
     if (ct.includes('application/pdf')) {
-      // Real PDF — trigger download
+      // Real PDF — trigger download with a clean, professional filename.
       const blob = await r.blob();
-      downloadBlob(blob, `${vin}-report.pdf`);
+      const veh  = (item.vehicle || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+      const fname = (veh ? `${veh} CARFAX (AutoVINReveal)` : `Vehicle History Report (AutoVINReveal)`) + '.pdf';
+      downloadBlob(blob, fname);
       showToast('PDF downloaded!', 'ok');
     } else {
       // Fallback: open the print-dialog HTML in a new tab
