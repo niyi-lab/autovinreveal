@@ -195,9 +195,9 @@ const CREDITS_PER_20PACK = Number(process.env.CREDITS_PER_20PACK || "20");
 // Inline price_data for one-time purchases — amount in cents, USD. Mirrors the
 // historical amounts ($5.99 / $20 / $58) so no dashboard Products are required.
 const ONE_TIME_PRICES = {
-  single: { unit_amount: 599,  credits: CREDITS_PER_SINGLE, name: "AVR – Single" },
-  five:   { unit_amount: 2000, credits: CREDITS_PER_5PACK,  name: "AVR – 5 Bundle" },
-  twenty: { unit_amount: 5800, credits: CREDITS_PER_20PACK, name: "AVR – 20 Bundle" },
+  single: { unit_amount: 599,  credits: CREDITS_PER_SINGLE, name: "KHLIN – Single" },
+  five:   { unit_amount: 2000, credits: CREDITS_PER_5PACK,  name: "KHLIN – 5 Bundle" },
+  twenty: { unit_amount: 5800, credits: CREDITS_PER_20PACK, name: "KHLIN – 20 Bundle" },
 };
 
 // Subscription price IDs
@@ -2405,7 +2405,12 @@ app.post("/api/create-checkout-session", async (req, res) => {
         order_id: orderId, vin, report_type: report_type || "carfax", site: "avr",
       }).then(({ error }) => { if (error) console.warn("[order-map] insert failed:", error.message); });
     }
-    const productName = vin ? `AVR – ${orderId}` : plan.name;
+    const productName = vin ? `KHLIN – ${orderId}` : plan.name;
+
+    // Route Stripe's return through khlinautomotive.com so the AVR domain never
+    // appears in the Stripe-stored return URLs. The forwarder rebuilds AVR's real
+    // success/cancel URL server-side (see khlin /r route).
+    const KHLIN_RETURN = process.env.KHLIN_RETURN_BASE || "https://khlinautomotive.com";
 
     const session = await stripeDefault.checkout.sessions.create({
       mode: "payment",
@@ -2420,14 +2425,14 @@ app.post("/api/create-checkout-session", async (req, res) => {
       }],
       payment_intent_data: {
         description: vin
-          ? `AVR – ${orderId}`
-          : isTwentyPack ? "AVR – 20 Bundle"
-          : isFivePack ? "AVR – 5 Bundle"
-          : "AVR – Single",
+          ? `KHLIN – ${orderId}`
+          : isTwentyPack ? "KHLIN – 20 Bundle"
+          : isFivePack ? "KHLIN – 5 Bundle"
+          : "KHLIN – Single",
         metadata: { ...(vin ? { order_id: orderId } : {}) },
       },
-      success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ""}`,
-      cancel_url:  `${SITE_URL}/?checkout=cancel`,
+      success_url: `${KHLIN_RETURN}/r?s=avr&d=success&session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ""}`,
+      cancel_url:  `${KHLIN_RETURN}/r?s=avr&d=cancel`,
       ...(userId ? { client_reference_id: userId } : {}),
       metadata: {
         ...(userId      ? { user_id: userId } : {}),
