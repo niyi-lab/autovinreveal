@@ -180,6 +180,26 @@ function ownerOptsFromRes(res, isUser) {
   };
 }
 
+// Derive a "YEAR Make Model" label from the report HTML for the PDF filename —
+// used when no vehicle label was passed (e.g. guest reports). The server sets a
+// clean <title> ("... 2021 MERCEDES-BENZ GLC ... : VIN") and the provider title
+// also contains the vehicle; parse either.
+function vehicleFromReportHtml(html) {
+  if (!html || typeof html !== 'string') return '';
+  const t = (html.match(/<title[^>]*>([^<]{0,200})<\/title>/i) || [])[1] || '';
+  // If the title is already our clean "<YMM> CARFAX (Brand)", strip the suffix.
+  const cleaned = t.replace(/\s*CARFAX\s*\(.*?\)\s*$/i, '').trim();
+  let m = t.match(/for this\s+(.+?)\s*:\s*[A-HJ-NPR-Z0-9]{11,17}\s*$/i);
+  let veh = m && m[1] ? m[1] : '';
+  if (!veh && /^(19|20)\d{2}\s+\S/.test(cleaned)) veh = cleaned;
+  if (!veh) { const mm = t.match(/\b((?:19|20)\d{2}\s+[A-Za-z][\w-]*(?:\s+[\w-]+){1,5})/); veh = mm && mm[1] ? mm[1] : ''; }
+  veh = (veh || '').replace(/\s+/g, ' ').trim();
+  if (veh && veh === veh.toUpperCase()) {
+    veh = veh.replace(/\b([A-Z])([A-Z0-9-]*)/g, (w, a, b) => (/^\d/.test(w) || w.length <= 3) ? w : a + b.toLowerCase());
+  }
+  return veh;
+}
+
 function openReport(html, vin, opts = {}) {
   showReportOverlay(html, vin, opts);
 }
@@ -271,9 +291,21 @@ function showReportOverlay(html, vin, opts = {}) {
   // own context, so the browser prints just the report — fully paginated, and the
   // injected @page width keeps the full report from clipping on the right.
   overlay.querySelector('#overlayDownloadBtn')?.addEventListener('click', () => {
+    // The report is a sandboxed blob-URL iframe in an opaque origin, so the browser
+    // ignores ITS <title> for the saved-PDF name and uses the TOP window's title.
+    // Set the top title to the clean vehicle name for the duration of the print,
+    // then restore it. (Belt-and-suspenders: the iframe HTML also has this title.)
+    const veh = ((opts.vehicle || vehicleFromReportHtml(html)) || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const pdfName = veh ? `${veh} CARFAX (AutoVINReveal)` : 'Vehicle History Report (AutoVINReveal)';
+    const prevTitle = document.title;
+    document.title = pdfName;
+    const restoreTitle = () => { document.title = prevTitle; };
+    // Restore after the print dialog closes (afterprint), with a fallback timer.
+    window.addEventListener('afterprint', restoreTitle, { once: true });
+    setTimeout(restoreTitle, 60000);
     try { iframe.contentWindow.focus(); } catch (_) {}
     try { iframe.contentWindow.postMessage('avr-print', '*'); }
-    catch (_) { showToast('Could not open the print dialog — please try again', 'error'); }
+    catch (_) { restoreTitle(); showToast('Could not open the print dialog — please try again', 'error'); }
   });
 
   // Guest email-capture handler — POST { to, vin, type, oneTimeSession } to the
