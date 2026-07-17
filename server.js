@@ -835,12 +835,28 @@ function addPrintFitScript(html) {
 // uses document.title). Format: "2018 Toyota Camry CARFAX (AutoVINReveal)" with a
 // graceful fallback when the vehicle isn't known.
 const REPORT_BRAND = process.env.REPORT_BRAND || "AutoVINReveal";
+function vehicleFromTitle(html) {
+  // The provider's own <title> is like:
+  //   "CARFAX Vehicle History Report for this 2021 MERCEDES-BENZ GLC 63 S 4MATIC AMG: W1N0…"
+  const t = html.match(/<title[^>]*>([^<]{0,200})<\/title>/i)?.[1] || "";
+  let m = t.match(/for this\s+(.+?)\s*:\s*[A-HJ-NPR-Z0-9]{11,17}\s*$/i)   // "...for this <YMM>: <VIN>"
+       || t.match(/\b((?:19|20)\d{2}\s+[A-Za-z][\w-]*(?:\s+[\w-]+){1,5})/); // any "YYYY Make Model…"
+  let veh = (m?.[1] || "").replace(/\s+/g, " ").trim();
+  // Title-case an ALL-CAPS make/model so "2021 MERCEDES-BENZ GLC…" reads nicely.
+  if (veh && veh === veh.toUpperCase()) {
+    veh = veh.replace(/\b([A-Z])([A-Z0-9-]*)/g, (w, a, b) =>
+      /^\d/.test(w) || w.length <= 3 ? w : a + b.toLowerCase());
+  }
+  return veh || null;
+}
 function setReportTitle(html, { vehicle = null, vin = null } = {}) {
   if (!html || typeof html !== "string") return html;
   // If no label was passed (e.g. guest purchase), derive it from the report HTML
   // itself so the PDF filename still gets the vehicle, not the generic fallback.
+  // Order: passed label → embedded JSON → the provider's own <title> text.
   let veh = (vehicle || "").replace(/\s+/g, " ").trim();
   if (!veh) { try { veh = (extractVehicleLabel(html) || "").replace(/\s+/g, " ").trim(); } catch (_) {} }
+  if (!veh) { try { veh = (vehicleFromTitle(html) || "").replace(/\s+/g, " ").trim(); } catch (_) {} }
   const core = veh ? `${veh} CARFAX` : "Vehicle History Report";
   const title = `${core} (${REPORT_BRAND})`
     .replace(/[\\/:*?"<>|]+/g, " ")   // strip characters browsers won't allow in a filename
