@@ -313,6 +313,27 @@ const CCF_BASE         = process.env.REPORTSVIN_BASE    || "https://api.reports.
 const CHEAPCARFAX_BASE = process.env.CHEAPCARFAX_BASE   || "https://panel.cheapcarfax.net";
 const CHEAPCARFAX_KEY  = process.env.CHEAPCARFAX_API_KEY || "";
 
+// panel.cheapcarfax.net sits behind Cloudflare; its Bot Fight Mode / WAF started
+// 403-blocking the bare axios User-Agent ("Attention Required! | Cloudflare").
+// Send realistic browser headers so the request isn't flagged as a bot. Keep the
+// x-api-key too. Overridable via CHEAPCARFAX_UA if the UA needs refreshing.
+const CHEAPCARFAX_UA = process.env.CHEAPCARFAX_UA
+  || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+function cheapcarfaxHeaders() {
+  return {
+    "x-api-key": CHEAPCARFAX_KEY,
+    "User-Agent": CHEAPCARFAX_UA,
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": CHEAPCARFAX_BASE + "/",
+    "Origin": CHEAPCARFAX_BASE,
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+  };
+}
+
 // Shared secret for the CFC→AVR provider proxy (see /api/provider-proxy below).
 // cheapcarfax only whitelisted AVR's outbound IP, so cheapestcarfax.com routes its
 // provider calls through this server. Default secret = sha256 of the Supabase
@@ -423,7 +444,7 @@ async function fetchFromCheapcarfax(vin, _type = "carfax") {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     console.log(`[CheapCARFAX] Live fetch (attempt ${attempt}/${MAX_ATTEMPTS}): GET ${endpoint}`);
     const r = await axios.get(endpoint, {
-      headers: { "x-api-key": CHEAPCARFAX_KEY },
+      headers: cheapcarfaxHeaders(),
       timeout: 45000,
       validateStatus: () => true,
     });
@@ -612,7 +633,7 @@ async function getCfcApiLimits() {
       // Best-effort: CheapCARFAX exposes user/limits info under panel.cheapcarfax.net.
       for (const p of ["/api/user/limits", "/api/user"]) {
         try {
-          const r = await axios.get(`${CHEAPCARFAX_BASE}${p}`, { headers: { "x-api-key": CHEAPCARFAX_KEY }, timeout: 8000, validateStatus: () => true });
+          const r = await axios.get(`${CHEAPCARFAX_BASE}${p}`, { headers: cheapcarfaxHeaders(), timeout: 8000, validateStatus: () => true });
           if (r.status === 200 && r.data && typeof r.data === "object") {
             const d = r.data;
             return {
@@ -2661,7 +2682,7 @@ app.get("/api/provider-proxy/cheapcarfax/:vin", async (req, res) => {
 
   try {
     const r = await axios.get(`${CHEAPCARFAX_BASE}/api/carfax/vin/${vin}/html`, {
-      headers: { "x-api-key": CHEAPCARFAX_KEY },
+      headers: cheapcarfaxHeaders(),
       timeout: 45000,
       validateStatus: () => true,
     });
