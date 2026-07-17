@@ -119,10 +119,12 @@ async function subscribe(key,btn){
   const restore=()=>{btn.textContent=old;btn.style.opacity=1;btn.disabled=false;};
   const session=await getSessionSafe();
   if(!session){alert('Please sign in first — subscriptions are tied to your account.');location.href='/?login=1';return;}
+  // Stripe subscription (khlin account). Map the button key -> plan key.
+  const planKey=({sub_starter:'starter',sub_dealer:'dealer',sub_pro:'pro'})[key]||key;
   try{
-    const r=await fetch('/api/whop/checkout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({key,user_id:session.user?.id||null})});
+    const r=await fetch('/api/create-subscription-session',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({plan_key:planKey})});
     const j=await r.json();
-    if(j.url){if(j.claim){try{localStorage.setItem('whopClaim',j.claim)}catch(e){}}location.href=j.url;return;}
+    if(j.url){location.href=j.url;return;}
     alert(j.error||'Could not start checkout');restore();
   }catch(e){alert('Could not start checkout');restore();}
 }

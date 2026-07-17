@@ -567,6 +567,19 @@ async function handleSuccessIfNeeded() {
     return;
   }
   if (!(onSuccessPage() || stripeSessionId)) return;
+  if (intentParam === 'subscription') {
+    // Subscription credits are granted server-side by the invoice.paid webhook,
+    // which can land a moment after the redirect — refresh the balance a few times.
+    showToast('Subscription active — your monthly credits are being added.', 'ok');
+    for (let i = 0; i < 5; i++) { await refreshBalancePill(); await new Promise(r => setTimeout(r, 1500)); }
+    if (onSuccessPage()) { setTimeout(() => { window.location.href = '/'; }, 800); }
+    else {
+      const u = new URL(location.href);
+      ['session_id','intent'].forEach(k => u.searchParams.delete(k));
+      history.replaceState({}, '', u.pathname + u.search);
+    }
+    return;
+  }
   if (intentParam === 'buy_report' && stripeSessionId && vinParam) {
     showToast('Payment confirmed. Preparing your report…', 'ok');
     try {
@@ -1327,13 +1340,28 @@ $id('buy20Sidebar')?.addEventListener('click', async () => {
 });
 $id('mobileViewPlans')?.addEventListener('click', () => openBuyModal());
 
-// Monthly subscription buttons (Membership tab + /membership page). Require login;
-// startWhopPurchase prompts sign-in for any non-single key.
-[['subStarterBtn', 'sub_starter'], ['subDealerBtn', 'sub_dealer'], ['subProBtn', 'sub_pro']].forEach(([id, key]) => {
+// Monthly subscriptions — Stripe (khlin account). Require login; the server ties
+// the subscription to the signed-in user via the Bearer token.
+async function startStripeSubscription(planKey) {
+  const { user, token } = await getSession();
+  if (!user || !token) { showToast('Please sign in to subscribe.', 'error'); openLogin(); return; }
+  try {
+    await ensureBackendReady();
+    const r = await apiFetch('/api/create-subscription-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ plan_key: planKey }),
+    }, 12_000);
+    if (!r.ok) { let m = 'Subscription error'; try { const j = await r.json(); m = j.message || j.error || m; } catch {} throw new Error(m); }
+    const { url } = await r.json();
+    if (!url) throw new Error('No checkout URL returned');
+    window.location.href = url;
+  } catch (e) { showToast(e.message || 'Failed to start subscription', 'error'); }
+}
+[['subStarterBtn', 'starter'], ['subDealerBtn', 'dealer'], ['subProBtn', 'pro']].forEach(([id, planKey]) => {
   $id(id)?.addEventListener('click', async () => {
     const btn = $id(id); const restore = setBtnLoading(btn, 'Redirecting…');
-    const { user } = await getSession();
-    await startWhopPurchase({ user, key });
+    await startStripeSubscription(planKey);
     restore();
   });
 });

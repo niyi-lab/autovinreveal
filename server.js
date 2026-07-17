@@ -201,15 +201,22 @@ const ONE_TIME_PRICES = {
 };
 
 // Subscription price IDs
-const SUB_STARTER  = process.env.STRIPE_PRICE_SUB_STARTER;  // $30/mo  20 reports
-const SUB_PRO      = process.env.STRIPE_PRICE_SUB_PRO;      // $98/mo 100 reports
-const SUB_PREMIUM  = process.env.STRIPE_PRICE_SUB_PREMIUM;  // $160/mo 200 reports
+// Stripe subscription Prices (recurring, khlin account). Tiers match the plans
+// shown on-site: Starter $39/20cr, Dealer $89/50cr, Pro $169/100cr. Each Price
+// carries metadata.credits + metadata.plan_key, so the webhook grants the right
+// amount regardless of which Price ID it is (see grantSubCreditsFromPrice).
+const SUB_STARTER  = process.env.STRIPE_PRICE_SUB_STARTER;
+const SUB_DEALER   = process.env.STRIPE_PRICE_SUB_DEALER;
+const SUB_PRO      = process.env.STRIPE_PRICE_SUB_PRO;
 
+// Fallback credit map by Price ID (used if a Price has no metadata.credits).
 const SUB_CREDITS = {
-  [SUB_STARTER]:  Number(process.env.SUB_CREDITS_STARTER  || 20),
-  [SUB_PRO]:      Number(process.env.SUB_CREDITS_PRO      || 100),
-  [SUB_PREMIUM]:  Number(process.env.SUB_CREDITS_PREMIUM  || 200),
+  [SUB_STARTER]: Number(process.env.SUB_CREDITS_STARTER || 20),
+  [SUB_DEALER]:  Number(process.env.SUB_CREDITS_DEALER  || 50),
+  [SUB_PRO]:     Number(process.env.SUB_CREDITS_PRO     || 100),
 };
+// Map a plan key (starter/dealer/pro) -> Price ID, for the checkout endpoint.
+const SUB_PRICE_BY_KEY = { starter: SUB_STARTER, dealer: SUB_DEALER, pro: SUB_PRO };
 
 function stripeForId(id) {
   const isTest = typeof id === "string" && id.startsWith("cs_test_");
@@ -1408,30 +1415,35 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
       }
     }
 
-    // ── Subscription renewal — grant credits each billing period ──
+    // ── Subscription: grant expiring credits each billing period (first month
+    //    AND renewals both fire invoice.paid). Credits come from the recurring
+    //    Price's metadata; user resolved from subscription metadata or the
+    //    customer→user mapping stored at checkout. ──
     if (event.type === "invoice.paid") {
       const invoice = event.data.object;
-      // Only act on subscription invoices, not one-time charges
       if (!invoice.subscription) return res.status(200).json({ ok: true });
 
+      const line     = invoice.lines?.data?.[0];
+      const price    = line?.price || {};
+      const priceId  = price.id;
+      const credits  = Number(price.metadata?.credits) || SUB_CREDITS[priceId] || 0;
+      const planKey  = price.metadata?.plan_key || "";
       const customerId = invoice.customer;
-      const priceId    = invoice.lines?.data?.[0]?.price?.id;
-      const credits    = SUB_CREDITS[priceId] || 0;
 
-      if (credits > 0 && customerId) {
-        // Look up user by stripe_customer_id
+      // Resolve the Supabase user: subscription metadata (set at checkout) first,
+      // then the customer→user mapping on the credits row.
+      let userId = invoice.subscription_details?.metadata?.user_id
+                || invoice.lines?.data?.[0]?.metadata?.user_id || null;
+      if (!userId && customerId) {
         const { data: row } = await supabaseService
-          .from("credits")
-          .select("user_id")
-          .eq("stripe_customer_id", customerId)
-          .maybeSingle();
+          .from("credits").select("user_id").eq("stripe_customer_id", customerId).maybeSingle();
+        userId = row?.user_id || null;
+      }
 
-        if (row?.user_id) {
-          await addCreditsAtomic(row.user_id, credits);
-          console.log(`[Sub] Renewed ${credits} credits for user ${row.user_id} (price ${priceId})`);
-        } else {
-          console.warn(`[Sub] invoice.paid — no user found for customer ${customerId}`);
-        }
+      if (userId && credits > 0) {
+        await grantStripeSubPayment(invoice.id, userId, credits, planKey);
+      } else {
+        console.warn(`[Sub] invoice.paid — unresolved (user:${userId} credits:${credits} price:${priceId} cust:${customerId})`);
       }
     }
 
@@ -1658,6 +1670,44 @@ async function grantWhopSubPayment(paymentId, planId, userId) {
     notifyOwner(`whopsub:${paymentId}`,
       `AutoVINReveal: subscription payment — ${buyerEmail}`,
       `A subscription payment came in on AutoVINReveal (${credits} monthly credits granted).\n\nEmail: ${buyerEmail}\nUser ID: ${userId}\nWhop plan: ${planId}\nPayment: ${paymentId}`);
+  } catch (_) {}
+  return credits;
+}
+
+// Grant a Stripe subscription payment's monthly credits EXACTLY ONCE, as an
+// EXPIRING batch (~60 days) — mirrors the Whop path so both providers behave the
+// same. Idempotent by the Stripe invoice id. `credits` comes from the recurring
+// Price's metadata.credits (fallback: SUB_CREDITS by Price ID). Called from the
+// invoice.paid webhook, which fires for BOTH the first month and every renewal.
+async function grantStripeSubPayment(invoiceId, userId, credits, planKey = "") {
+  if (!invoiceId || !userId || !(credits > 0)) return 0;
+  const { error } = await supabaseService
+    .from("processed_webhook_events")
+    .insert({ event_id: "stripesub_" + invoiceId });
+  if (error) {                          // 23505 = already granted for this invoice
+    if (error.code === "23505" || /duplicate|unique/i.test(error.message || "")) return 0;
+    // Transient (non-duplicate) failure — THROW so the webhook rolls back the
+    // outer event.id marker and returns 500, letting Stripe retry (else the
+    // customer paid and got zero credits with no self-healing).
+    throw new Error("sub idempotency insert failed: " + error.message);
+  }
+  const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
+  const { error: e2 } = await supabaseService
+    .from("cfc_sub_batches")
+    .insert({ user_id: userId, remaining: credits, expires_at: expiresAt });
+  if (e2) {
+    console.error("[Stripe sub] batch insert failed:", e2.message);
+    await supabaseService.from("processed_webhook_events").delete().eq("event_id", "stripesub_" + invoiceId);
+    // THROW so the webhook rolls back event.id and Stripe retries this invoice.
+    throw new Error("sub batch insert failed: " + e2.message);
+  }
+  console.log(`[Stripe sub] +${credits} expiring credits to ${userId} (plan ${planKey}, invoice ${invoiceId}, expires ${expiresAt})`);
+  try {
+    let buyerEmail = "(unknown email)";
+    try { const { data: u } = await supabaseService.auth.admin.getUserById(userId); buyerEmail = u?.user?.email || buyerEmail; } catch (_) {}
+    notifyOwner(`stripesub:${invoiceId}`,
+      `AutoVINReveal: subscription payment — ${buyerEmail}`,
+      `A Stripe subscription payment came in on AutoVINReveal (${credits} monthly credits granted).\n\nEmail: ${buyerEmail}\nUser ID: ${userId}\nPlan: ${planKey || "-"}\nInvoice: ${invoiceId}`);
   } catch (_) {}
   return credits;
 }
@@ -2526,24 +2576,32 @@ app.post("/api/create-checkout-session", async (req, res) => {
 ================================================================ */
 app.post("/api/create-subscription-session", async (req, res) => {
   try {
-    const { price_id } = req.body || {};
+    const { price_id, plan_key } = req.body || {};
     const { user } = await getUser(req);
     if (!user) return res.status(401).json({ error: "Login required to subscribe" });
 
-    const validPrices = [SUB_STARTER, SUB_PRO, SUB_PREMIUM].filter(Boolean);
-    if (!validPrices.includes(price_id)) {
-      return res.status(400).json({ error: "Invalid subscription price" });
+    // Accept either a plan key (starter/dealer/pro) or a raw Price ID.
+    const priceId = SUB_PRICE_BY_KEY[String(plan_key || "").toLowerCase()] || price_id;
+    const validPrices = [SUB_STARTER, SUB_DEALER, SUB_PRO].filter(Boolean);
+    if (!priceId || !validPrices.includes(priceId)) {
+      return res.status(400).json({ error: "Invalid subscription plan" });
     }
+    const planKey = Object.keys(SUB_PRICE_BY_KEY).find(k => SUB_PRICE_BY_KEY[k] === priceId) || "";
+
+    // Route the return through khlinautomotive.com so the AVR domain never appears
+    // on Stripe (matches the one-time checkout scrub).
+    const KHLIN_RETURN = process.env.KHLIN_RETURN_BASE || "https://khlinautomotive.com";
 
     const session = await stripeDefault.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
-      line_items: [{ price: price_id, quantity: 1 }],
-      success_url: `${SITE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}&intent=subscription`,
-      cancel_url:  `${SITE_URL}/?checkout=cancel`,
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${KHLIN_RETURN}/r?s=avr&d=success&session_id={CHECKOUT_SESSION_ID}&intent=subscription`,
+      cancel_url:  `${KHLIN_RETURN}/r?s=avr&d=cancel`,
       client_reference_id: user.id,
-      metadata: { user_id: user.id, price_id },
-      subscription_data: { metadata: { user_id: user.id } },
+      ...(user.email ? { customer_email: user.email } : {}),
+      metadata: { user_id: user.id, plan_key: planKey },
+      subscription_data: { metadata: { user_id: user.id, plan_key: planKey } },
     });
 
     res.json({ url: session.url });
@@ -3527,8 +3585,8 @@ app.get("/api/dashboard", async (req, res) => {
         const sub     = await stripeDefault.subscriptions.retrieve(credRow.stripe_subscription_id);
         const priceId = sub.items && sub.items.data[0] && sub.items.data[0].price && sub.items.data[0].price.id;
         if      (priceId === SUB_STARTER)  plan = "Starter";
+        else if (priceId === SUB_DEALER)   plan = "Dealer";
         else if (priceId === SUB_PRO)      plan = "Pro";
-        else if (priceId === SUB_PREMIUM)  plan = "Premium";
         else                               plan = "Active";
       } catch { plan = "Active"; }
     }
