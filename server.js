@@ -837,7 +837,10 @@ function addPrintFitScript(html) {
 const REPORT_BRAND = process.env.REPORT_BRAND || "AutoVINReveal";
 function setReportTitle(html, { vehicle = null, vin = null } = {}) {
   if (!html || typeof html !== "string") return html;
-  const veh = (vehicle || "").replace(/\s+/g, " ").trim();
+  // If no label was passed (e.g. guest purchase), derive it from the report HTML
+  // itself so the PDF filename still gets the vehicle, not the generic fallback.
+  let veh = (vehicle || "").replace(/\s+/g, " ").trim();
+  if (!veh) { try { veh = (extractVehicleLabel(html) || "").replace(/\s+/g, " ").trim(); } catch (_) {} }
   const core = veh ? `${veh} CARFAX` : "Vehicle History Report";
   const title = `${core} (${REPORT_BRAND})`
     .replace(/[\\/:*?"<>|]+/g, " ")   // strip characters browsers won't allow in a filename
@@ -1351,6 +1354,15 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
             .eq("user_id", userId);
           console.log(`[Sub] New subscription ${subId} for user ${userId}`);
         }
+        // Notify the owner of a new subscription (unique key per sub → not throttled).
+        try {
+          const buyerEmail = session.customer_details?.email || session.customer_email || "(unknown email)";
+          const planLabel  = session.metadata?.plan_label || session.metadata?.price_id || "subscription";
+          const amount     = session.amount_total != null ? `$${(session.amount_total / 100).toFixed(2)}` : "";
+          notifyOwner(`newsub:${subId || userId}`,
+            `AutoVINReveal: NEW subscription — ${buyerEmail}`,
+            `A customer just subscribed on AutoVINReveal.\n\nPlan: ${planLabel} ${amount}\nEmail: ${buyerEmail}\nUser ID: ${userId || "-"}\nStripe subscription: ${subId || "-"}\nStripe customer: ${customerId || "-"}`);
+        } catch (_) {}
         // Credits for first period are granted by invoice.paid below
         return res.status(200).json({ ok: true });
       }
@@ -1622,6 +1634,15 @@ async function grantWhopSubPayment(paymentId, planId, userId) {
     return 0;
   }
   console.log(`[Whop sub] +${credits} expiring credits to ${userId} (plan ${planId}, payment ${paymentId}, expires ${expiresAt})`);
+  // Notify the owner of this subscription payment (unique key per payment → fires
+  // once for the signup and once per renewal).
+  try {
+    let buyerEmail = "(unknown email)";
+    try { const { data: u } = await supabaseService.auth.admin.getUserById(userId); buyerEmail = u?.user?.email || buyerEmail; } catch (_) {}
+    notifyOwner(`whopsub:${paymentId}`,
+      `AutoVINReveal: subscription payment — ${buyerEmail}`,
+      `A subscription payment came in on AutoVINReveal (${credits} monthly credits granted).\n\nEmail: ${buyerEmail}\nUser ID: ${userId}\nWhop plan: ${planId}\nPayment: ${paymentId}`);
+  } catch (_) {}
   return credits;
 }
 
