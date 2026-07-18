@@ -539,10 +539,11 @@ async function resumePendingPurchase() {
     if (!r.ok) { showToast(await friendlyReportError(r), 'error'); return; }
     const html = await r.text();
     clearPending();
-    openReport(html, pending.vin || '', (!user && stripeSessionId && pending.vin) ? { guest: true, oneTimeSession: stripeSessionId } : {});
+    const guestSession = (!user && stripeSessionId && pending.vin) ? stripeSessionId : null;
+    openReport(html, pending.vin || '', guestSession ? { guest: true, oneTimeSession: guestSession } : {});
     trackPurchase(pending.amount || 5.99);
     showToast('Report ready!', 'ok');
-    addToHistory({ vin: pending.vin, type: pending.type || 'carfax', ts: Date.now() });
+    addToHistory({ vin: pending.vin, type: pending.type || 'carfax', ts: Date.now(), session: guestSession });
     renderHistory();
   } catch (e) {
     showToast(e.message || 'Failed to resume purchase', 'error');
@@ -937,13 +938,18 @@ async function openHistoryHTML(item) {
   const { token } = await getSession();
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
+  // Guest reopen: send the stored paid session so the server re-serves the report
+  // within the receipt window (no re-charge). Logged-in owners use their token.
+  const reqBody = { vin, type, as: 'html', allowLive: false };
+  if (!token && item.session) reqBody.oneTimeSession = item.session;
+
   showToast('Loading report…', 'ok');
   try {
     await ensureBackendReady();
     let r = await apiFetch(API.report, {
       method: 'POST', headers,
       // allowLive: false — serve the owner's stored copy, never charge a credit
-      body: JSON.stringify({ vin, type, as: 'html', allowLive: false }),
+      body: JSON.stringify(reqBody),
     });
 
     if (r.status === 404) {
@@ -963,7 +969,8 @@ async function openHistoryHTML(item) {
     if (!r.ok) { showToast(await friendlyReportError(r), 'error'); return; }
 
     const html = await r.text();
-    openReport(html, vin, { ...ownerOptsFromRes(r, !!token), type });
+    const guestOpts = (!token && item.session) ? { guest: true, oneTimeSession: item.session } : {};
+    openReport(html, vin, { ...ownerOptsFromRes(r, !!token), ...guestOpts, type });
   } catch (e) { showToast(e.message || 'Request failed', 'error'); }
 }
 
@@ -1158,8 +1165,10 @@ function bindRecentChecksBtns() {
       const vin    = btn.dataset.vin;
       const type   = btn.dataset.type || 'carfax';
       const action = btn.dataset.action;
-      const item   = { vin, type, ts: Date.now() };
-      if (action === 'view')     openHistoryHTML({ vin, type });
+      // Recover the stored paid session for this VIN (guests) so reopen works.
+      const hist   = loadHistory().find(h => (h.vin || '') === vin && (h.type || 'carfax') === type);
+      const item   = { vin, type, ts: hist?.ts || Date.now(), session: hist?.session || null };
+      if (action === 'view')     openHistoryHTML(item);
       if (action === 'savepdf') {
         const headers = { 'Content-Type': 'application/json' };
         const { token } = await getSession();
@@ -1519,7 +1528,7 @@ f?.addEventListener('submit', async (e) => {
       ? { guest: true, oneTimeSession: stripeSessionId }
       : { ...ownerOptsFromRes(r, !!currentUser), type: data.type || 'carfax' });
     showToast('Report fetched successfully!', 'ok');
-    addToHistory({ vin: data.vin, type: data.type, ts: Date.now() });
+    addToHistory({ vin: data.vin, type: data.type, ts: Date.now(), session: isGuest ? stripeSessionId : null });
     renderHistory();
     renderRecentChecksBar(); // update mini history immediately
     await refreshBalancePill();
