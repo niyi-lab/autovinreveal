@@ -272,6 +272,38 @@ if (SMTP_USER && SMTP_PASS) {
   console.warn("⚠️  SMTP not configured. Emails will fail.");
 }
 
+// Send a report to an email as an attachment. Shared by the post-purchase
+// auto-send and the manual "email me this report" flow.
+async function sendReportToEmail(to, vin, type, html, vehicle = null) {
+  if (!mailer || !to || !html) return;
+  const label = vehicle ? `${vehicle} (VIN ${vin})` : `VIN ${vin}`;
+  const fname = (vehicle ? `${vehicle}-CARFAX` : `${vin}-report`).replace(/[^a-z0-9]+/gi, "-").slice(0, 60);
+  await mailer.sendMail({
+    from: SMTP_FROM,
+    to,
+    subject: `Your CARFAX Vehicle History Report — ${vehicle || vin}`,
+    text:
+`Your CARFAX vehicle history report for ${label} is attached to this email.
+
+Open the attached file in any browser to view the full report.
+
+Not seeing this email in your inbox? Check your Spam or Promotions folder — and mark it "Not spam" so future reports land in your inbox.
+
+Thanks for using AutoVINReveal.
+support@autovinreveal.com`,
+    html:
+`<div style="font-family:system-ui,Segoe UI,Arial;max-width:520px;margin:auto;line-height:1.6;color:#0f172a">
+  <p>Your <b>CARFAX vehicle history report</b> for <b>${String(label).replace(/</g,"&lt;")}</b> is attached to this email.</p>
+  <p>Open the attached file in any browser to view the full report.</p>
+  <p style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;color:#1e3a8a;font-size:14px">
+    📥 <b>Don't see this in your inbox?</b> Check your <b>Spam</b> or <b>Promotions</b> folder, and mark it "Not spam" so future reports arrive normally.
+  </p>
+  <p style="color:#64748b;font-size:13px">Thanks for using AutoVINReveal · <a href="mailto:support@autovinreveal.com">support@autovinreveal.com</a></p>
+</div>`,
+    attachments: [{ filename: `${fname}.html`, content: html, contentType: "text/html" }],
+  });
+}
+
 /* ================================================================
    CarfaxCheaper removed — CheapCARFAX is the sole provider
 ================================================================ */
@@ -2942,6 +2974,7 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
   let oneTimeSession  = null;
   let alreadyOwned    = false;
   let pendingChargeId = null;
+  let guestBuyerEmail = null;
 
   try {
     const {
@@ -3063,6 +3096,8 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
           const sStripe = stripeForId(oneTimeSession);
           const s       = await sStripe.checkout.sessions.retrieve(oneTimeSession);
           if (s.payment_status !== "paid") throw new Error("unpaid");
+          // Email Stripe collected at checkout — auto-email the report after serve.
+          guestBuyerEmail = s.customer_details?.email || s.customer_email || null;
           await markSessionConsumed(oneTimeSession);
           pendingChargeId = await createPendingCharge({ sessionId: oneTimeSession, vin: targetVin });
         } catch (e) {
@@ -3194,6 +3229,13 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
       reportHtml = reportHtml.replace("</body>", watermark + "</body>");
 
       if (pendingChargeId) { await resolvePendingCharge(pendingChargeId); pendingChargeId = null; }
+      // Auto-email the report to the guest buyer (email Stripe collected at
+      // checkout), so every purchaser gets a copy in their inbox. Fire-and-forget.
+      if (!currentUser && guestBuyerEmail && mailer) {
+        sendReportToEmail(guestBuyerEmail, targetVin, type, reportHtml, labelForHeader)
+          .then(() => console.log(`[report] Auto-emailed report to ${guestBuyerEmail} (${targetVin})`))
+          .catch((e) => console.warn(`[report] Auto-email failed for ${guestBuyerEmail}: ${e.message}`));
+      }
       return res.send(reportHtml);
     }
 
@@ -4020,7 +4062,7 @@ Support email is support@autovinreveal.com.
 
 If a customer sends a screenshot or photo, you CAN see it — read what is shown (an error message, a VIN, a payment screen, a report) and help with that specifically. Never say you cannot see images.
 
-IF ASKED ABOUT A MISSING OR FAILED REPORT - ask ONE question at a time in order:
+IF ASKED ABOUT A MISSING REPORT OR A MISSING REPORT EMAIL - the report is auto-emailed to their checkout address, so FIRST tell them to check their email spam and promotions folders and mark it Not spam, since it often lands there. If that does not find it, ask ONE question at a time in order:
 Step 1: Ask if they got a payment confirmation email.
 Step 2: Ask how long ago they paid.
 Step 3: Ask if they saw an error message.
