@@ -272,20 +272,29 @@ if (SMTP_USER && SMTP_PASS) {
   console.warn("⚠️  SMTP not configured. Emails will fail.");
 }
 
-// Send a report to an email as an attachment. Shared by the post-purchase
-// auto-send and the manual "email me this report" flow.
-async function sendReportToEmail(to, vin, type, html, vehicle = null) {
-  if (!mailer || !to || !html) return;
-  const label = vehicle ? `${vehicle} (VIN ${vin})` : `VIN ${vin}`;
-  const fname = (vehicle ? `${vehicle}-CARFAX` : `${vin}-report`).replace(/[^a-z0-9]+/gi, "-").slice(0, 60);
+// Email a LINK to the report (not an attachment). HTML-file attachments are a
+// strong spam signal; a hosted view-link lands in the inbox and lets the buyer
+// reopen the report anytime for 7 days. The report is already cached by the time
+// this runs, so /view/:token resolves it — we just mint the share token.
+async function sendReportToEmail(to, vin, type, _html = null, vehicle = null) {
+  if (!mailer || !to) return;
+  const label = vehicle ? `${vehicle}` : `VIN ${vin}`;
+  const base  = (SITE_URL && /^https?:\/\//.test(SITE_URL)) ? SITE_URL.replace(/\/$/, "") : "https://www.autovinreveal.com";
+  let link = base;
+  try {
+    const { token } = await createShareToken(vin, type, vehicle);
+    link = `${base}/view/${token}`;
+  } catch (e) { console.warn("[email] share-link build failed, linking home:", e.message); }
+
   await mailer.sendMail({
     from: SMTP_FROM,
     to,
     subject: `Your CARFAX Vehicle History Report — ${vehicle || vin}`,
     text:
-`Your CARFAX vehicle history report for ${label} is attached to this email.
+`Your CARFAX vehicle history report for ${label} (VIN ${vin}) is ready.
 
-Open the attached file in any browser to view the full report.
+View or download it here (link works for 7 days):
+${link}
 
 Not seeing this email in your inbox? Check your Spam or Promotions folder — and mark it "Not spam" so future reports land in your inbox.
 
@@ -293,14 +302,16 @@ Thanks for using AutoVINReveal.
 support@autovinreveal.com`,
     html:
 `<div style="font-family:system-ui,Segoe UI,Arial;max-width:520px;margin:auto;line-height:1.6;color:#0f172a">
-  <p>Your <b>CARFAX vehicle history report</b> for <b>${String(label).replace(/</g,"&lt;")}</b> is attached to this email.</p>
-  <p>Open the attached file in any browser to view the full report.</p>
+  <p>Your <b>CARFAX vehicle history report</b> for <b>${String(label).replace(/</g,"&lt;")}</b> <span style="color:#64748b">(VIN ${vin})</span> is ready.</p>
+  <p style="text-align:center;margin:24px 0">
+    <a href="${link}" style="display:inline-block;background:#2563eb;color:#fff;font-weight:700;text-decoration:none;padding:13px 28px;border-radius:10px">View your report →</a>
+  </p>
+  <p style="color:#64748b;font-size:13px">Or paste this link into your browser (works for 7 days):<br><a href="${link}" style="color:#2563eb;word-break:break-all">${link}</a></p>
   <p style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;color:#1e3a8a;font-size:14px">
     📥 <b>Don't see this in your inbox?</b> Check your <b>Spam</b> or <b>Promotions</b> folder, and mark it "Not spam" so future reports arrive normally.
   </p>
   <p style="color:#64748b;font-size:13px">Thanks for using AutoVINReveal · <a href="mailto:support@autovinreveal.com">support@autovinreveal.com</a></p>
 </div>`,
-    attachments: [{ filename: `${fname}.html`, content: html, contentType: "text/html" }],
   });
 }
 
