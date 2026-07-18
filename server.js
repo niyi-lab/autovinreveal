@@ -4347,6 +4347,65 @@ app.use(express.static(path.join(__dirname, "public"), {
   },
 }));
 app.get("/301", (_req, res) => res.redirect(301, "/"));
+
+/* ================================================================
+   /api/decode-vin  — FREE VIN decoder (link-magnet tool)
+   Factory specs only (NHTSA free vPIC API); no accident/title/odometer
+   history — that's the paid report. Format-validate only (let NHTSA judge
+   the check digit), cache in-memory 24h.
+================================================================ */
+const _vinDecodeCache = new Map();
+app.get("/api/decode-vin", async (req, res) => {
+  try {
+    const vin = (req.query.vin || "").toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
+    if (vin.length !== 17) return res.status(400).json({ error: "VIN must be 17 characters (no I, O, or Q)." });
+
+    const hit = _vinDecodeCache.get(vin);
+    if (hit && (Date.now() - hit.at) < 24 * 60 * 60 * 1000) return res.json(hit.data);
+
+    const r = await axios.get(
+      `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${encodeURIComponent(vin)}?format=json`,
+      { timeout: 12000, validateStatus: () => true }
+    );
+    if (r.status !== 200 || !r.data?.Results?.[0]) {
+      return res.status(502).json({ error: "Decode service unavailable — please try again." });
+    }
+    const v = r.data.Results[0];
+    const clean = (x) => (x && String(x).trim() && x !== "Not Applicable") ? String(x).trim() : null;
+    const disp = clean(v.DisplacementL);
+    const data = {
+      vin,
+      year:  clean(v.ModelYear),
+      make:  clean(v.Make),
+      model: clean(v.Model),
+      trim:  clean(v.Trim) || clean(v.Series),
+      body:  clean(v.BodyClass),
+      doors: clean(v.Doors),
+      vehicleType: clean(v.VehicleType),
+      engine: [clean(v.EngineCylinders) ? `${clean(v.EngineCylinders)}-cyl` : null,
+               disp ? `${Number(disp).toFixed(1)}L` : null].filter(Boolean).join(" ") || null,
+      fuel:   clean(v.FuelTypePrimary),
+      drive:  clean(v.DriveType),
+      transmission: clean(v.TransmissionStyle),
+      plant:  [clean(v.PlantCity), clean(v.PlantCountry)].filter(Boolean).join(", ") || null,
+      manufacturer: clean(v.Manufacturer),
+      status: clean(v.ErrorText),
+    };
+    if (!data.year || !data.make) {
+      return res.status(404).json({ error: "Couldn't decode that VIN. Double-check all 17 characters." });
+    }
+    _vinDecodeCache.set(vin, { at: Date.now(), data });
+    if (_vinDecodeCache.size > 5000) _vinDecodeCache.clear();
+    res.json(data);
+  } catch (e) {
+    console.error("[decode-vin]", e.message);
+    res.status(502).json({ error: "Decode service unavailable — please try again." });
+  }
+});
+
+// Clean URL for the free VIN decoder tool.
+app.get("/free-vin-decoder", (_req, res) => res.sendFile(path.join(__dirname, "public", "free-vin-decoder.html")));
+
 app.get("*", (req, res) => {
   if (req.accepts("html")) {
     res.setHeader("Cache-Control", "no-store, must-revalidate");

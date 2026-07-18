@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Free VIN Decoder — Look Up Any VIN Number Free | AutoVINReveal</title>
+  <meta name="description" content="Decode any 17-digit VIN for free and see the year, make, model, trim, engine, plant and factory specs in seconds. No account, no cost — built on official NHTSA vPIC data." />
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+  <link rel="canonical" href="https://www.autovinreveal.com/free-vin-decoder" />
+  <meta property="og:title" content="Free VIN Decoder — Look Up Any VIN Number Free" />
+  <meta property="og:site_name" content="AutoVINReveal" />
+  <meta property="og:image" content="https://www.autovinreveal.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Free VIN Decoder — Look Up Any VIN Number Free" />
+  <meta name="twitter:description" content="Enter a 17-digit VIN and read its factory specs free — year, make, model, trim, engine, plant and more. No signup." />
+  <meta name="twitter:image" content="https://www.autovinreveal.com/og-image.png" />
+  <meta property="og:description" content="Enter a 17-digit VIN and read its factory specs free — year, make, model, trim, engine, plant and more. No signup." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.autovinreveal.com/free-vin-decoder" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%231e3a8a'/%3E%3Cg fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 14h16'/%3E%3Cpath d='M6.5 14l1-4h9l1 4'/%3E%3Ccircle cx='8' cy='16.5' r='1'/%3E%3Ccircle cx='16' cy='16.5' r='1'/%3E%3C/g%3E%3C/svg%3E" />
+  <meta name="theme-color" content="#1e3a8a" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Free VIN Decoder",
+    "url": "https://www.autovinreveal.com/free-vin-decoder",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "Any",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "description": "Look up any 17-digit VIN instantly — year, make, model, trim, engine, plant and more. Free, no account needed."
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What information does a free VIN decoder give you?",
+        "acceptedAnswer": { "@type": "Answer", "text": "It translates the 17-character VIN into the vehicle's factory build sheet: model year, make, model, trim, body style, engine, fuel type, drivetrain, transmission and the plant where it was assembled. It will not surface crash records, title brands, mileage discrepancies or previous owners — those come from a full vehicle history report." }
+      },
+      {
+        "@type": "Question",
+        "name": "Is the AutoVINReveal VIN decoder actually free?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes, decoding specs costs nothing and needs no account. It reads from the U.S. Department of Transportation's NHTSA vPIC database. There's a charge only if you want the full vehicle history report ($5.99), which layers on accidents, title status, odometer readings and service history." }
+      },
+      {
+        "@type": "Question",
+        "name": "Can a VIN decoder reveal whether a car was in a wreck?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. Decoding returns manufacturing specs only. Collision events, branded titles, rolled-back odometers and maintenance logs are recorded over the life of the vehicle, not stamped into the VIN, so they only appear in a history report — which AutoVINReveal delivers for $5.99." }
+      },
+      {
+        "@type": "Question",
+        "name": "Where is the VIN located on a vehicle?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Look at the base of the windshield on the driver's side, the sticker inside the driver's door jamb, and the paperwork — your title, registration and insurance card all list the 17-character VIN." }
+      }
+    ]
+  }
+  </script>
+
+  <link rel="stylesheet" href="/tw.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #f8fafc; }
+    .brand-font { font-family: 'Poppins', sans-serif; }
+    .hero-bg  { background: radial-gradient(circle at top right, #7c3aed 0%, #3b0764 100%); }
+    .vin-in { letter-spacing: .14em; text-transform: uppercase; font-family: 'Poppins', monospace; }
+    .spec-row { display:flex; justify-content:space-between; gap:12px; padding:11px 16px; border-bottom:1px solid #f1f5f9; font-size:14px; }
+    .spec-row:last-child { border-bottom:0; }
+    .spec-row .k { color:#64748b; }
+    .spec-row .v { color:#0f172a; font-weight:700; text-align:right; }
+    .prose-body { font-size: 16px; line-height: 1.8; color: #334155; }
+    .prose-body h2 { font-family:'Poppins',sans-serif; font-size:1.35rem; font-weight:800; color:#0f172a; margin:2.2rem 0 .8rem; }
+    .prose-body p { margin-bottom: 1.1rem; }
+    .prose-body a { color:#2563eb; text-decoration:underline; text-underline-offset:3px; }
+  </style>
+</head>
+<body class="text-slate-800 antialiased">
+
+  <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2">
+        <div class="w-9 h-9 bg-blue-700 rounded-lg flex items-center justify-center text-white font-extrabold text-xl">A</div>
+        <span class="text-xl font-bold text-slate-900 brand-font">AutoVIN<span class="text-blue-600">Reveal</span></span>
+      </a>
+      <div class="flex items-center gap-4">
+        <a href="/blog/" class="text-sm font-semibold text-gray-600 hover:text-blue-600">Blog</a>
+        <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2 rounded-lg shadow-md shadow-blue-600/20">Get Report — $5.99</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero-bg py-14 px-4">
+    <div class="max-w-xl mx-auto text-center">
+      <span class="inline-block bg-white/15 text-white text-xs font-bold px-3 py-1 rounded-full mb-4">Free · No account required</span>
+      <h1 class="text-3xl sm:text-4xl font-black text-white leading-tight mb-3" style="font-family:'Poppins',sans-serif;">Free VIN Decoder</h1>
+      <p class="text-purple-100 text-base max-w-lg mx-auto leading-relaxed">Type in any 17-digit VIN and read the vehicle's factory build sheet in seconds — model year, make, model, trim, engine, plant and more. Free, sourced from the official NHTSA database.</p>
+    </div>
+  </header>
+
+  <main class="max-w-xl mx-auto px-4 py-10">
+
+    <!-- DECODER TOOL -->
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-lg p-5 sm:p-6 -mt-16 relative z-10">
+      <label for="vinInput" class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Enter a VIN</label>
+      <div class="flex flex-col sm:flex-row gap-3">
+        <input id="vinInput" class="vin-in flex-1 border-2 border-gray-200 focus:border-blue-500 outline-none rounded-xl px-4 py-3 text-lg text-slate-900" maxlength="17" placeholder="1HGCM82633A004352" autocomplete="off" spellcheck="false" />
+        <button id="decodeBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-xl transition-colors whitespace-nowrap">Decode VIN</button>
+      </div>
+      <p class="text-xs text-gray-400 mt-2">Find the VIN at the base of the windshield, on the driver's door-jamb sticker, or on your registration.</p>
+      <p id="decodeMsg" class="hidden mt-3 text-sm rounded-lg px-3 py-2"></p>
+    </div>
+
+    <!-- RESULT -->
+    <div id="resultCard" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm mt-6 overflow-hidden">
+      <div class="bg-slate-900 text-white px-5 py-4">
+        <p id="resultTitle" class="font-black text-lg" style="font-family:'Poppins',sans-serif;"></p>
+        <p id="resultVin" class="text-xs text-slate-400 font-mono mt-0.5"></p>
+      </div>
+      <div id="specList"></div>
+    </div>
+
+    <!-- UPSELL: the whole point — free specs, paid history -->
+    <div id="upsell" class="hidden mt-6 bg-gradient-to-r from-blue-600 to-blue-800 rounded-2xl p-6 text-white text-center">
+      <p class="text-sm text-blue-100 mb-1">✅ Specs decoded — but specs won't tell you if it's been in a crash.</p>
+      <h2 class="text-xl font-black mb-2" style="font-family:'Poppins',sans-serif;">Pull the full history for $5.99</h2>
+      <p class="text-blue-100 text-sm mb-4 max-w-md mx-auto">Crash records, branded titles, odometer rollbacks, service history and open recalls — the same national-database report others sell for $44.99, yours for $5.99.</p>
+      <a id="upsellBtn" href="/" class="inline-flex items-center gap-2 bg-white text-blue-700 font-bold px-6 py-3 rounded-xl hover:bg-blue-50 transition-colors shadow-lg">Get the full report — $5.99
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+      </a>
+    </div>
+
+    <!-- EXPLAINER (SEO content) -->
+    <section class="prose-body mt-12">
+      <h2>What a VIN decoder can tell you — and what it can't</h2>
+      <p>Those 17 characters on your Vehicle Identification Number aren't a random serial. Each position carries meaning, together spelling out how the car left the factory. Run them through a decoder and you'll get the <strong>model year, make, model, trim, body style, engine, fuel type, drivetrain, transmission and assembly plant</strong>. It's a fast way to confirm an online listing describes the actual car, double-check that a replacement part will fit, or catch a seller who has the trim wrong.</p>
+      <p>Here's the catch: the decoder can't touch the part of a car's past that affects its value. Factory specs are fixed the day the vehicle is built and never change, so they reveal nothing about crashes, a rolled-back odometer, a salvage or rebuilt title, or years of skipped maintenance. All of that is recorded later, over the vehicle's life, and it only shows up in a <a href="/blog/what-does-a-carfax-report-show.html">vehicle history report</a> — never in the VIN alone.</p>
+
+      <h2>Start with the free specs, then dig into the history</h2>
+      <p>Decode as many VINs here as you like at no cost — it's the right first move when you're scanning listings. Once you've zeroed in on one car worth buying, order the full <a href="/">vehicle history report for $5.99</a> to unlock the accident timeline, title-brand record, odometer readings, service entries and open recalls. Wondering whether a report this cheap is the real deal? Read <a href="/blog/is-cheap-carfax-legit.html">why a low-cost CARFAX is legit</a> and see <a href="/blog/carfax-alternative.html">how it stacks up against the alternatives</a>.</p>
+    </section>
+  </main>
+
+  <footer class="bg-slate-900 text-slate-400 mt-8 pt-10 pb-6">
+    <div class="max-w-5xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm">
+      <a href="/" class="font-bold text-white brand-font">AutoVIN<span class="text-blue-400">Reveal</span></a>
+      <div class="flex gap-6 text-xs"><a href="/" class="hover:text-white">Home</a><a href="/free-vin-decoder" class="hover:text-white">VIN Decoder</a><a href="/blog/" class="hover:text-white">Blog</a><a href="/terms.html" class="hover:text-white">Terms</a><a href="/privacy.html" class="hover:text-white">Privacy</a></div>
+      <p class="text-xs text-slate-600">© 2026 AutoVINReveal</p>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var input = document.getElementById('vinInput');
+      var btn   = document.getElementById('decodeBtn');
+      var msg   = document.getElementById('decodeMsg');
+      var card  = document.getElementById('resultCard');
+      var upsell= document.getElementById('upsell');
+      var specList = document.getElementById('specList');
+      var rTitle = document.getElementById('resultTitle');
+      var rVin   = document.getElementById('resultVin');
+      var upsellBtn = document.getElementById('upsellBtn');
+
+      function clean(v){ return (v||'').toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g,'').slice(0,17); }
+      input.addEventListener('input', function(){ input.value = clean(input.value); });
+
+      function showMsg(text, kind){
+        msg.textContent = text;
+        msg.className = 'mt-3 text-sm rounded-lg px-3 py-2 ' + (kind==='err'
+          ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700');
+        msg.classList.remove('hidden');
+      }
+      function hideMsg(){ msg.classList.add('hidden'); }
+
+      var SPEC_FIELDS = [
+        ['Year','year'], ['Make','make'], ['Model','model'], ['Trim','trim'],
+        ['Body style','body'], ['Doors','doors'], ['Vehicle type','vehicleType'],
+        ['Engine','engine'], ['Fuel','fuel'], ['Drivetrain','drive'],
+        ['Transmission','transmission'], ['Assembly plant','plant'], ['Manufacturer','manufacturer']
+      ];
+
+      function render(d){
+        var name = [d.year, d.make, d.model].filter(Boolean).join(' ') || 'Vehicle';
+        rTitle.textContent = name + (d.trim ? ' ' + d.trim : '');
+        rVin.textContent = 'VIN ' + d.vin;
+        var rows = '';
+        SPEC_FIELDS.forEach(function(f){
+          var val = d[f[1]];
+          if (val) rows += '<div class="spec-row"><span class="k">'+f[0]+'</span><span class="v">'+String(val).replace(/</g,'&lt;')+'</span></div>';
+        });
+        specList.innerHTML = rows || '<div class="spec-row"><span class="k">No spec data returned</span></div>';
+        card.classList.remove('hidden');
+        // point the upsell at the pre-filled report purchase for this VIN
+        try { upsellBtn.href = '/?vin=' + encodeURIComponent(d.vin); } catch(e){}
+        upsell.classList.remove('hidden');
+        card.scrollIntoView({ behavior:'smooth', block:'nearest' });
+      }
+
+      async function decode(){
+        var vin = clean(input.value);
+        input.value = vin;
+        card.classList.add('hidden'); upsell.classList.add('hidden'); hideMsg();
+        if (vin.length !== 17){ showMsg('A VIN is exactly 17 characters. You entered ' + vin.length + '.', 'err'); input.focus(); return; }
+        var orig = btn.textContent; btn.textContent = 'Decoding…'; btn.disabled = true;
+        showMsg('Decoding…', 'info');
+        try {
+          var r = await fetch('/api/decode-vin?vin=' + encodeURIComponent(vin));
+          var j = await r.json();
+          if (!r.ok){ showMsg(j.error || 'Could not decode that VIN.', 'err'); return; }
+          hideMsg();
+          render(j);
+        } catch(e){ showMsg('Something went wrong — please try again.', 'err'); }
+        finally { btn.textContent = orig; btn.disabled = false; }
+      }
+
+      btn.addEventListener('click', decode);
+      input.addEventListener('keydown', function(e){ if (e.key === 'Enter') decode(); });
+
+      // Deep-link support: /free-vin-decoder?vin=XXXX auto-decodes.
+      try {
+        var qv = new URLSearchParams(location.search).get('vin');
+        if (qv){ input.value = clean(qv); if (input.value.length === 17) decode(); }
+      } catch(e){}
+    })();
+  </script>
+</body>
+</html>
