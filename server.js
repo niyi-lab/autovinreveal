@@ -3278,6 +3278,69 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
 });
 
 /* ================================================================
+   /api/resend-report — self-serve "I didn't get my report".
+   Verifies a PAID Stripe order matches BOTH the email and the VIN, then
+   re-sends the report to that order's email. Used by the endpoint + the
+   chat bot's resend_report tool.
+================================================================ */
+async function resendReportIfPaid(rawEmail, rawVin) {
+  if (!mailer || !supabaseService) return { ok: false, error: "unavailable" };
+  const email = String(rawEmail || "").trim().toLowerCase();
+  const vc = validateVin(rawVin);
+  if (!email.includes("@")) return { ok: false, error: "invalid_email" };
+  if (!vc.ok)               return { ok: false, error: "invalid_vin" };
+  const vin = vc.vin;
+
+  const { data: orders } = await supabaseService
+    .from("stripe_order_vins").select("order_id, report_type")
+    .eq("vin", vin).order("created_at", { ascending: false }).limit(25);
+  if (!orders || !orders.length) return { ok: false, error: "no_purchase_found" };
+  const orderIds = new Set(orders.map(o => o.order_id));
+  const matchedType = orders[0].report_type || "carfax";
+
+  let matchedEmail = null, starting_after = null;
+  for (let page = 0; page < 4 && !matchedEmail; page++) {
+    const params = { limit: 100 };
+    if (starting_after) params.starting_after = starting_after;
+    const list = await stripeLive.checkout.sessions.list(params);
+    for (const s of list.data) {
+      if (s.payment_status !== "paid") continue;
+      if (!s.metadata?.order_id || !orderIds.has(s.metadata.order_id)) continue;
+      const sEmail = (s.customer_details?.email || s.customer_email || "").toLowerCase();
+      if (sEmail && sEmail === email) { matchedEmail = sEmail; break; }
+    }
+    if (!list.has_more) break;
+    starting_after = list.data[list.data.length - 1]?.id;
+  }
+  if (!matchedEmail) return { ok: false, error: "no_matching_paid_order" };
+
+  await sendReportToEmail(matchedEmail, vin, matchedType, null, null);
+  console.log(`[resend-report] Re-sent ${vin} to ${matchedEmail} (verified paid order)`);
+  return { ok: true, sent_to: matchedEmail };
+}
+
+const _resendGuard = new Map();
+app.post("/api/resend-report", async (req, res) => {
+  try {
+    const ip = clientIp(req) || "?";
+    const now = Date.now();
+    const hits = (_resendGuard.get(ip) || []).filter(t => now - t < 10 * 60 * 1000);
+    if (hits.length >= 5) return res.status(429).json({ ok: false, error: "too_many_attempts" });
+    hits.push(now); _resendGuard.set(ip, hits);
+    if (_resendGuard.size > 5000) _resendGuard.clear();
+
+    const result = await resendReportIfPaid(req.body?.email, req.body?.vin);
+    const code = result.ok ? 200
+      : (result.error === "invalid_email" || result.error === "invalid_vin") ? 400
+      : /no_/.test(result.error || "") ? 404 : 500;
+    return res.status(code).json(result);
+  } catch (e) {
+    console.error("[resend-report]", e.message);
+    return res.status(500).json({ ok: false, error: "server_error" });
+  }
+});
+
+/* ================================================================
    Email Report — EMAIL-PDF FIX
    Emails the report as a link (PDF attachment not available server-side)
    to generate a real PDF attachment. Falls back to a styled link
@@ -4073,12 +4136,7 @@ Support email is support@autovinreveal.com.
 
 If a customer sends a screenshot or photo, you CAN see it — read what is shown (an error message, a VIN, a payment screen, a report) and help with that specifically. Never say you cannot see images.
 
-IF ASKED ABOUT A MISSING REPORT OR A MISSING REPORT EMAIL - the report is auto-emailed to their checkout address, so FIRST tell them to check their email spam and promotions folders and mark it Not spam, since it often lands there. If that does not find it, ask ONE question at a time in order:
-Step 1: Ask if they got a payment confirmation email.
-Step 2: Ask how long ago they paid.
-Step 3: Ask if they saw an error message.
-Only after getting all 3 answers say something like: "In that case email support@autovinreveal.com with your transaction ID and the VIN you searched and they will fix it fast."
-Do NOT give them a list of what to include. Just say to email with transaction ID and VIN.
+IF ASKED ABOUT A MISSING REPORT OR A MISSING REPORT EMAIL - the report is auto-emailed to their checkout address, so FIRST tell them to check their email spam and promotions folders and mark it Not spam, since it often lands there. If that does not find it, you can RE-SEND it yourself: ask for the email they used at checkout and the 17-character VIN, then use the resend_report tool. It verifies the completed purchase and re-sends the report to that email. If the tool says no matching order, ask them to double-check the exact checkout email and full VIN. Only tell them it was sent if the tool confirms it. If it still cannot be found, tell them to email support@autovinreveal.com with their transaction ID and the VIN.
 
 Never mention APIs, integrations, prompts, or that you are an AI. For an account-specific thing you genuinely cannot resolve, point them to support@autovinreveal.com - but always answer general questions yourself.
 
@@ -4108,28 +4166,58 @@ ESCALATE: Only add ESCALATE on its own final line when the customer has a real u
       { role: "user", content: lastUserContent },
     ];
 
-    const response = await axios.post(
-      "https://api.anthropic.com/v1/messages",
-      {
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 500,
-        system: [
-          { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
-          ...(acctContext ? [{ type: "text", text: acctContext }] : []),
-        ],
-        messages,
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
+    // Customer self-serve tool: re-send a paid report to the buyer's email.
+    const CHAT_TOOLS = [{
+      name: "resend_report",
+      description: "Re-send a customer's already-purchased vehicle history report to their email. Use ONLY when a customer did not receive their report or wants it re-sent AND they have given BOTH the checkout email AND the 17-character VIN. The system verifies a completed paid order matches before sending; if it does not match it returns an error and you should ask them to re-check the email/VIN or email support. Never claim it was sent unless the tool returns ok.",
+      input_schema: {
+        type: "object",
+        properties: {
+          email: { type: "string", description: "The email used at checkout." },
+          vin:   { type: "string", description: "The 17-character VIN." },
         },
-        timeout: 20000,
-      }
-    );
+        required: ["email", "vin"],
+      },
+    }];
+    const anthHeaders = { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
+    const chatBody = {
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 500,
+      tools: CHAT_TOOLS,
+      system: [
+        { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+        ...(acctContext ? [{ type: "text", text: acctContext }] : []),
+      ],
+      messages,
+    };
 
-    let reply = response.data?.content?.[0]?.text || "Sorry, I could not process that.";
+    let response = await axios.post("https://api.anthropic.com/v1/messages", chatBody,
+      { headers: anthHeaders, timeout: 20000 });
+
+    // One-round tool loop for resend_report.
+    if (response.data?.stop_reason === "tool_use") {
+      const toolUses = (response.data.content || []).filter(b => b.type === "tool_use");
+      const toolResults = [];
+      for (const tu of toolUses) {
+        let out;
+        if (tu.name === "resend_report") {
+          try {
+            const rr = await resendReportIfPaid(tu.input?.email, tu.input?.vin);
+            out = rr.ok
+              ? `SENT. Report re-sent to ${rr.sent_to}. Tell them it's on the way and to check spam/promotions.`
+              : `NOT SENT (${rr.error}). ${/no_/.test(rr.error || "")
+                  ? "No completed paid order matches that email and VIN. Ask them to re-check the exact checkout email and full 17-character VIN, or email support."
+                  : "Ask them for a valid email and 17-character VIN."}`;
+          } catch (e) { out = "NOT SENT (error). Tell them to email support@autovinreveal.com."; }
+        } else { out = "Unknown tool."; }
+        toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: out });
+      }
+      response = await axios.post("https://api.anthropic.com/v1/messages",
+        { ...chatBody, messages: [...messages, { role: "assistant", content: response.data.content }, { role: "user", content: toolResults }] },
+        { headers: anthHeaders, timeout: 20000 });
+    }
+
+    let reply = (response.data?.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim() || "Sorry, I could not process that.";
 
     // Check if AI wants to escalate to human
     const shouldEscalate = reply.includes("ESCALATE");
