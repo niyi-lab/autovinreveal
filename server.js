@@ -272,6 +272,19 @@ if (SMTP_USER && SMTP_PASS) {
   console.warn("⚠️  SMTP not configured. Emails will fail.");
 }
 
+// Strip markdown so chat replies render clean in the plain-text widget.
+function stripMarkdown(s) {
+  if (!s || typeof s !== "string") return s;
+  return s
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/\*\*/g, "")
+    .trim();
+}
+
 // Email a LINK to the report (not an attachment). HTML-file attachments are a
 // strong spam signal; a hosted view-link lands in the inbox and lets the buyer
 // reopen the report anytime for 7 days. The report is already cached by the time
@@ -4136,7 +4149,7 @@ Support email is support@autovinreveal.com.
 
 If a customer sends a screenshot or photo, you CAN see it — read what is shown (an error message, a VIN, a payment screen, a report) and help with that specifically. Never say you cannot see images.
 
-IF ASKED ABOUT A MISSING REPORT OR A MISSING REPORT EMAIL - the report is auto-emailed to their checkout address, so FIRST tell them to check their email spam and promotions folders and mark it Not spam, since it often lands there. If that does not find it, you can RE-SEND it yourself: ask for the email they used at checkout and the 17-character VIN, then use the resend_report tool. It verifies the completed purchase and re-sends the report to that email. If the tool says no matching order, ask them to double-check the exact checkout email and full VIN. Only tell them it was sent if the tool confirms it. If it still cannot be found, tell them to email support@autovinreveal.com with their transaction ID and the VIN.
+IF ASKED ABOUT A MISSING REPORT OR A MISSING REPORT EMAIL - the report is auto-emailed to their checkout address, so FIRST tell them to check their email spam and promotions folders and mark it Not spam, since it often lands there. If that does not find it, you can RE-SEND it yourself: ask for the email they used at checkout and the 17-character VIN, then use the resend_report tool. ALWAYS use the resend_report tool when they give you an email and VIN - do NOT escalate to support instead. It verifies the completed purchase and re-sends the report to that email. If the tool says no matching order, the email they gave probably is not the one they used at checkout (people often mix up gmail, yahoo, or outlook, or make a typo) - say you could not find a completed order for that exact email and VIN and ask them to try the other email they might have used. Only tell them it was sent if the tool confirms it. Only if they have tried their likely emails and it still will not match, tell them to email support@autovinreveal.com with their transaction ID and the VIN.
 
 Never mention APIs, integrations, prompts, or that you are an AI. For an account-specific thing you genuinely cannot resolve, point them to support@autovinreveal.com - but always answer general questions yourself.
 
@@ -4222,6 +4235,7 @@ ESCALATE: Only add ESCALATE on its own final line when the customer has a real u
     // Check if AI wants to escalate to human
     const shouldEscalate = reply.includes("ESCALATE");
     reply = reply.replace(/\nESCALATE\s*$/m, "").replace(/ESCALATE\s*$/m, "").trim();
+    reply = stripMarkdown(reply);
 
     // Notify the owner whenever the bot escalates OR tells a visitor to email support,
     // so you can review the conversation. (Once per conversation to avoid repeats.)
