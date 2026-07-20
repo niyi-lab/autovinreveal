@@ -558,6 +558,29 @@ async function cfcGetReport(vin, type = "carfax") {
   }
 }
 
+// Provider health gate — BLOCK new report purchases when the provider can't
+// deliver (e.g. outbound IP not whitelisted → Cloudflare 403). Probes a known VIN,
+// caches ~60s. Fails OPEN on odd errors; blocks on clear provider-down signals.
+let _providerHealth = { ok: true, at: 0 };
+const PROVIDER_HEALTH_TTL_MS = 60 * 1000;
+const PROVIDER_HEALTH_VIN = process.env.PROVIDER_HEALTH_VIN || "1FTFW1ED3MFC07365";
+async function providerHealthy() {
+  const now = Date.now();
+  if (now - _providerHealth.at < PROVIDER_HEALTH_TTL_MS) return _providerHealth.ok;
+  let ok = true;
+  try {
+    await cfcGetReport(PROVIDER_HEALTH_VIN, "carfax");
+    ok = true;
+  } catch (e) {
+    const msg = String(e.message || "");
+    if (/RV_AUTH|RV_LIMIT|RV_UNAVAILABLE|RV_EMPTY|403|attention required|cloudflare/i.test(msg)) ok = false;
+    else ok = true;
+  }
+  _providerHealth = { ok, at: now };
+  console.log(`[provider-health] ${ok ? "OK" : "DOWN"}`);
+  return ok;
+}
+
 // ── Fetch from api.reports.vin ───────────────────────────────────────────────
 async function fetchFromReportsVin(vin, type = "carfax") {
   const key = process.env.REPORTSVIN_API_KEY;
@@ -2515,6 +2538,14 @@ console.log(`[Provider] Ready — daily limit: ${process.env.CCF_DAILY_HARD_LIMI
 ================================================================ */
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
+    // Don't let anyone pay when we can't deliver a report right now.
+    if (!(await providerHealthy())) {
+      return res.status(503).json({
+        error: "reports_unavailable",
+        message: "Reports are temporarily unavailable while we resolve an issue with our data provider — please try again shortly. You have not been charged.",
+      });
+    }
+
     // ── Cloudflare Turnstile verification ──────────────────────────────────
     // Blocks headless bots before they can reach Stripe
     const turnstileToken = req.body?.turnstile_token;
