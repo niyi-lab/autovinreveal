@@ -509,6 +509,14 @@ async function fetchFromCheapcarfax(vin, _type = "carfax") {
 
     if (r.status === 401) throw new Error("RV_AUTH_ERROR:Invalid CheapCARFAX API key");
     if (r.status === 429) throw new Error("RV_RATELIMIT:Rate limit exceeded");
+    // Provider 5xx (incl. 500 "Error fetching report") = couldn't generate the report
+    // for this VIN right now — transient/unavailable, not a hard error. Retry, then
+    // surface a friendly "unavailable, not charged" message.
+    if (r.status >= 500) {
+      lastTransient = (r.data?.message || `HTTP ${r.status}`).toString();
+      if (attempt < MAX_ATTEMPTS) { await new Promise((s) => setTimeout(s, 2500 * attempt)); continue; }
+      throw new Error("RV_UNAVAILABLE:" + lastTransient);
+    }
     if (r.status === 400 || r.status === 404) {
       const msg = (r.data?.message || r.data?.error || JSON.stringify(r.data) || "").toString();
       if (/daily limit/i.test(msg))     throw new Error("RV_DAILY_LIMIT:" + msg);
@@ -558,27 +566,35 @@ async function cfcGetReport(vin, type = "carfax") {
   }
 }
 
-// Provider health gate — BLOCK new report purchases when the provider can't
-// deliver (e.g. outbound IP not whitelisted → Cloudflare 403). Probes a known VIN,
-// caches ~60s. Fails OPEN on odd errors; blocks on clear provider-down signals.
+// Provider health gate — BLOCKS new report purchases only when the provider is
+// CLEARLY unreachable (Cloudflare 403 / IP block). MUST NOT consume a report credit:
+// probes a NON-report endpoint (/api/user/limits). Also fed by real report outcomes
+// via reportProviderResult(). Fails OPEN on ambiguous errors.
 let _providerHealth = { ok: true, at: 0 };
-const PROVIDER_HEALTH_TTL_MS = 60 * 1000;
-const PROVIDER_HEALTH_VIN = process.env.PROVIDER_HEALTH_VIN || "1FTFW1ED3MFC07365";
+const PROVIDER_HEALTH_TTL_MS = 5 * 60 * 1000;   // 5 min; real fetches keep it fresher
 async function providerHealthy() {
   const now = Date.now();
   if (now - _providerHealth.at < PROVIDER_HEALTH_TTL_MS) return _providerHealth.ok;
   let ok = true;
   try {
-    await cfcGetReport(PROVIDER_HEALTH_VIN, "carfax");
-    ok = true;
-  } catch (e) {
-    const msg = String(e.message || "");
-    if (/RV_AUTH|RV_LIMIT|RV_UNAVAILABLE|RV_EMPTY|403|attention required|cloudflare/i.test(msg)) ok = false;
-    else ok = true;
-  }
+    const r = await axios.get(`${CHEAPCARFAX_BASE}/api/user/limits`, {
+      headers: cheapcarfaxHeaders(), timeout: 10000, validateStatus: () => true,
+    });
+    const bodyStr = typeof r.data === "string" ? r.data : JSON.stringify(r.data || "");
+    if (r.status === 401 || r.status === 403 || /attention required|cloudflare/i.test(bodyStr)) ok = false;
+    else ok = true;   // reachable (IP got through)
+  } catch (_) { ok = true; }   // network blip → don't block sales
   _providerHealth = { ok, at: now };
-  console.log(`[provider-health] ${ok ? "OK" : "DOWN"}`);
+  console.log(`[provider-health] ${ok ? "OK" : "DOWN"} (non-report probe)`);
   return ok;
+}
+
+// Keep health fresh for FREE from real report outcomes (no extra provider calls).
+function reportProviderResult(errMsg) {
+  if (!errMsg) { _providerHealth = { ok: true, at: Date.now() }; return; }
+  if (/RV_AUTH|403|attention required|cloudflare/i.test(String(errMsg))) {
+    _providerHealth = { ok: false, at: Date.now() };
+  }
 }
 
 // ── Fetch from api.reports.vin ───────────────────────────────────────────────
@@ -2756,6 +2772,31 @@ app.post("/api/cancel-subscription", async (req, res) => {
    one attempt, status + JSON body relayed as-is so the caller's own
    retry/error handling applies. Auth: x-proxy-secret header.
 ================================================================ */
+// Reachability PING — hits a NON-report cheapcarfax endpoint so CFC can check the
+// provider is reachable (IP whitelisted) WITHOUT consuming a report credit. Returns
+// the upstream status; 401/403 = IP blocked, anything else = the IP got through.
+app.get("/api/provider-proxy/cheapcarfax-ping", async (req, res) => {
+  const given = String(req.headers["x-proxy-secret"] || "");
+  const ok = PROVIDER_PROXY_SECRET
+    && given.length === PROVIDER_PROXY_SECRET.length
+    && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(PROVIDER_PROXY_SECRET));
+  if (!ok) return res.status(401).json({ message: "Unauthorized" });
+  try {
+    // /api/user/limits does NOT generate a report → no credit spent.
+    const r = await axios.get(`${CHEAPCARFAX_BASE}/api/user/limits`, {
+      headers: cheapcarfaxHeaders(), timeout: 10000, validateStatus: () => true,
+    });
+    const bodyStr = typeof r.data === "string" ? r.data : JSON.stringify(r.data || "");
+    const blocked = r.status === 401 || r.status === 403 || /attention required|cloudflare/i.test(bodyStr);
+    console.log(`[ProviderPing] cheapcarfax /user/limits → ${r.status} (${blocked ? "BLOCKED" : "reachable"})`);
+    res.status(blocked ? 403 : 200).json({ reachable: !blocked, upstream_status: r.status });
+  } catch (err) {
+    // Network error to the provider — report reachable:true so we don't block sales
+    // on a blip (a real IP block returns a 403 body, not a network error).
+    res.status(200).json({ reachable: true, note: "probe error: " + err.message });
+  }
+});
+
 app.get("/api/provider-proxy/cheapcarfax/:vin", async (req, res) => {
   const given = String(req.headers["x-proxy-secret"] || "");
   const ok = PROVIDER_PROXY_SECRET
@@ -3189,11 +3230,13 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
         raw           = fetched.raw;
         fetchedVehicle = fetched.vehicle;
         justFetched   = true;
+        reportProviderResult(null);   // real success → provider healthy (free signal)
         writeCache(targetVin, type, raw);
         // Guests have no vin_queries row — persist their fresh pull to the global
         // cache so the next buyer of this VIN reuses it (no double provider charge).
         if (!currentUser) await writeGlobalCache(targetVin, type, raw, fetchedVehicle);
       } catch (e) {
+        reportProviderResult(e.message);   // clear IP/auth block updates health for free
         console.error(`[Fetch Failed] User: ${currentUser?.id || "guest"} | VIN: ${targetVin} | Err: ${e.message}`);
         if (pendingChargeId) {
           await refundAndResolve(pendingChargeId, currentUser?.id || null, oneTimeSession,
