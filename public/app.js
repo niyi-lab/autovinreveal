@@ -986,7 +986,7 @@ async function downloadHistoryPDF(item, btn = null) {
     // Use dedicated PDF endpoint — streams PDF or print-dialog HTML from CFC
     const url = '/api/download-pdf?vin=' + encodeURIComponent(vin);
     const r   = await apiFetch(url, { headers: { Authorization: `Bearer ${token}` } }, 60_000);
-    if (!r.ok) { showToast('PDF failed — ' + r.status, 'error'); restore(); return; }
+    if (!r.ok) { showToast('We couldn’t generate the PDF right now — please try again in a moment.', 'error'); restore(); return; }
     const ct = r.headers.get('content-type') || '';
     if (ct.includes('application/pdf')) {
       // Real PDF — trigger download with a clean, professional filename.
@@ -1016,11 +1016,11 @@ async function copyShareLink(vin, type) {
       { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ vin, type }) },
       10_000
     );
-    if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
+    if (!r.ok) throw new Error('share failed');
     const { url } = await r.json();
     await navigator.clipboard.writeText(url);
     showToast('Share link copied!', 'ok');
-  } catch (e) { showToast(e.message || 'Could not create share link', 'error'); }
+  } catch (e) { showToast('Could not create a share link right now — please try again.', 'error'); }
 }
 
 /* ================================

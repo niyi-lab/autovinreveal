@@ -680,7 +680,9 @@
           }
 
           if (!r.ok) {
-            showToast(await r.text() || `HTTP ${r.status}`, 'error');
+            let m = '';
+            try { const j = await r.clone().json(); m = j.message || (j.error === 'invalid_vin' ? 'VIN not found — please double-check it. You were not charged.' : ''); } catch (_) {}
+            showToast(m || 'We couldn’t load that report right now — please try again in a moment.', 'error');
             return;
           }
           openReport(await r.text(), vin);
@@ -728,11 +730,11 @@
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({ vin, type: item.type }),
           }, 10_000);
-          if (!r.ok) throw new Error(await r.text());
+          if (!r.ok) throw new Error('share failed');
           const { url } = await r.json();
           await navigator.clipboard.writeText(url);
           showToast('Share link copied!', 'ok');
-        } catch (e) { showToast(e.message || 'Could not create share link', 'error'); }
+        } catch (e) { showToast('Could not create a share link right now — please try again.', 'error'); }
       }
 
       /* ============================================================
