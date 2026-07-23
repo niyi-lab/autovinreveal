@@ -2564,11 +2564,12 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
     // ── Cloudflare Turnstile verification ──────────────────────────────────
     // Blocks headless bots before they can reach Stripe
+    // A token is VERIFIED when present, but a missing one must not block the sale:
+    // the widget lives inside the buy modal and often hasn't solved yet (slow load,
+    // ad-blockers, privacy browsers, mobile), which was silently 403-ing real buyers.
+    // Same fail-open reasoning as the Cloudflare-unreachable branch below.
     const turnstileToken = req.body?.turnstile_token;
-    if (process.env.TURNSTILE_SECRET_KEY) {
-      if (!turnstileToken) {
-        return res.status(403).json({ error: "captcha_required", message: "Please complete the verification." });
-      }
+    if (process.env.TURNSTILE_SECRET_KEY && turnstileToken) {
       try {
         const verifyParams = new URLSearchParams();
         verifyParams.append("secret",   process.env.TURNSTILE_SECRET_KEY);

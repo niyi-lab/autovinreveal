@@ -1268,14 +1268,15 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
     // Get Turnstile token if widget is present
     const turnstileEl = document.querySelector('.cf-turnstile');
     if (turnstileEl) {
-      // Wait up to 3s for turnstile to be ready
+      // Poll up to ~4s for a token. The widget sits inside the buy modal, so it
+      // often only solves once the modal is visible. A missing token no longer
+      // blocks checkout server-side — we just send one when we can get it.
       let token = window.turnstile?.getResponse();
-      if (!token) {
-        await new Promise(r => setTimeout(r, 1500));
+      for (let i = 0; i < 8 && !token; i++) {
+        await new Promise(r => setTimeout(r, 500));
         token = window.turnstile?.getResponse();
       }
-      if (token) body.turnstile_token = token;
-      window.turnstile?.reset();
+      if (token) { body.turnstile_token = token; window.turnstile?.reset(); }
     }
 
     const r = await apiFetch(
