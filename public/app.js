@@ -136,7 +136,7 @@ const _sentConversions = new Set();
 function trackPurchase(value = 5.99, txnId = null) {
   const amount = Number(value) || 5.99;
   try {
-    fbq('track', 'Purchase', {
+    window.fbq?.('track', 'Purchase', {
       value: amount, currency: 'USD',
       contents: [{ id: 'VinReport', quantity: 1 }],
       content_ids: ['VinReport'], content_type: 'product'
@@ -144,7 +144,10 @@ function trackPurchase(value = 5.99, txnId = null) {
   } catch {}
 
   try {
-    if (!GADS_PURCHASE_LABEL || typeof gtag !== 'function') return;
+    // app.js is loaded as type="module", which has its OWN scope — a bare
+    // gtag(...) does NOT resolve to the inline tag's function and throws.
+    // Always go through window.
+    if (!GADS_PURCHASE_LABEL || typeof window.gtag !== 'function') return;
     // Stable id per sale: the Stripe session when we have it, else a
     // per-session fallback so one pageview can't fire twice.
     const id = txnId || `avr-${Date.now()}`;
@@ -157,7 +160,7 @@ function trackPurchase(value = 5.99, txnId = null) {
       sessionStorage.setItem('gads_conv', JSON.stringify(seen.slice(-20)));
     } catch (_) {}
 
-    gtag('event', 'conversion', {
+    window.gtag('event', 'conversion', {
       send_to: `${GADS_ID}/${GADS_PURCHASE_LABEL}`,
       value: amount,
       currency: 'USD',
