@@ -108,12 +108,60 @@ function showToast(message, type = 'error') {
   }, 4000);
 }
 
-function trackPurchase(value = 5.99) {
+/* Google Ads conversion. Label comes from the Ads "event snippet"
+   (send_to: 'AW-18241895372/<LABEL>'). Until it's filled in, the Ads
+   conversion is skipped and only the Facebook Pixel fires. */
+const GADS_ID = 'AW-18241895372';
+const GADS_PURCHASE_LABEL = '';   // <-- paste the label from the event snippet
+
+/* Real USD price per package, so a $58 bundle isn't reported as a $5.99 sale.
+   Keep in sync with the pricing cards. */
+const PLAN_VALUES = {
+  single: 5.99, pack5: 20, pack20: 58,
+  '5pack': 20, '20pack': 58,          // Stripe price_id spellings
+  sub_starter: 39, sub_dealer: 89, sub_pro: 169,
+};
+function getPendingAmount() {
+  try {
+    const k = localStorage.getItem('purchaseKey');
+    if (k && PLAN_VALUES[k]) return PLAN_VALUES[k];
+  } catch (_) {}
+  return null;
+}
+
+/* Fired ONLY after a report is actually delivered, so failed provider pulls
+   and refunds never count as conversions. txnId de-duplicates: a page refresh
+   or a retry that re-enters this path won't double-count the same sale. */
+const _sentConversions = new Set();
+function trackPurchase(value = 5.99, txnId = null) {
+  const amount = Number(value) || 5.99;
   try {
     fbq('track', 'Purchase', {
-      value, currency: 'USD',
+      value: amount, currency: 'USD',
       contents: [{ id: 'VinReport', quantity: 1 }],
       content_ids: ['VinReport'], content_type: 'product'
+    });
+  } catch {}
+
+  try {
+    if (!GADS_PURCHASE_LABEL || typeof gtag !== 'function') return;
+    // Stable id per sale: the Stripe session when we have it, else a
+    // per-session fallback so one pageview can't fire twice.
+    const id = txnId || `avr-${Date.now()}`;
+    if (_sentConversions.has(id)) return;
+    _sentConversions.add(id);
+    try {
+      const seen = JSON.parse(sessionStorage.getItem('gads_conv') || '[]');
+      if (seen.includes(id)) return;
+      seen.push(id);
+      sessionStorage.setItem('gads_conv', JSON.stringify(seen.slice(-20)));
+    } catch (_) {}
+
+    gtag('event', 'conversion', {
+      send_to: `${GADS_ID}/${GADS_PURCHASE_LABEL}`,
+      value: amount,
+      currency: 'USD',
+      transaction_id: id,
     });
   } catch {}
 }
@@ -541,7 +589,7 @@ async function resumePendingPurchase() {
     clearPending();
     const guestSession = (!user && stripeSessionId && pending.vin) ? stripeSessionId : null;
     openReport(html, pending.vin || '', guestSession ? { guest: true, oneTimeSession: guestSession } : {});
-    trackPurchase(pending.amount || 5.99);
+    trackPurchase(pending.amount || 5.99, stripeSessionId || null);
     showToast('Report ready!', 'ok');
     addToHistory({ vin: pending.vin, type: pending.type || 'carfax', ts: Date.now(), session: guestSession });
     renderHistory();
@@ -570,9 +618,11 @@ async function handleWhopReturn() {
       const j = await r.json().catch(() => ({}));
       clearWhopClaim(); clearPending();
       if (j.token) {                             // single report → land on it
-        trackPurchase(5.99);
+        trackPurchase(5.99, whopPaymentId || null);
         window.location.replace(`/view/${j.token}`);
       } else {                                   // pack → credits added
+        // Bundles are real revenue too — report their actual value, not $5.99.
+        trackPurchase(getPendingAmount() || 5.99, whopPaymentId || null);
         await refreshBalancePill();
         showToast('Credits added to your account.', 'ok');
       }
@@ -591,6 +641,7 @@ async function handleSuccessIfNeeded() {
     if (getWhopClaim()) {
       await handleWhopReturn();
     } else {
+      trackPurchase(getPendingAmount() || 5.99, stripeSessionId || null);
       await refreshBalancePill();
       showToast('Payment confirmed. If you bought credits they’ve been added; a single report is emailed to you.', 'ok');
     }
@@ -604,6 +655,7 @@ async function handleSuccessIfNeeded() {
     // Subscription credits are granted server-side by the invoice.paid webhook,
     // which can land a moment after the redirect — refresh the balance a few times.
     showToast('Subscription active — your monthly credits are being added.', 'ok');
+    trackPurchase(getPendingAmount() || 39, stripeSessionId || null);
     for (let i = 0; i < 5; i++) { await refreshBalancePill(); await new Promise(r => setTimeout(r, 1500)); }
     if (onSuccessPage()) { setTimeout(() => { window.location.href = '/'; }, 800); }
     else {
@@ -625,7 +677,7 @@ async function handleSuccessIfNeeded() {
       const html = await r.text();
       const { user } = await getSession();
       openReport(html, vinParam, user ? {} : { guest: true, oneTimeSession: stripeSessionId });
-      trackPurchase(5.99);
+      trackPurchase(5.99, stripeSessionId || null);
       return;
     } catch (e) {
       console.error('[report] post-payment fetch failed:', e.message);
@@ -1257,6 +1309,9 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
   }
   try {
     await ensureBackendReady();
+    // Remember the package so the returning buyer's conversion reports its
+    // real value (no price_id = single report).
+    try { localStorage.setItem('purchaseKey', price_id || 'single'); } catch {}
     const body = { user_id: user?.id || null, price_id };
     if (pendingReport?.vin) {
       localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport));
@@ -1309,6 +1364,9 @@ async function startWhopPurchase({ user, key, pendingReport = null }) {
     showToast('Enter a VIN first — a single report is for one specific vehicle.', 'error'); return;
   }
   if (pendingReport?.vin) { try { localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport)); } catch {} }
+  // Remember which package was bought so the conversion reports its real value
+  // when the buyer returns from checkout.
+  try { localStorage.setItem('purchaseKey', key); } catch {}
   // PayGate handles one-time report plans (single/pack5/pack20); recurring subs
   // stay on Whop (PayGate can't rebill). The claim/return flow is identical —
   // both store 'whopClaim' and fulfil via the same server pipeline.
