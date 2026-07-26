@@ -112,7 +112,7 @@ function showToast(message, type = 'error') {
    (send_to: 'AW-18241895372/<LABEL>'). Until it's filled in, the Ads
    conversion is skipped and only the Facebook Pixel fires. */
 const GADS_ID = 'AW-18241895372';
-const GADS_PURCHASE_LABEL = '';   // <-- paste the label from the event snippet
+const GADS_PURCHASE_LABEL = 'bUQgCNKw1NYcEMz3tPpD';
 
 /* Real USD price per package, so a $58 bundle isn't reported as a $5.99 sale.
    Keep in sync with the pricing cards. */
