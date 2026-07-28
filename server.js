@@ -597,6 +597,90 @@ function reportProviderResult(errMsg) {
   }
 }
 
+/* ── Provider watchdog ────────────────────────────────────────────
+   Render rotates our outbound IP on every restart. If it lands on an IP
+   cheapcarfax hasn't whitelisted, the provider 401/403s, the purchase-block
+   engages and BOTH sites silently stop taking money. Previously the only
+   signal was "sales went quiet", which cost a full day.
+
+   This probes a NON-report endpoint (no credit spent) every 5 min and emails
+   on every state CHANGE — down and recovered — including the current egress
+   IP so it's obvious whether it's a whitelist miss.                        */
+const WATCHDOG_MS = 5 * 60 * 1000;
+const WHITELISTED_IPS = (process.env.WHITELISTED_EGRESS_IPS ||
+  "74.220.48.163,74.220.48.165,74.220.48.170,74.220.48.174,74.220.48.177")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+let _watchdogLastState = null;   // null = unknown (first run), true = up, false = down
+
+async function currentEgressIp() {
+  try {
+    const r = await axios.get("https://api.ipify.org?format=json", { timeout: 8000 });
+    return r.data?.ip || "unknown";
+  } catch (_) { return "unknown"; }
+}
+
+async function providerWatchdog() {
+  let up = true, detail = "";
+  try {
+    const r = await axios.get(`${CHEAPCARFAX_BASE}/api/user/limits`, {
+      headers: cheapcarfaxHeaders(), timeout: 12_000, validateStatus: () => true,
+    });
+    const body = typeof r.data === "string" ? r.data : JSON.stringify(r.data || "");
+    up = !(r.status === 401 || r.status === 403 || /attention required|cloudflare/i.test(body));
+    detail = `HTTP ${r.status}`;
+  } catch (e) {
+    // Network blip — don't cry wolf; treat as up (matches providerHealthy()).
+    up = true; detail = "probe error: " + e.message;
+  }
+
+  if (_watchdogLastState === null) { _watchdogLastState = up; }
+  if (up === _watchdogLastState) return;         // no change → stay quiet
+  _watchdogLastState = up;
+
+  const ip = await currentEgressIp();
+  const known = WHITELISTED_IPS.includes(ip);
+  if (!up) {
+    notifyOwner(`provider-down:${ip}`,
+      `🔴 AutoVINReveal: reports provider DOWN — sales are BLOCKED`,
+      `The report provider is rejecting our requests, so checkout is blocked on ` +
+      `BOTH AutoVINReveal and CheapestCarFax. No one can buy right now.\n\n` +
+      `Probe result: ${detail}\n` +
+      `Server outbound IP: ${ip}\n` +
+      `Whitelisted with provider: ${known ? "YES" : "NO — this is almost certainly the cause"}\n\n` +
+      (known
+        ? `The IP IS whitelisted, so this may be a provider outage or an API-key/credit issue. Check the cheapcarfax panel.\n`
+        : `FIX: redeploy on Render to re-roll the outbound IP, or ask cheapcarfax to whitelist ${ip}.\n`) +
+      `\nKnown-good IPs: ${WHITELISTED_IPS.join(", ")}`);
+  } else {
+    notifyOwner(`provider-up:${ip}`,
+      `🟢 AutoVINReveal: reports provider RECOVERED — sales are live`,
+      `The provider is reachable again and checkout works on both sites.\n\n` +
+      `Probe result: ${detail}\nServer outbound IP: ${ip} (${known ? "whitelisted" : "NOT on the known whitelist"})`);
+  }
+}
+
+// Start after a short delay so it doesn't fire during boot.
+setTimeout(() => {
+  providerWatchdog().catch(() => {});
+  setInterval(() => providerWatchdog().catch(() => {}), WATCHDOG_MS);
+}, 60_000);
+
+// Owner-only health snapshot (same secret as /api/myip) — for manual checks.
+app.get("/api/provider-status", async (req, res) => {
+  const given = String(req.query.key || "");
+  if (!PROVIDER_PROXY_SECRET || given !== PROVIDER_PROXY_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  const ip = await currentEgressIp();
+  res.json({
+    provider_ok: _watchdogLastState,
+    cached_health: _providerHealth,
+    egress_ip: ip,
+    ip_whitelisted: WHITELISTED_IPS.includes(ip),
+    whitelisted_ips: WHITELISTED_IPS,
+  });
+});
+
 // ── Fetch from api.reports.vin ───────────────────────────────────────────────
 async function fetchFromReportsVin(vin, type = "carfax") {
   const key = process.env.REPORTSVIN_API_KEY;
