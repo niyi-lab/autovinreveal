@@ -64,7 +64,6 @@ import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 import { createClient } from "@supabase/supabase-js";
 import axios from "axios";
-import FormData from "form-data";
 import fs from "fs";
 import Stripe from "stripe";
 import { gunzipSync } from "zlib";

@@ -3,3 +3,12 @@ node_modules
 .env.*
 !.env.example
 .cache
+# Runtime report cache — real customer report payloads, never commit
+cache/
+*.b64
+# Runtime state files from retired flows
+.consumed_sessions.json
+.share_tokens.json
+.viewer_urls.json
+# PowerShell redirect artifact
+$null
