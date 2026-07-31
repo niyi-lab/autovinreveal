@@ -193,12 +193,17 @@ const CREDITS_PER_SINGLE = Number(process.env.CREDITS_PER_SINGLE || "1");
 const CREDITS_PER_5PACK  = Number(process.env.CREDITS_PER_5PACK  || "5");
 const CREDITS_PER_20PACK = Number(process.env.CREDITS_PER_20PACK || "20");
 
-// Inline price_data for one-time purchases — amount in cents, USD. Mirrors the
-// historical amounts ($5.99 / $20 / $58) so no dashboard Products are required.
+// Inline price_data for one-time purchases — amount in cents, USD; no dashboard
+// Products required. Repriced 2026-07-31 (provider cost dropped): every bundle
+// stays ABOVE the equivalent membership per-report rate on purpose — members
+// always pay less per report.
 const ONE_TIME_PRICES = {
-  single: { unit_amount: 599,  credits: CREDITS_PER_SINGLE, name: "KHLIN – Single" },
-  five:   { unit_amount: 2000, credits: CREDITS_PER_5PACK,  name: "KHLIN – 5 Bundle" },
-  twenty: { unit_amount: 5800, credits: CREDITS_PER_20PACK, name: "KHLIN – 20 Bundle" },
+  single:  { unit_amount: 599,   credits: CREDITS_PER_SINGLE, name: "KHLIN – Single" },
+  five:    { unit_amount: 1800,  credits: CREDITS_PER_5PACK,  name: "KHLIN – 5 Bundle" },
+  ten:     { unit_amount: 2900,  credits: 10,                 name: "KHLIN – 10 Bundle" },
+  twenty:  { unit_amount: 4900,  credits: CREDITS_PER_20PACK, name: "KHLIN – 20 Bundle" },
+  fifty:   { unit_amount: 9900,  credits: 50,                 name: "KHLIN – 50 Bundle" },
+  hundred: { unit_amount: 18500, credits: 100,                name: "KHLIN – 100 Bundle" },
 };
 
 // Subscription price IDs
@@ -1883,7 +1888,7 @@ async function sendReportEmail(to, vin, vehicle, token, attachPdf = false) {
       <tr><td style="padding:0 32px 24px;">
         <div style="background:#eff6ff;border:1px solid #dbeafe;border-radius:10px;padding:18px 20px;">
           <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#1e3a8a;">Checking more than one car?</p>
-          <p style="margin:0 0 12px;font-size:13px;color:#475569;line-height:1.5;">Save with a bundle &mdash; credits never expire:<br><b>5 reports for $20</b> ($4 each) &middot; <b>20 reports for $58</b> ($2.90 each).</p>
+          <p style="margin:0 0 12px;font-size:13px;color:#475569;line-height:1.5;">Save with a bundle &mdash; credits never expire:<br><b>5 for $18</b> ($3.60 each) &middot; <b>20 for $49</b> ($2.45 each) &middot; <b>50 for $99</b> ($1.98 each).</p>
           <a href="${SITE_URL}/#pricing" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;font-weight:700;font-size:13px;padding:10px 20px;border-radius:7px;">See bundles &amp; save &rarr;</a>
         </div>
       </td></tr>
@@ -2887,25 +2892,34 @@ app.post("/api/create-checkout-session", async (req, res) => {
       if (user?.id) userId = user.id;
     }
 
-    const isTwentyPack = price_id === "STRIPE_PRICE_20PACK" || price_id === "20pack";
-    const isFivePack   = price_id === "STRIPE_PRICE_5PACK"  || price_id === "5pack";
+    // Pack lookup by client price_id (legacy env-var spellings kept for old clients).
+    const PACK_BY_PRICE_ID = {
+      "5pack": "five",   "STRIPE_PRICE_5PACK": "five",
+      "10pack": "ten",
+      "20pack": "twenty", "STRIPE_PRICE_20PACK": "twenty",
+      "50pack": "fifty",
+      "100pack": "hundred",
+    };
+    const PACK_INTENT = {
+      five: "buy_credits_5pack",  ten: "buy_credits_10pack", twenty: "buy_credits_20pack",
+      fifty: "buy_credits_50pack", hundred: "buy_credits_100pack",
+    };
+    const packKey = PACK_BY_PRICE_ID[String(price_id || "")] || null;
 
     // Bundles must be tied to an account, or the webhook can't store the credits
     // (guest would pay and receive nothing).
-    if ((isTwentyPack || isFivePack) && !userId) {
+    if (packKey && !userId) {
       return res.status(401).json({ error: "login_required", message: "Please sign in to buy a bundle." });
     }
 
     // A single report is for one specific vehicle — require a VIN.
-    if (!isTwentyPack && !isFivePack && !vin) {
+    if (!packKey && !vin) {
       return res.status(422).json({ error: "vin_required", message: "Please enter a VIN — single reports are for one specific vehicle." });
     }
 
     // Inline price_data (khlinautomotive account has no pre-created Prices).
-    let planKey = "single";
-    let intent  = vin ? "buy_report" : "buy_credit_single";
-    if (isTwentyPack)    { planKey = "twenty"; intent = "buy_credits_20pack"; }
-    else if (isFivePack) { planKey = "five";   intent = "buy_credits_5pack"; }
+    const planKey = packKey || "single";
+    const intent  = packKey ? PACK_INTENT[packKey] : (vin ? "buy_report" : "buy_credit_single");
     const plan = ONE_TIME_PRICES[planKey];
 
     // The VIN must NEVER appear on Stripe. Mint a random order id and store the
@@ -2947,11 +2961,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
         },
       }],
       payment_intent_data: {
-        description: vin
-          ? `KHLIN – ${orderId}`
-          : isTwentyPack ? "KHLIN – 20 Bundle"
-          : isFivePack ? "KHLIN – 5 Bundle"
-          : "KHLIN – Single",
+        description: vin ? `KHLIN – ${orderId}` : plan.name,
         metadata: { ...(vin ? { order_id: orderId } : {}) },
       },
       success_url: `${KHLIN_RETURN}/r?s=avr&d=success&session_id={CHECKOUT_SESSION_ID}&intent=${encodeURIComponent(intent)}${vin ? `&vin=${encodeURIComponent(vin)}` : ""}`,
@@ -3164,9 +3174,12 @@ const NP_API_KEY    = process.env.NOWPAYMENTS_API_KEY || "";
 const NP_IPN_SECRET = process.env.NOWPAYMENTS_IPN_SECRET || "";
 const NP_BASE       = "https://api.nowpayments.io/v1";
 const NP_AMOUNTS = {
-  single: { usd: 5.99,  credits: 1  },
-  five:   { usd: 20.00, credits: 5  },
-  twenty: { usd: 58.00, credits: 20 },
+  single:  { usd: 5.99,   credits: 1   },
+  five:    { usd: 18.00,  credits: 5   },
+  ten:     { usd: 29.00,  credits: 10  },
+  twenty:  { usd: 49.00,  credits: 20  },
+  fifty:   { usd: 99.00,  credits: 50  },
+  hundred: { usd: 185.00, credits: 100 },
 };
 
 // Recursively sort object keys for NOWPayments IPN HMAC verification
@@ -4565,7 +4578,7 @@ We accept card, Apple Pay, and Google Pay (one tap at checkout), and crypto - US
 A single report needs no account. Bundles and monthly plans need a free account.
 
 PRICING:
-Single report $5.99 (no account). 5-pack $20 ($4 each, account). 20-pack $58 ($2.90 each, account).
+Single report $5.99 (no account). Bundles (account required, credits never expire): 5 for $18 ($3.60 each), 10 for $29 ($2.90 each), 20 for $49 ($2.45 each), 50 for $99 ($1.98 each), 100 for $185 ($1.85 each). Memberships are always cheaper per report than bundles.
 Monthly subscription plans (reports come as credits that renew each month; unused credits roll over for one month only, then expire): Starter $39/mo for 20 reports, Dealer $89/mo for 50 reports, Pro $169/mo for 100 reports.
 Credits never expire.
 

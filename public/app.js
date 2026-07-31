@@ -117,8 +117,8 @@ const GADS_PURCHASE_LABEL = 'bUQgCNKw1NYcEMz3tPpD';
 /* Real USD price per package, so a $58 bundle isn't reported as a $5.99 sale.
    Keep in sync with the pricing cards. */
 const PLAN_VALUES = {
-  single: 5.99, pack5: 20, pack20: 58,
-  '5pack': 20, '20pack': 58,          // Stripe price_id spellings
+  single: 5.99, pack5: 18, pack20: 49,
+  '5pack': 18, '10pack': 29, '20pack': 49, '50pack': 99, '100pack': 185,   // Stripe price_id spellings
   sub_starter: 39, sub_dealer: 89, sub_pro: 169, sub_fleet: 349, sub_enterprise: 649,
 };
 function getPendingAmount() {
@@ -711,7 +711,10 @@ async function handleSuccessIfNeeded() {
     // Bundle / credit purchase — credits are granted by the webhook. This branch
     // was missing entirely: bundles fired NO purchase conversion (Ads saw $0 of
     // bundle revenue) and fell through to resume any stale single-report state.
-    const FALLBACK = { buy_credits_20pack: 58, buy_credits_5pack: 20, buy_credit_single: 5.99 };
+    const FALLBACK = {
+      buy_credits_100pack: 185, buy_credits_50pack: 99, buy_credits_20pack: 49,
+      buy_credits_10pack: 29, buy_credits_5pack: 18, buy_credit_single: 5.99,
+    };
     trackPurchase(getPendingAmount() || FALLBACK[intentParam] || 5.99, stripeSessionId);
     try { localStorage.removeItem('purchaseKey'); } catch {}
     clearPending();
@@ -1492,6 +1495,14 @@ $id('buy20Btn')?.addEventListener('click', async () => {
   await startStripePurchase({ user, price_id: '20pack', requireLogin: true });
   restore();
 });
+[['buy10Btn', '10pack'], ['buy50Btn', '50pack'], ['buy100Btn', '100pack']].forEach(([id, priceId]) => {
+  $id(id)?.addEventListener('click', async () => {
+    const btn = $id(id); const restore = setBtnLoading(btn, 'Redirecting…');
+    const { user } = await getSession(); closeBuyModal();
+    await startStripePurchase({ user, price_id: priceId, requireLogin: true });
+    restore();
+  });
+});
 
 $id('buy1Sidebar')?.addEventListener('click',  () => openBuyModal());
 $id('buy5Sidebar')?.addEventListener('click',  async () => {
@@ -1502,7 +1513,7 @@ $id('buy20Sidebar')?.addEventListener('click', async () => {
   const { user } = await getSession();
   await startStripePurchase({ user, price_id: '20pack', requireLogin: true });
 });
-['pricingBuy1Btn', 'pricingBuy5Btn', 'pricingBuy20Btn'].forEach(id => {
+['pricingBuy1Btn', 'pricingBuy5Btn', 'pricingBuy10Btn', 'pricingBuy20Btn', 'pricingBuy50Btn', 'pricingBuy100Btn'].forEach(id => {
   $id(id)?.addEventListener('click', () => openBuyModal());
 });
 $id('mobileViewPlans')?.addEventListener('click', () => openBuyModal());
