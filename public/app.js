@@ -119,7 +119,7 @@ const GADS_PURCHASE_LABEL = 'bUQgCNKw1NYcEMz3tPpD';
 const PLAN_VALUES = {
   single: 5.99, pack5: 20, pack20: 58,
   '5pack': 20, '20pack': 58,          // Stripe price_id spellings
-  sub_starter: 39, sub_dealer: 89, sub_pro: 169,
+  sub_starter: 39, sub_dealer: 89, sub_pro: 169, sub_fleet: 349, sub_enterprise: 649,
 };
 function getPendingAmount() {
   try {
@@ -1461,7 +1461,7 @@ async function startStripeSubscription(planKey) {
     window.location.href = url;
   } catch (e) { showToast(e.message || 'Failed to start subscription', 'error'); }
 }
-[['subStarterBtn', 'starter'], ['subDealerBtn', 'dealer'], ['subProBtn', 'pro']].forEach(([id, planKey]) => {
+[['subStarterBtn', 'starter'], ['subDealerBtn', 'dealer'], ['subProBtn', 'pro'], ['subFleetBtn', 'fleet'], ['subEnterpriseBtn', 'enterprise']].forEach(([id, planKey]) => {
   $id(id)?.addEventListener('click', async () => {
     const btn = $id(id); const restore = setBtnLoading(btn, 'Redirecting…');
     await startStripeSubscription(planKey);

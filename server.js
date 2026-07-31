@@ -202,21 +202,31 @@ const ONE_TIME_PRICES = {
 
 // Subscription price IDs
 // Stripe subscription Prices (recurring, khlin account). Tiers match the plans
-// shown on-site: Starter $39/20cr, Dealer $89/50cr, Pro $169/100cr. Each Price
-// carries metadata.credits + metadata.plan_key, so the webhook grants the right
+// shown on-site: Starter $39/20cr, Dealer $89/50cr, Pro $169/100cr,
+// Fleet $349/250cr, Enterprise $649/500cr. Each Price carries
+// metadata.credits + metadata.plan_key, so the webhook grants the right
 // amount regardless of which Price ID it is (see grantSubCreditsFromPrice).
 const SUB_STARTER  = process.env.STRIPE_PRICE_SUB_STARTER;
 const SUB_DEALER   = process.env.STRIPE_PRICE_SUB_DEALER;
 const SUB_PRO      = process.env.STRIPE_PRICE_SUB_PRO;
+// Price IDs aren't secrets — hardcoded fallbacks keep new tiers live without a
+// Render env change; env vars still override.
+const SUB_FLEET      = process.env.STRIPE_PRICE_SUB_FLEET      || "price_1Tz4YNPmWFFdHkDa9AOg8vFk";
+const SUB_ENTERPRISE = process.env.STRIPE_PRICE_SUB_ENTERPRISE || "price_1Tz4YNPmWFFdHkDa1aY4X85q";
 
 // Fallback credit map by Price ID (used if a Price has no metadata.credits).
 const SUB_CREDITS = {
-  [SUB_STARTER]: Number(process.env.SUB_CREDITS_STARTER || 20),
-  [SUB_DEALER]:  Number(process.env.SUB_CREDITS_DEALER  || 50),
-  [SUB_PRO]:     Number(process.env.SUB_CREDITS_PRO     || 100),
+  [SUB_STARTER]:    Number(process.env.SUB_CREDITS_STARTER    || 20),
+  [SUB_DEALER]:     Number(process.env.SUB_CREDITS_DEALER     || 50),
+  [SUB_PRO]:        Number(process.env.SUB_CREDITS_PRO        || 100),
+  [SUB_FLEET]:      Number(process.env.SUB_CREDITS_FLEET      || 250),
+  [SUB_ENTERPRISE]: Number(process.env.SUB_CREDITS_ENTERPRISE || 500),
 };
-// Map a plan key (starter/dealer/pro) -> Price ID, for the checkout endpoint.
-const SUB_PRICE_BY_KEY = { starter: SUB_STARTER, dealer: SUB_DEALER, pro: SUB_PRO };
+// Map a plan key -> Price ID, for the checkout endpoint.
+const SUB_PRICE_BY_KEY = {
+  starter: SUB_STARTER, dealer: SUB_DEALER, pro: SUB_PRO,
+  fleet: SUB_FLEET, enterprise: SUB_ENTERPRISE,
+};
 
 function stripeForId(id) {
   const isTest = typeof id === "string" && id.startsWith("cs_test_");
@@ -2789,9 +2799,9 @@ app.post("/api/create-subscription-session", async (req, res) => {
     const { user } = await getUser(req);
     if (!user) return res.status(401).json({ error: "Login required to subscribe" });
 
-    // Accept either a plan key (starter/dealer/pro) or a raw Price ID.
+    // Accept either a plan key (starter/dealer/pro/fleet/enterprise) or a raw Price ID.
     const priceId = SUB_PRICE_BY_KEY[String(plan_key || "").toLowerCase()] || price_id;
-    const validPrices = [SUB_STARTER, SUB_DEALER, SUB_PRO].filter(Boolean);
+    const validPrices = [SUB_STARTER, SUB_DEALER, SUB_PRO, SUB_FLEET, SUB_ENTERPRISE].filter(Boolean);
     if (!priceId || !validPrices.includes(priceId)) {
       return res.status(400).json({ error: "Invalid subscription plan" });
     }

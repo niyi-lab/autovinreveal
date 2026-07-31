@@ -13,7 +13,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Dealer Membership · AutoVINReveal</title>
-<meta name="description" content="Monthly dealer plans from AutoVINReveal — vehicle history reports as low as $1.69 each. Cancel anytime."/>
+<meta name="description" content="Monthly dealer plans from AutoVINReveal — vehicle history reports as low as $1.30 each. Cancel anytime."/>
 <link rel="stylesheet" href="/tw.css">
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
@@ -41,7 +41,7 @@
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 4-6"/></svg> For dealers &amp; flippers
     </div>
     <h1 class="text-4xl sm:text-5xl font-black tracking-tight leading-[1.05]">Run volume? Subscribe and save.</h1>
-    <p class="text-gray-500 text-lg mt-3">Reports land as credits every month — as low as <strong class="text-slate-700">$1.69 each</strong> vs CARFAX's $44.99. Cancel anytime, right from your dashboard.</p>
+    <p class="text-gray-500 text-lg mt-3">Reports land as credits every month — as low as <strong class="text-slate-700">$1.30 each</strong> vs CARFAX's $44.99. Cancel anytime, right from your dashboard.</p>
   </div>
 
   <div class="grid md:grid-cols-3 gap-4 mt-9">
@@ -78,11 +78,38 @@
       <div class="text-sm text-gray-500 mt-0.5">100 reports / month · $1.69 each</div>
       <ul class="space-y-2.5 text-sm text-slate-600 flex-1 my-5">
         <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> 100 full reports every month</li>
-        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Lowest price per report</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Great for steady monthly volume</li>
         <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Credits roll over 1 month, then expire</li>
         <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Priority support</li>
       </ul>
       <button onclick="subscribe('sub_pro',this)" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-xl text-sm transition-colors">Subscribe — $169/mo</button>
+    </div>
+    <!-- Fleet -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6 flex flex-col">
+      <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Fleet</div>
+      <div class="mt-2"><span class="text-4xl font-black">$349</span><span class="text-gray-400 text-sm">/mo</span></div>
+      <div class="text-sm text-gray-500 mt-0.5">250 reports / month · $1.40 each</div>
+      <ul class="space-y-2.5 text-sm text-slate-600 flex-1 my-5">
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> 250 full reports every month</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Built for fleets &amp; wholesalers</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Credits roll over 1 month, then expire</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Priority support</li>
+      </ul>
+      <button onclick="subscribe('sub_fleet',this)" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-xl text-sm transition-colors">Subscribe — $349/mo</button>
+    </div>
+    <!-- Enterprise -->
+    <div class="relative bg-white rounded-2xl border border-gray-200 p-6 flex flex-col">
+      <div class="absolute top-4 right-4 bg-green-100 text-green-700 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">Best Value</div>
+      <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Enterprise</div>
+      <div class="mt-2"><span class="text-4xl font-black">$649</span><span class="text-gray-400 text-sm">/mo</span></div>
+      <div class="text-sm text-gray-500 mt-0.5">500 reports / month · $1.30 each</div>
+      <ul class="space-y-2.5 text-sm text-slate-600 flex-1 my-5">
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> 500 full reports every month</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Lowest price per report</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Credits roll over 1 month, then expire</li>
+        <li class="flex gap-2"><span class="text-blue-500 font-bold">✓</span> Priority support</li>
+      </ul>
+      <button onclick="subscribe('sub_enterprise',this)" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 rounded-xl text-sm transition-colors">Subscribe — $649/mo</button>
     </div>
   </div>
   <p class="text-center text-sm text-gray-500 mt-5">Prefer to pay per report? <a href="/#pricing" class="text-blue-600 font-bold hover:underline">One-time reports &amp; bundles →</a></p>
@@ -100,7 +127,7 @@
 
 <script>
 const FAQ=[
-  ["How do the monthly credits work?","Each billing period your plan tops up your account with that plan's credits (20, 50, or 100). One credit = one full vehicle history report, used automatically when you run a report."],
+  ["How do the monthly credits work?","Each billing period your plan tops up your account with that plan's credits (20 up to 500, depending on plan). One credit = one full vehicle history report, used automatically when you run a report."],
   ["Do the monthly credits expire?","Subscription credits roll over one month, then expire — so a slow month isn't wasted, but they don't pile up forever. Credits from one-time bundles you buy outright never expire."],
   ["Can I cancel anytime?","Yes — cancel whenever you like and you won't be billed again. You keep any non-expired credits through their rollover window. No contracts."],
   ["Do I need an account?","Yes. Subscriptions are tied to your account so your credits and report history stay in one place. You'll be asked to sign in before checkout."],
@@ -129,7 +156,7 @@ async function subscribe(key,btn){
   const session=await getSessionSafe();
   if(!session){alert('Please sign in first — subscriptions are tied to your account.');location.href='/?login=1';return;}
   // Stripe subscription (khlin account). Map the button key -> plan key.
-  const planKey=({sub_starter:'starter',sub_dealer:'dealer',sub_pro:'pro'})[key]||key;
+  const planKey=({sub_starter:'starter',sub_dealer:'dealer',sub_pro:'pro',sub_fleet:'fleet',sub_enterprise:'enterprise'})[key]||key;
   try{
     const r=await fetch('/api/create-subscription-session',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({plan_key:planKey})});
     const j=await r.json();
