@@ -155,7 +155,9 @@ app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 // Anyone hitting /api/bulk, /api/batch, /api/vin-list etc is a scraper
 ["/api/bulk", "/api/batch", "/api/vin-list", "/api/reports", "/api/export", "/api/download-all"].forEach(path => {
   app.all(path, (req, res) => {
-    const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip;
+    // Same key as /api/report's clientIp() — a honeypot block must actually
+    // match the IP the report route sees (XFF-keyed entries never did).
+    const ip = clientIp(req);
     console.warn(`[Honeypot] Hit by ${ip} — ${req.method} ${path} UA: ${(req.headers["user-agent"] || "").slice(0,80)}`);
     // Permanently block this IP
     const entry = suspiciousIps.get(ip) || { count: 0, vins: new Set(), firstSeen: Date.now() };
@@ -408,6 +410,15 @@ const PROVIDER_PROXY_SECRET = process.env.PROVIDER_PROXY_SECRET
   || (process.env.SERVICE_ROLE_KEY
         ? crypto.createHash("sha256").update(process.env.SERVICE_ROLE_KEY).digest("hex")
         : "");
+
+// Constant-time check for the ops secret (same rule as the provider-proxy
+// endpoints — plain === leaks a byte-timing side channel).
+function providerSecretOk(given) {
+  const g = String(given || "");
+  if (!PROVIDER_PROXY_SECRET || g.length !== PROVIDER_PROXY_SECRET.length) return false;
+  try { return crypto.timingSafeEqual(Buffer.from(g), Buffer.from(PROVIDER_PROXY_SECRET)); }
+  catch { return false; }
+}
 
 const providerState = {
   cfc: { failures: 0, lastFailure: null },
@@ -677,8 +688,7 @@ setTimeout(() => {
 
 // Owner-only health snapshot (same secret as /api/myip) — for manual checks.
 app.get("/api/provider-status", async (req, res) => {
-  const given = String(req.query.key || "");
-  if (!PROVIDER_PROXY_SECRET || given !== PROVIDER_PROXY_SECRET) {
+  if (!providerSecretOk(req.query.key)) {
     return res.status(401).json({ message: "Unauthorized" });
   }
   const ip = await currentEgressIp();
@@ -1287,8 +1297,20 @@ async function markSessionConsumed(sessionId) {
   }
 }
 
-async function unmarkSessionConsumed(sessionId) {
-  await supabaseService.from("consumed_sessions").delete().eq("session_id", sessionId);
+// Guest receipt window: after the first view (consumption), the same receipt can
+// re-view its report for GUEST_RECEIPT_WINDOW_MIN minutes (default 7 days) — so
+// a guest's paid report doesn't vanish the moment the tab closes.
+const GUEST_RECEIPT_WINDOW_MIN = Number(process.env.GUEST_RECEIPT_WINDOW_MIN || 10080);
+async function withinGuestReceiptWindow(sessionId) {
+  try {
+    const { data } = await supabaseService
+      .from("consumed_sessions")
+      .select("created_at")
+      .eq("session_id", sessionId)
+      .maybeSingle();
+    if (!data?.created_at) return false;
+    return Date.now() - new Date(data.created_at).getTime() < GUEST_RECEIPT_WINDOW_MIN * 60_000;
+  } catch { return false; }
 }
 
 // Resolve the VIN behind a Stripe order id (the VIN is never stored on Stripe —
@@ -1482,7 +1504,10 @@ async function refundAndResolve(chargeId, userId, sessionId, reason = "") {
             `A guest report delivery failed AND the automatic Stripe refund also failed.\nRefund this payment manually in the Stripe dashboard.\n\nSession: ${sessionId}\nRefund error: ${stripeErr.message}${reason ? `\nOriginal failure: ${reason}` : ""}`);
         }
       }
-      await unmarkSessionConsumed(sessionId);
+      // The session stays consumed on purpose: a refunded payment is a dead
+      // receipt. (It used to be un-consumed here, which let a refunded buyer
+      // redeem the report anyway once the provider recovered.) The report gate
+      // also rejects refunded charges directly.
     }
   } catch (e) {
     console.error(`[Refund] Failed to resolve charge ${chargeId}:`, e.message);
@@ -1603,7 +1628,11 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
       // One-time purchase. Credits come from session.metadata.credits (set at
       // checkout with inline price_data). Fall back to matching legacy Price IDs
       // for any session created before the inline-price_data switch.
+      // EXCEPT single-report buys (intent=buy_report): those are fulfilled by
+      // redeeming the receipt on /api/report — granting the metadata credit too
+      // double-fulfills (report + a leftover credit worth a second report).
       let creditsToAdd = Number(session.metadata?.credits || 0);
+      if ((session.metadata?.intent || "") === "buy_report") creditsToAdd = 0;
       if (!creditsToAdd) {
         const sStripe   = stripeForId(session.id);
         const lineItems = await sStripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
@@ -1665,6 +1694,36 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
         .update({ stripe_subscription_id: null })
         .eq("stripe_customer_id", customerId);
       console.log(`[Sub] Cancelled subscription for customer ${customerId}`);
+    }
+
+    // ── Refund / chargeback — claw back credits from credit purchases ──
+    // (Whop and crypto already reverse; Stripe — the live card processor — didn't,
+    // so a disputed 20-pack kept its 20 credits.) Singles (intent=buy_report) grant
+    // no credits and their receipt dies at the report gate's refunded check.
+    // Note: a partial refund reverses the full credit grant — owner is notified.
+    if (event.type === "charge.refunded" || event.type === "charge.dispute.created") {
+      const obj  = event.data.object;
+      const piId = typeof obj.payment_intent === "string" ? obj.payment_intent : obj.payment_intent?.id;
+      if (piId) {
+        try {
+          const sList = await stripeDefault.checkout.sessions.list({ payment_intent: piId, limit: 1 });
+          const s       = sList.data?.[0];
+          const uid     = s?.metadata?.user_id || s?.client_reference_id || null;
+          const sIntent = s?.metadata?.intent || "";
+          const credits = Number(s?.metadata?.credits || 0);
+          if (s && uid && credits > 0 && sIntent !== "buy_report") {
+            const reversed = await reverseCredits(uid, credits);
+            console.log(`[Webhook] ${event.type}: reversed ${reversed}/${credits} credits from ${uid} (session ${s.id})`);
+            notifyOwner(`stripe-reversal:${piId}`,
+              `AutoVINReveal: ${event.type === "charge.refunded" ? "refund" : "DISPUTE"} — credits reversed`,
+              `A ${event.type === "charge.refunded" ? "refund" : "chargeback dispute"} came in on a credit purchase.\n\nUser: ${uid}\nCredits reversed: ${reversed} of ${credits}\nIntent: ${sIntent || "-"}\nPayment: ${piId}`);
+          } else if (event.type === "charge.dispute.created") {
+            notifyOwner(`stripe-dispute:${piId}`,
+              "AutoVINReveal: chargeback dispute opened",
+              `A dispute was opened on payment ${piId}${s ? ` (session ${s.id}, intent ${s.metadata?.intent || "-"})` : ""}. Respond in the Stripe dashboard.`);
+          }
+        } catch (e) { console.warn("[Webhook] reversal lookup failed:", e.message); }
+      }
     }
 
     return res.status(200).json({ ok: true });
@@ -1963,11 +2022,28 @@ async function fulfillWhopRow(row) {
     // credited per-payment by grantWhopSubRenewals() (idempotent), so never grant
     // them here (would double-grant the first month).
     if (!row.vin) {
-      if (row.user_id && !isWhopSubPlan(row.plan_id)) await addCreditsAtomic(row.user_id, row.credits || 0);
-      await supabaseService.from("whop_checkouts").update({
-        status: "fulfilled", fulfilled_at: new Date().toISOString(),
-      }).eq("session_id", row.session_id);
-      console.log(`[Whop] reconciled -> fulfilled ${isWhopSubPlan(row.plan_id) ? "subscription" : "pack"} (user ${row.user_id || "none"}, session ${row.session_id})`);
+      let granted = false;
+      try {
+        if (row.user_id && !isWhopSubPlan(row.plan_id)) await addCreditsAtomic(row.user_id, row.credits || 0);
+        granted = true;
+        await supabaseService.from("whop_checkouts").update({
+          status: "fulfilled", fulfilled_at: new Date().toISOString(),
+        }).eq("session_id", row.session_id);
+        console.log(`[Whop] reconciled -> fulfilled ${isWhopSubPlan(row.plan_id) ? "subscription" : "pack"} (user ${row.user_id || "none"}, session ${row.session_id})`);
+      } catch (packErr) {
+        if (!granted) {
+          // Grant failed — revert so the next sweep retries the grant.
+          await supabaseService.from("whop_checkouts")
+            .update({ status: "paid" }).eq("session_id", row.session_id).eq("status", "fulfilling");
+          console.warn(`[Whop] reconcile pack grant failed (reverted to paid, ${row.session_id}):`, packErr.message);
+        } else {
+          // Credits granted but not marked fulfilled — never revert (the next sweep
+          // would grant again). Leave 'fulfilling' and alert for a manual mark.
+          notifyOwner(`whop-stuck:${row.session_id}`,
+            "AutoVINReveal: Whop pack granted but row not marked fulfilled",
+            `Credits WERE granted for session ${row.session_id} (user ${row.user_id || "?"}) but marking it fulfilled failed. Mark it fulfilled manually so nothing re-grants.\nError: ${packErr.message}`);
+        }
+      }
       return;
     }
     let raw = await getReportData(row.vin, row.type), vehicle = row.vehicle || null;
@@ -2072,6 +2148,80 @@ if (process.env.WHOP_API_KEY) {
   setTimeout(reconcileWhopCheckouts, 60 * 1000);          // once shortly after boot
   setInterval(grantWhopSubRenewals, 10 * 60 * 1000);     // subscription renewals (no buyer return)
   setTimeout(grantWhopSubRenewals, 70 * 1000);
+}
+
+// Safety net for STRIPE guest singles: paid but never redeemed (buyer closed the
+// tab before returning through the khlin forwarder — nothing was fetched, nothing
+// emailed, and "resend my report" had nothing to link to). Mirrors the Whop
+// reconciler: fetch + cache + email, then consume the session so the sweep never
+// double-processes. The receipt window still allows re-views afterwards.
+async function reconcileStripeSingles() {
+  if (!supabaseService) return;
+  try {
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();  // receipt lifetime
+    const until = new Date(Date.now() - 15 * 60 * 1000).toISOString();           // give the browser flow a head start
+    const { data: rows } = await supabaseService
+      .from("stripe_order_vins")
+      .select("order_id, vin, report_type, session_id, created_at")
+      .eq("site", "avr")
+      .not("session_id", "is", null)
+      .gte("created_at", since)
+      .lte("created_at", until)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (!rows?.length) return;
+
+    const { data: consumedRows } = await supabaseService
+      .from("consumed_sessions").select("session_id")
+      .in("session_id", rows.map(r => r.session_id));
+    const consumed = new Set((consumedRows || []).map(r => r.session_id));
+
+    for (const row of rows) {
+      if (consumed.has(row.session_id)) continue;            // already delivered
+      try {
+        const s = await stripeDefault.checkout.sessions.retrieve(row.session_id);
+        if (s.payment_status !== "paid") continue;            // abandoned checkout — most rows
+        if ((s.metadata?.intent || "buy_report") !== "buy_report") continue;
+
+        const vin   = (row.vin || "").toUpperCase();
+        const type2 = (row.report_type || "carfax").toLowerCase();
+        const email = s.customer_details?.email || s.customer_email || null;
+
+        let vehicle = null;
+        let raw = await getReportData(vin, type2);
+        if (!raw) {
+          const f = await cfcGetReport(vin, type2);           // 1 provider credit (paid for)
+          raw = f.raw; vehicle = f.vehicle || null;
+          try { writeCache(vin, type2, raw); } catch (_) {}
+          await writeGlobalCache(vin, type2, raw, vehicle);
+        }
+
+        // Consume atomically — if the buyer's browser wins the race, skip the email.
+        try { await markSessionConsumed(row.session_id); }
+        catch (e) { if (e.message === "SESSION_ALREADY_CONSUMED") continue; throw e; }
+
+        // Logged-in buyer who never returned: record ownership too.
+        const uid = s.metadata?.user_id || s.client_reference_id || null;
+        if (uid) {
+          await supabaseService.from("vin_queries").upsert(
+            { user_id: uid, vin, type: type2, success: true, report_data: raw, vehicle },
+            { onConflict: "user_id,vin,type" });
+        }
+
+        if (email) await sendReportToEmail(email, vin, type2, null, vehicle);
+        console.log(`[StripeReconcile] delivered ${vin} to ${email || "no-email"} (order ${row.order_id})`);
+        notifyOwner(`stripe-reconcile:${row.order_id}`,
+          "AutoVINReveal: stranded guest single auto-delivered",
+          `A paid single-report purchase never returned to the site — the report was fetched and emailed automatically.\n\nVIN: ${vin}\nBuyer email: ${email || "unknown"}\nOrder: ${row.order_id}`);
+      } catch (e) {
+        console.warn(`[StripeReconcile] ${row.order_id} failed:`, e.message);
+      }
+    }
+  } catch (e) { console.warn("[StripeReconcile] sweep error:", e.message); }
+}
+if (supabaseService) {
+  setInterval(reconcileStripeSingles, 10 * 60 * 1000);
+  setTimeout(reconcileStripeSingles, 90 * 1000);
 }
 
 // Crypto reconcile — a NOWPayments IPN can be missed (network blip, deploy during
@@ -2204,14 +2354,22 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
           mayGrant = !!claimed;
         }
         if (mayGrant) {
-          if (isWhopSubPlan(planId)) {
-            // Subscription → EXPIRING credits only, idempotent by payment id (shared
-            // with the claim + renewal poller). Never permanent.
-            await grantWhopSubPayment(data.id, planId, userId);
-            console.log(`[Whop] subscription payment -> expiring credits (user ${userId}, plan ${planId}, payment ${data.id})`);
-          } else {
-            await addCreditsAtomic(userId, credits);
-            console.log(`[Whop] +${credits} credits to ${userId} (pack, plan ${planId}, payment ${data.id})`);
+          try {
+            if (isWhopSubPlan(planId)) {
+              // Subscription → EXPIRING credits only, idempotent by payment id (shared
+              // with the claim + renewal poller). Never permanent.
+              await grantWhopSubPayment(data.id, planId, userId);
+              console.log(`[Whop] subscription payment -> expiring credits (user ${userId}, plan ${planId}, payment ${data.id})`);
+            } else {
+              await addCreditsAtomic(userId, credits);
+              console.log(`[Whop] +${credits} credits to ${userId} (pack, plan ${planId}, payment ${data.id})`);
+            }
+          } catch (grantErr) {
+            // The row was claimed 'fulfilled' BEFORE the grant — revert it, or the
+            // retry sees "already fulfilled" and the buyer stays paid-with-no-credits.
+            if (row) await supabaseService.from("whop_checkouts")
+              .update({ status: "paid" }).eq("session_id", row.session_id).eq("status", "fulfilled");
+            throw grantErr;   // outer catch rolls back the event marker so the retry reprocesses
           }
         } else {
           console.log(`[Whop] no-VIN already fulfilled elsewhere (session ${row?.session_id})`);
@@ -2264,8 +2422,10 @@ app.use(cookieParser());
 app.use(cors({ origin: ALLOWED_ORIGIN, credentials: false }));
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
-// General API rate limit
-app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
+// General API rate limit. Keyed by the real client IP (cf-connecting-ip) —
+// req.ip behind Cloudflare→Render resolves to an upstream hop, which collapses
+// distinct users into shared buckets.
+app.use("/api/", rateLimit({ windowMs: 15 * 60 * 1000, max: 200, keyGenerator: (req) => clientIp(req) }));
 
 // ── Whop checkout: create a hosted-checkout session, store a claim row ──
 // The signed webhook is the source of truth; this only sets up the session and
@@ -2277,7 +2437,9 @@ app.post("/api/whop/checkout", async (req, res) => {
     const cfg = WHOP_PLANS[key];
     if (!cfg) return res.status(400).json({ error: "invalid_plan" });
     const { user } = await getUser(req).catch(() => ({ user: null }));
-    const userId = (user && user.id) || (req.body && req.body.user_id) || null;
+    // Identity comes from the verified token ONLY — a body user_id lets anyone
+    // attribute a purchase to an arbitrary account.
+    const userId = (user && user.id) || null;
     const vinUp  = vin ? String(vin).toUpperCase() : null;
     const typeL  = (type || "carfax").toLowerCase();
     const flow   = userId ? "user" : "guest";
@@ -2329,7 +2491,8 @@ app.post("/api/paygate/checkout", async (req, res) => {
     if (!cfg) return res.status(400).json({ error: "invalid_plan" });
     if (cfg.recurring) return res.status(400).json({ error: "subscriptions_not_supported" });  // PayGate is one-shot
     const { user } = await getUser(req).catch(() => ({ user: null }));
-    const userId = (user && user.id) || (req.body && req.body.user_id) || null;
+    // Verified token only (see the Whop checkout note).
+    const userId = (user && user.id) || null;
     const vinUp  = vin ? String(vin).toUpperCase() : null;
     const typeL  = (type || "carfax").toLowerCase();
     const flow   = userId ? "user" : "guest";
@@ -2470,14 +2633,38 @@ app.post("/api/whop/claim", whopClaimLimiter, async (req, res) => {
       const { data: packClaimed } = await supabaseService.from("whop_checkouts")
         .update({ status: "fulfilling" }).eq("session_id", row.session_id).eq("status", "paid").select().maybeSingle();
       if (packClaimed) {
-        if (row.user_id) {
-          if (isWhopSubPlan(row.plan_id)) await grantWhopSubPayment(req.body?.payment_id, row.plan_id, row.user_id);  // first month (instant, idempotent)
-          else await addCreditsAtomic(row.user_id, row.credits || 0);                                                 // one-time pack
+        let granted = false;
+        try {
+          if (row.user_id) {
+            if (isWhopSubPlan(row.plan_id)) await grantWhopSubPayment(req.body?.payment_id, row.plan_id, row.user_id);  // first month (instant, idempotent)
+            else await addCreditsAtomic(row.user_id, row.credits || 0);                                                 // one-time pack
+          }
+          granted = true;
+          await supabaseService.from("whop_checkouts").update({
+            status: "fulfilled", fulfilled_at: new Date().toISOString(),
+          }).eq("session_id", row.session_id);
+          console.log(`[Whop] claim fulfilled ${isWhopSubPlan(row.plan_id) ? "subscription" : "pack"} (user ${row.user_id || "none"}, session ${row.session_id})`);
+        } catch (packErr) {
+          if (!granted) {
+            // Grant failed — revert the claim so a retry / the reconcile sweep can
+            // grant (was: stuck 'fulfilling' forever, invisible to both).
+            await supabaseService.from("whop_checkouts")
+              .update({ status: "paid" }).eq("session_id", row.session_id).eq("status", "fulfilling");
+            console.error("[Whop] pack grant failed (reverted to paid):", packErr.message);
+            return res.status(502).json({ error: "grant_failed" });
+          }
+          // Credits granted but the fulfilled-update failed: do NOT revert (a
+          // retry would double-grant). Retry the update once, else alert.
+          try {
+            await supabaseService.from("whop_checkouts").update({
+              status: "fulfilled", fulfilled_at: new Date().toISOString(),
+            }).eq("session_id", row.session_id);
+          } catch (updErr) {
+            notifyOwner(`whop-stuck:${row.session_id}`,
+              "AutoVINReveal: Whop pack granted but row not marked fulfilled",
+              `Credits WERE granted for session ${row.session_id} (user ${row.user_id || "?"}) but the status update keeps failing. Mark it fulfilled manually so nothing re-grants.\nError: ${updErr.message}`);
+          }
         }
-        await supabaseService.from("whop_checkouts").update({
-          status: "fulfilled", fulfilled_at: new Date().toISOString(),
-        }).eq("session_id", row.session_id);
-        console.log(`[Whop] claim fulfilled ${isWhopSubPlan(row.plan_id) ? "subscription" : "pack"} (user ${row.user_id || "none"}, session ${row.session_id})`);
       }
       return res.json({ status: "fulfilled", token: null, vin: null, credits: row.credits || 0 });
     }
@@ -2633,6 +2820,7 @@ setInterval(() => {
 const lookupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
+  keyGenerator: (req) => clientIp(req),
   message: { error: "rate_limited", message: "Too many lookups. Please slow down." },
 });
 
@@ -2727,9 +2915,19 @@ app.post("/api/create-checkout-session", async (req, res) => {
     // carries it client-side and the webhook grants credits from metadata.)
     const orderId = "AVR-" + crypto.randomBytes(6).toString("hex").toUpperCase();
     if (vin) {
+      // Deliberately non-blocking (a DB hiccup must not break checkout) — but a
+      // failure now alerts the owner, because without this row the receipt can
+      // never be bound to its VIN (no re-view, no guest email, no reconcile).
       supabaseService.from("stripe_order_vins").insert({
         order_id: orderId, vin, report_type: report_type || "carfax", site: "avr",
-      }).then(({ error }) => { if (error) console.warn("[order-map] insert failed:", error.message); });
+      }).then(({ error }) => {
+        if (error) {
+          console.warn("[order-map] insert failed:", error.message);
+          notifyOwner(`ordermap:${orderId}`,
+            "AutoVINReveal: order-map insert FAILED",
+            `stripe_order_vins insert failed for ${orderId} (VIN ${vin}).\nGuest receipt binding, re-view, email and reconcile will NOT work for this order.\nError: ${error.message}`);
+        }
+      });
     }
     const productName = vin ? `KHLIN – ${orderId}` : plan.name;
 
@@ -2774,6 +2972,14 @@ app.post("/api/create-checkout-session", async (req, res) => {
         client_ua: (req.headers["user-agent"] || "").slice(0, 200),
       },
     });
+
+    // Attach the session id to the order row — lets the reconcile sweep find
+    // paid-but-never-redeemed guest singles later. Non-blocking like the insert.
+    if (vin) {
+      supabaseService.from("stripe_order_vins")
+        .update({ session_id: session.id }).eq("order_id", orderId)
+        .then(({ error }) => { if (error) console.warn("[order-map] session_id update failed:", error.message); });
+    }
 
     // Log guest purchases for investigator detection
     if (!userId && vin) {
@@ -2923,7 +3129,7 @@ app.get("/api/myip", async (req, res) => {
   // The server's outbound IP is infra detail (whitelisted with the report provider).
   // Only reveal it to an authenticated ops caller (?key = the provider-proxy secret);
   // the public just gets their own IP.
-  const authed = PROVIDER_PROXY_SECRET && req.query.key === PROVIDER_PROXY_SECRET;
+  const authed = providerSecretOk(req.query.key);
   if (!authed) return res.json({ your_ip: yourIp });
   let serverOutboundIp = null;
   try {
@@ -3144,8 +3350,17 @@ app.post("/api/crypto/ipn", async (req, res) => {
     if (!claimed) return res.status(200).json({ ok: true }); // already fulfilled/claimed
 
     if (claimed.user_id) {
-      await addCreditsAtomic(claimed.user_id, claimed.credits);
-      console.log(`[NP IPN] +${claimed.credits} credits → user ${claimed.user_id}`);
+      try {
+        await addCreditsAtomic(claimed.user_id, claimed.credits);
+        console.log(`[NP IPN] +${claimed.credits} credits → user ${claimed.user_id}`);
+      } catch (grantErr) {
+        // Un-claim so NOWPayments' IPN redelivery (or the sweep) can re-grant —
+        // otherwise the row sits 'fulfilled' with credits never added.
+        await supabaseService.from("crypto_payments")
+          .update({ status: pending.status || "confirmed", fulfilled_at: null })
+          .eq("order_id", pending.order_id).eq("status", "fulfilled");
+        throw grantErr;
+      }
     }
 
     res.status(200).json({ ok: true });
@@ -3224,9 +3439,11 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
     const forceRefresh = req.body?.refresh === true && allowLive;
     let ownedAgeDays = null;
     let ownedVehicle = null;
-    if (!oneTimeSession) {
-      const { user } = await getUser(req);
-      currentUser = user;
+    {
+      // Resolve the signed-in user even when a one-time receipt is presented, so
+      // a logged-in single-report buyer gets a vin_queries ownership row (their
+      // purchase shows in account history) instead of being treated as a guest.
+      currentUser = earlyUser;
       if (currentUser) {
         const { data: ownRows } = await supabaseService
           .from("vin_queries")
@@ -3285,14 +3502,39 @@ app.post("/api/report", reportRateLimit, async (req, res) => {
         try {
           // Stripe one-time guest receipt only (PayPal removed).
           const sStripe = stripeForId(oneTimeSession);
-          const s       = await sStripe.checkout.sessions.retrieve(oneTimeSession);
+          const s       = await sStripe.checkout.sessions.retrieve(oneTimeSession, { expand: ["payment_intent.latest_charge"] });
           if (s.payment_status !== "paid") throw new Error("unpaid");
+          // A receipt is a SINGLE-REPORT payment only. The khlin Stripe account is
+          // shared (AVR/CFC packs, subscriptions, khlin inspections) — none of
+          // those sessions may redeem a report.
+          if (s.mode !== "payment") throw new Error("wrong_receipt");
+          if ((s.metadata?.intent || "buy_report") !== "buy_report") throw new Error("wrong_receipt");
+          // A refunded/disputed payment is a dead receipt.
+          const paidCharge = s.payment_intent?.latest_charge;
+          if (paidCharge && (paidCharge.refunded || paidCharge.disputed)) throw new Error("refunded");
+          // Bind the receipt to the VIN it paid for (VIN never on Stripe — resolve
+          // via the order map, same rule as /api/email-report). Never loosen this.
+          const boundVin = await vinForOrderId(s.metadata?.order_id);
+          if (!boundVin || boundVin !== targetVin) throw new Error("vin_mismatch");
           // Email Stripe collected at checkout — auto-email the report after serve.
           guestBuyerEmail = s.customer_details?.email || s.customer_email || null;
-          await markSessionConsumed(oneTimeSession);
-          pendingChargeId = await createPendingCharge({ sessionId: oneTimeSession, vin: targetVin });
+          try {
+            await markSessionConsumed(oneTimeSession);
+            pendingChargeId = await createPendingCharge({ sessionId: oneTimeSession, vin: targetVin });
+          } catch (consumeErr) {
+            if (consumeErr.message !== "SESSION_ALREADY_CONSUMED") throw consumeErr;
+            // Already consumed: allow re-viewing within the guest receipt window
+            // (clock starts at first view). No new charge, no refund machinery,
+            // no repeat auto-email.
+            if (!(await withinGuestReceiptWindow(oneTimeSession))) {
+              throw new Error("SESSION_ALREADY_CONSUMED");
+            }
+            guestBuyerEmail = null;
+          }
         } catch (e) {
-          if (e.message === "SESSION_ALREADY_CONSUMED") return res.status(400).json({ error: "receipt_already_used" });
+          if (e.message === "SESSION_ALREADY_CONSUMED") return res.status(400).json({ error: "receipt_already_used", message: "This receipt's re-view window has ended. Use the report link emailed to you, or contact support." });
+          if (e.message === "vin_mismatch")             return res.status(403).json({ error: "receipt_vin_mismatch", message: "This receipt was for a different vehicle." });
+          if (e.message === "refunded")                 return res.status(403).json({ error: "receipt_refunded", message: "This payment was refunded, so the receipt is no longer valid." });
           return res.status(400).json({ error: "receipt_invalid" });
         }
       } else if (currentUser) {
@@ -3495,6 +3737,20 @@ async function resendReportIfPaid(rawEmail, rawVin) {
     starting_after = list.data[list.data.length - 1]?.id;
   }
   if (!matchedEmail) return { ok: false, error: "no_matching_paid_order" };
+
+  // Ensure the report actually exists first — a stranded buyer's report may never
+  // have been fetched, and the emailed link must not land on "Report not found".
+  const cached = await getReportData(vin, matchedType);
+  if (!cached) {
+    try {
+      const f = await cfcGetReport(vin, matchedType);
+      try { writeCache(vin, matchedType, f.raw); } catch (_) {}
+      await writeGlobalCache(vin, matchedType, f.raw, f.vehicle || null);
+    } catch (e) {
+      console.error(`[resend-report] fetch failed for ${vin}: ${e.message}`);
+      return { ok: false, error: "report_unavailable" };
+    }
+  }
 
   await sendReportToEmail(matchedEmail, vin, matchedType, null, null);
   console.log(`[resend-report] Re-sent ${vin} to ${matchedEmail} (verified paid order)`);
@@ -3943,14 +4199,19 @@ app.get("/api/download-pdf", async (req, res) => {
       return res.status(400).json({ error: "valid VIN required" });
     }
 
-    // Verify the user has run this report before (owns it)
-    const { data: owned } = await supabaseService
+    // Verify the user has run this report before (owns it). Filter by type and
+    // take the newest row — a user owning both carfax+autocheck for one VIN made
+    // maybeSingle() error out and 403 a report they paid for.
+    const { data: ownedRows } = await supabaseService
       .from("vin_queries")
       .select("id, vehicle")
       .eq("user_id", user.id)
       .eq("vin", vin)
+      .eq("type", "carfax")
       .eq("success", true)
-      .maybeSingle();
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const owned = ownedRows?.[0];
 
     if (!owned) {
       return res.status(403).json({ error: "report_not_owned" });
