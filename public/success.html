@@ -14,11 +14,18 @@
 
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow" />
   <title>Processing Order...</title>
-  
+
   <link rel="stylesheet" href="/tw.css">
-  
-  
+
+  <!-- Supabase config MUST be set before app.js loads — without it every buyer
+       returning from Stripe was processed as a guest (no auth header, no
+       account history row for their purchase). -->
+  <script>
+    window.VITE_SUPABASE_URL="https://vvajqnljwvhjgdtxqzfl.supabase.co";
+    window.VITE_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2YWpxbmxqd3ZoamdkdHhxemZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1NTg5NjIsImV4cCI6MjA3NTEzNDk2Mn0.Q4g5Slr3mpHrATgh03sSQ4gBVlpwtIZ8ioSmCa2GFv4";
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center min-h-screen text-center px-4 transition-colors duration-300">

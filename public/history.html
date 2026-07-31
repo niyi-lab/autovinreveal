@@ -582,23 +582,24 @@
         if (!to || !to.includes('@')) return showToast('Invalid email', 'error');
         if (!emailTarget) return;
 
-        const isPlate = emailTarget.vin === '(from plate)';
-        const body = {
-          to,
-          type:  emailTarget.type || 'carfax',
-          vin:   isPlate ? ''                       : emailTarget.vin,
-          state: isPlate ? (emailTarget.state || '') : '',
-          plate: isPlate ? (emailTarget.plate || '') : '',
-        };
+        // Plate-lookup items carry no VIN and /api/email-report requires one.
+        if (emailTarget.vin === '(from plate)') {
+          showToast('Emailing isn\'t available for plate-lookup items.', 'error');
+          return;
+        }
+        const body = { to, type: emailTarget.type || 'carfax', vin: emailTarget.vin };
 
         const { token } = await getSession();
-        if (!token) { showToast('Please sign in to email reports.', 'error'); return; }
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        else if (emailTarget.session) body.oneTimeSession = emailTarget.session;   // guest receipt
+        else { showToast('Please sign in to email reports.', 'error'); return; }
 
         const restore = setBtnLoading($id('sendEmailBtn'), 'Sending…');
         try {
           const r = await apiFetch('/api/email-report', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            headers,
             body: JSON.stringify(body),
           }, 15_000);
           if (!r.ok) throw new Error(await r.text());
@@ -659,6 +660,9 @@
           as:        'html',
           allowLive: false,  // serve from Supabase only — never charge a credit
         };
+        // Guest re-open: the stored paid receipt authorizes the re-view within
+        // the receipt window (was missing → guests got 401 on reports they bought).
+        if (!token && item.session) data.oneTimeSession = item.session;
 
         try {
           const r = await apiFetch('/api/report', { method: 'POST', headers, body: JSON.stringify(data) }, 60_000);
@@ -669,8 +673,8 @@
             if (json.can_refetch && vin) {
               const go = await customConfirm({
                 title: 'Report expired',
-                message: "This report is older than 20 days, so it's no longer saved on our servers.\n\nRe-fetch a fresh copy from the provider now? This will use 1 credit.",
-                confirmText: 'Re-fetch · 1 credit',
+                message: "This report is older than 20 days, so it's no longer saved on our servers.\n\nRe-fetch a fresh copy now? You own this report, so re-fetching it is free.",
+                confirmText: 'Re-fetch — free',
                 cancelText: 'Cancel',
               });
               if (go) {
@@ -716,11 +720,13 @@
         const { token } = await getSession();
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = `Bearer ${token}`;
+        const pdfBody = { vin, type: item.type, as: 'html', allowLive: false };
+        if (!token && item.session) pdfBody.oneTimeSession = item.session;   // guest receipt
         try {
           const r = await apiFetch('/api/report', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ vin, type: item.type, as: 'html', allowLive: false }),
+            body: JSON.stringify(pdfBody),
           }, 45_000);
           if (!r.ok) { showToast('Failed to fetch report', 'error'); return; }
           openReport(await r.text(), vin, { autoPrint: true });

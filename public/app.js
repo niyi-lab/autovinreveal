@@ -659,6 +659,7 @@ async function handleSuccessIfNeeded() {
     // which can land a moment after the redirect — refresh the balance a few times.
     showToast('Subscription active — your monthly credits are being added.', 'ok');
     trackPurchase(getPendingAmount() || 39, stripeSessionId || null);
+    try { localStorage.removeItem('purchaseKey'); } catch {}
     for (let i = 0; i < 5; i++) { await refreshBalancePill(); await new Promise(r => setTimeout(r, 1500)); }
     if (onSuccessPage()) { setTimeout(() => { window.location.href = '/'; }, 800); }
     else {
@@ -671,21 +672,59 @@ async function handleSuccessIfNeeded() {
   if (intentParam === 'buy_report' && stripeSessionId && vinParam) {
     showToast('Payment confirmed. Preparing your report…', 'ok');
     try {
+      // Send the auth token when signed in — the server then records the purchase
+      // in the buyer's account history (vin_queries) instead of a guest-only serve.
+      const { user, token } = await getSession();
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const r = await apiFetch(API.report, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers,
         body: JSON.stringify({ vin: vinParam, type: 'carfax', as: 'html', oneTimeSession: stripeSessionId }),
       }, 60_000);
-      if (!r.ok) throw new Error(await r.text());
+      if (!r.ok) throw new Error(await friendlyReportError(r));
       const html = await r.text();
-      const { user } = await getSession();
-      openReport(html, vinParam, user ? {} : { guest: true, oneTimeSession: stripeSessionId });
+      // Purchase complete: clear the pending state NOW so a later purchase can't
+      // resume this one (stale pendingReport consumed the next buy's session),
+      // and record it in local history (guests keep the session for re-views).
+      clearPending();
+      try { localStorage.removeItem('purchaseKey'); } catch {}
+      addToHistory({ vin: vinParam, type: 'carfax', ts: Date.now(), session: user ? null : stripeSessionId });
       trackPurchase(5.99, stripeSessionId || null);
+      // Un-strand the success page: swap the "Finalizing Order..." spinner card
+      // for a done state before the overlay covers it.
+      if (onSuccessPage()) {
+        const card = document.querySelector('.animate-spin')?.parentElement;
+        if (card) card.innerHTML =
+          '<h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">✅ Report ready</h2>' +
+          '<p class="text-gray-500 dark:text-gray-400 text-sm">Your report is open on this page and was also emailed to you.</p>' +
+          '<p class="mt-4"><a href="/" class="text-blue-600 font-bold">← Back to AutoVINReveal</a></p>';
+        document.title = 'Report Ready — AutoVINReveal';
+      }
+      openReport(html, vinParam, user ? {} : { guest: true, oneTimeSession: stripeSessionId });
       return;
     } catch (e) {
       console.error('[report] post-payment fetch failed:', e.message);
       showToast('Payment received — your report is taking longer than usual. Your purchase is safe; please wait a moment, then refresh. Still stuck? Email support@autovinreveal.com.', 'error');
     }
+  }
+  if (/^buy_credits?_/.test(intentParam || '') && stripeSessionId) {
+    // Bundle / credit purchase — credits are granted by the webhook. This branch
+    // was missing entirely: bundles fired NO purchase conversion (Ads saw $0 of
+    // bundle revenue) and fell through to resume any stale single-report state.
+    const FALLBACK = { buy_credits_20pack: 58, buy_credits_5pack: 20, buy_credit_single: 5.99 };
+    trackPurchase(getPendingAmount() || FALLBACK[intentParam] || 5.99, stripeSessionId);
+    try { localStorage.removeItem('purchaseKey'); } catch {}
+    clearPending();
+    showToast('Payment received — credits added to your account!', 'ok');
+    await refreshBalancePill();
+    if (onSuccessPage()) {
+      setTimeout(() => { window.location.href = '/'; }, 1200);
+    } else {
+      const u = new URL(location.href);
+      ['session_id', 'intent'].forEach(k => u.searchParams.delete(k));
+      history.replaceState({}, '', u.pathname + u.search);
+    }
+    return;
   }
   if (stripeSessionId || onSuccessPage()) {
     const pending = tryLoadPending();
@@ -701,6 +740,13 @@ async function handleSuccessIfNeeded() {
   }
 }
 handleSuccessIfNeeded();
+
+// Deep links: /?vin=... (free VIN decoder upsell + schema.org SearchAction) used
+// to be ignored, landing users on an empty form.
+if (vinParam && !intentParam && !stripeSessionId && !purchased) {
+  const vinBox = document.querySelector('input[name="vin"]');
+  if (vinBox && !vinBox.value) { vinBox.value = vinParam; try { vinBox.focus(); } catch {} }
+}
 
 /* ================================
    Theme toggle
@@ -897,11 +943,19 @@ async function checkOwnerAccess() {
 (async () => {
   if (!supabase) return;
   if (/[?&]code=/.test(location.search)) {
-    const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
+    // supabase-js v2: getSessionFromUrl is a v1 API and would throw here,
+    // killing this whole auth IIFE (page renders logged-out). Exchange the
+    // PKCE code defensively instead.
+    try {
+      const code = new URL(location.href).searchParams.get('code');
+      if (code && typeof supabase.auth.exchangeCodeForSession === 'function') {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (!error) showToast('You\'re signed in!', 'ok');
+      }
+    } catch (e) { console.warn('[Auth] code exchange failed:', e.message); }
     const url = new URL(location.href);
     url.searchParams.delete('code'); url.searchParams.delete('state');
     history.replaceState({}, '', url.pathname + url.search);
-    if (!error) showToast('You\'re signed in!', 'ok');
   }
   try {
     const { data, error } = await supabase.auth.getSession();
@@ -1051,11 +1105,15 @@ async function downloadHistoryPDF(item, btn = null) {
       downloadBlob(blob, fname);
       showToast('PDF downloaded!', 'ok');
     } else {
-      // Fallback: open the print-dialog HTML in a new tab
-      const html = await r.text();
-      const win  = window.open('', '_blank');
-      if (win) { win.document.write(html); win.document.close(); }
-      showToast('Print dialog will open — choose Save as PDF', 'ok');
+      // Fallback: open the print-dialog HTML via a blob URL — a REAL navigation.
+      // (document.write renders these reports blank; see the print architecture
+      // notes. And only claim success if the popup actually opened.)
+      const html    = await r.text();
+      const blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      const win     = window.open(blobUrl, '_blank');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+      if (win) showToast('Print dialog will open — choose Save as PDF', 'ok');
+      else showToast('Popup blocked — allow popups for this site and try again.', 'error');
     }
   } catch (e) {
     showToast(e.message || 'Request failed', 'error');
@@ -1105,24 +1163,26 @@ sendEmailBtn?.addEventListener('click', async () => {
   if (!to || !to.includes('@')) return showToast('Invalid email', 'error');
   if (!emailTargetItem) return;
 
-  // FIX-S3: pass vin/state/plate separately so the server handles plate lookups
-  const isPlate = emailTargetItem.vin === '(from plate)';
-  const body = {
-    to,
-    type:  emailTargetItem.type || 'carfax',
-    vin:   isPlate ? ''                           : emailTargetItem.vin,
-    state: isPlate ? (emailTargetItem.state || '') : '',
-    plate: isPlate ? (emailTargetItem.plate || '') : '',
-  };
+  // Plate-lookup items carry no VIN and /api/email-report requires one — the old
+  // "server does the plate→VIN lookup" premise (FIX-S3) was never implemented
+  // server-side, so those requests always 400'd.
+  if (emailTargetItem.vin === '(from plate)') {
+    showToast('Emailing isn\'t available for plate-lookup items.', 'error');
+    return;
+  }
+  const body = { to, type: emailTargetItem.type || 'carfax', vin: emailTargetItem.vin };
 
   const { token } = await getSession();
-  if (!token) { showToast('Please sign in to email reports.', 'error'); return; }
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  else if (emailTargetItem.session) body.oneTimeSession = emailTargetItem.session;   // guest receipt (server-verified)
+  else { showToast('Please sign in to email reports.', 'error'); return; }
 
   const restore = setBtnLoading(sendEmailBtn, 'Sending…');
   try {
     const r = await apiFetch(
       '/api/email-report',
-      { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) },
+      { method: 'POST', headers, body: JSON.stringify(body) },
       15_000
     );
     if (!r.ok) throw new Error(await r.text());
@@ -1315,6 +1375,10 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
     // Remember the package so the returning buyer's conversion reports its
     // real value (no price_id = single report).
     try { localStorage.setItem('purchaseKey', price_id || 'single'); } catch {}
+    // Send the verified token — the server prefers it over the body user_id
+    // (which only exists for older cached clients).
+    const checkoutHeaders = { 'Content-Type': 'application/json' };
+    try { const { token } = await getSession(); if (token) checkoutHeaders['Authorization'] = `Bearer ${token}`; } catch {}
     const body = { user_id: user?.id || null, price_id };
     if (pendingReport?.vin) {
       localStorage.setItem(PENDING_KEY, JSON.stringify(pendingReport));
@@ -1339,7 +1403,7 @@ async function startStripePurchase({ user, price_id, pendingReport = null, requi
 
     const r = await apiFetch(
       API.checkout,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      { method: 'POST', headers: checkoutHeaders, body: JSON.stringify(body) },
       10_000
     );
     if (!r.ok) {
@@ -1449,6 +1513,9 @@ async function startStripeSubscription(planKey) {
   const { user, token } = await getSession();
   if (!user || !token) { showToast('Please sign in to subscribe.', 'error'); openLogin(); return; }
   try {
+    // Remember the plan so the return page reports the REAL conversion value
+    // (a $649 Enterprise signup used to be tracked as $39).
+    try { localStorage.setItem('purchaseKey', 'sub_' + planKey); } catch {}
     await ensureBackendReady();
     const r = await apiFetch('/api/create-subscription-session', {
       method: 'POST',

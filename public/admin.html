@@ -47,7 +47,6 @@
     <!-- Tabs -->
     <div id="tabs" class="tabs hidden">
       <div class="tab active" data-tab="users">Users</div>
-      <div class="tab" data-tab="cache">Cache</div>
       <div class="tab" data-tab="history">History</div>
     </div>
 
@@ -74,29 +73,6 @@
           <tbody id="usersBody"></tbody>
         </table>
       </div>
-    </div>
-
-    <!-- Cache -->
-    <div id="view-cache" class="pad hidden">
-      <div class="row">
-        <input id="vinInput" type="text" placeholder="VIN (optional for quick open)" />
-        <select id="typeInput">
-          <option value="carfax">carfax</option>
-          <option value="autocheck">autocheck</option>
-        </select>
-        <button id="openHtmlBtn">Open HTML</button>
-        <button id="downloadPdfBtn">Download PDF</button>
-        <button id="fetchLiveBtn" class="primary">Fetch live (no cost)</button>
-      </div>
-
-      <table id="cacheTable">
-        <thead>
-          <tr>
-            <th>VIN</th><th>Type</th><th class="right">Size</th><th>Updated</th><th>Action</th>
-          </tr>
-        </thead>
-        <tbody id="cacheBody"></tbody>
-      </table>
     </div>
 
     <!-- History -->
@@ -167,10 +143,8 @@
         t.classList.toggle('active', t.dataset.tab===name);
       });
       $('view-users').classList.toggle('hidden', name!=='users');
-      $('view-cache').classList.toggle('hidden', name!=='cache');
       $('view-history').classList.toggle('hidden', name!=='history');
       if (name==='users') loadUsers();
-      if (name==='cache') loadCache();
       if (name==='history') loadHistory();
     }
     document.querySelectorAll('.tab').forEach(t=>{
@@ -233,84 +207,8 @@
     $('userSubsBtn').addEventListener('click', ()=>{ subsOnly = true; renderUsers(); });
     $('userClearBtn').addEventListener('click', ()=>{ subsOnly = false; $('userSearch').value=''; loadUsers(); });
 
-    // Cache data
-    async function loadCache(){
-      const body = $('cacheBody');
-      body.innerHTML = '<tr><td colspan="5" class="muted">Loading…</td></tr>';
-      try {
-        const r = await fetch('/api/admin/cache');
-        if (!r.ok) throw new Error('not ok');
-        const { rows=[] } = await r.json();
-        if (!rows.length) { body.innerHTML = '<tr><td colspan="5" class="muted">Empty.</td></tr>'; return; }
-        body.innerHTML = '';
-        for (const row of rows) {
-          const tr = document.createElement('tr');
-          const dt = new Date(row.mtime);
-          const kb = Math.round(row.size/1024);
-          tr.innerHTML = `
-            <td style="font-family:ui-monospace,Menlo,Consolas">${row.vin}</td>
-            <td>${row.type}</td>
-            <td class="right">${kb.toLocaleString()} KB</td>
-            <td>${dt.toLocaleString()}</td>
-            <td>
-              <button data-act="open" data-vin="${row.vin}" data-type="${row.type}">Open</button>
-              <button data-act="pdf"  data-vin="${row.vin}" data-type="${row.type}">PDF</button>
-              <button data-act="fetch" data-vin="${row.vin}" data-type="${row.type}">Fetch live</button>
-            </td>
-          `;
-          body.appendChild(tr);
-        }
-        body.querySelectorAll('button').forEach(btn=>{
-          btn.addEventListener('click', handleRowAction);
-        });
-      } catch {
-        body.innerHTML = '<tr><td colspan="5" class="muted">Failed.</td></tr>';
-      }
-    }
-
-    async function handleRowAction(e){
-      const b = e.currentTarget;
-      const act = b.dataset.act;
-      const vin = b.dataset.vin;
-      const type = b.dataset.type || 'carfax';
-      if (act==='open') window.open(`/api/admin/open?vin=${encodeURIComponent(vin)}&type=${encodeURIComponent(type)}&as=html`, '_blank');
-      if (act==='pdf')  window.location = `/api/admin/open?vin=${encodeURIComponent(vin)}&type=${encodeURIComponent(type)}&as=pdf`;
-      if (act==='fetch') {
-        b.disabled = true; b.textContent = 'Fetching…';
-        try {
-          const r = await fetch(`/api/admin/open?vin=${encodeURIComponent(vin)}&type=${encodeURIComponent(type)}&fetch=1`);
-          if (!r.ok) throw 0;
-          toast('Fetched & cached.');
-          loadCache();
-        } catch { toast('Fetch failed'); }
-        finally { b.disabled = false; b.textContent = 'Fetch live'; }
-      }
-    }
-
-    // Quick controls
-    $('openHtmlBtn').addEventListener('click', ()=>{
-      const vin = $('vinInput').value.trim().toUpperCase();
-      const type = $('typeInput').value;
-      if (!vin) return toast('Enter VIN');
-      window.open(`/api/admin/open?vin=${encodeURIComponent(vin)}&type=${encodeURIComponent(type)}&as=html`, '_blank');
-    });
-    $('downloadPdfBtn').addEventListener('click', ()=>{
-      const vin = $('vinInput').value.trim().toUpperCase();
-      const type = $('typeInput').value;
-      if (!vin) return toast('Enter VIN');
-      window.location = `/api/admin/open?vin=${encodeURIComponent(vin)}&type=${encodeURIComponent(type)}&as=pdf`;
-    });
-    $('fetchLiveBtn').addEventListener('click', async ()=>{
-      const vin = $('vinInput').value.trim().toUpperCase();
-      const type = $('typeInput').value;
-      if (!vin) return toast('Enter VIN');
-      try {
-        const r = await fetch(`/api/admin/open?vin=${encodeURIComponent(vin)}&type=${encodeURIComponent(type)}&fetch=1`);
-        if (!r.ok) throw 0;
-        toast('Fetched & cached.');
-        loadCache();
-      } catch { toast('Fetch failed'); }
-    });
+    // (The old Cache tab was removed — it targeted /api/admin/cache and
+    // /api/admin/open, endpoints that never existed on this server.)
 
     // History
     async function loadHistory(){

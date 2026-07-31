@@ -157,6 +157,8 @@ async function subscribe(key,btn){
   if(!session){alert('Please sign in first — subscriptions are tied to your account.');location.href='/?login=1';return;}
   // Stripe subscription (khlin account). Map the button key -> plan key.
   const planKey=({sub_starter:'starter',sub_dealer:'dealer',sub_pro:'pro',sub_fleet:'fleet',sub_enterprise:'enterprise'})[key]||key;
+  // Remember the plan so the return page reports the real conversion value.
+  try{localStorage.setItem('purchaseKey',key)}catch(e){}
   try{
     const r=await fetch('/api/create-subscription-session',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({plan_key:planKey})});
     const j=await r.json();
