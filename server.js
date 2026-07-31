@@ -3903,10 +3903,12 @@ app.get("/api/dashboard", async (req, res) => {
       try {
         const sub     = await stripeDefault.subscriptions.retrieve(credRow.stripe_subscription_id);
         const priceId = sub.items && sub.items.data[0] && sub.items.data[0].price && sub.items.data[0].price.id;
-        if      (priceId === SUB_STARTER)  plan = "Starter";
-        else if (priceId === SUB_DEALER)   plan = "Dealer";
-        else if (priceId === SUB_PRO)      plan = "Pro";
-        else                               plan = "Active";
+        if      (priceId === SUB_STARTER)    plan = "Starter";
+        else if (priceId === SUB_DEALER)     plan = "Dealer";
+        else if (priceId === SUB_PRO)        plan = "Pro";
+        else if (priceId === SUB_FLEET)      plan = "Fleet";
+        else if (priceId === SUB_ENTERPRISE) plan = "Enterprise";
+        else                                 plan = "Active";
       } catch { plan = "Active"; }
     }
 
