@@ -114,7 +114,7 @@ function showToast(message, type = 'error') {
 const GADS_ID = 'AW-18241895372';
 const GADS_PURCHASE_LABEL = 'bUQgCNKw1NYcEMz3tPpD';
 
-/* Real USD price per package, so a $58 bundle isn't reported as a $5.99 sale.
+/* Real USD price per package, so a $49 bundle isn't reported as a $5.99 sale.
    Keep in sync with the pricing cards. */
 const PLAN_VALUES = {
   single: 5.99, pack5: 18, pack20: 49,
