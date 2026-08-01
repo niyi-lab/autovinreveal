@@ -1,0 +1,36 @@
+# AutoVINReveal
+
+> Vehicle history reports for used cars at $5.99 — the same national-database data (accidents, title brands, odometer rollbacks, open recalls, service records, ownership history) that CARFAX sells for $44.99. Enter a VIN, pay, and the full report opens in seconds. Independent provider, not affiliated with CARFAX, Inc.
+
+Reports are delivered instantly in the browser and can be saved as PDF or emailed. A single report needs no account; bundles and memberships require a free account so credits sync across devices.
+
+## Pricing
+
+- Single report: $5.99, no account needed
+- 5-report bundle: $18 ($3.60 each)
+- 10-report bundle: $29 ($2.90 each)
+- 20-report bundle: $49 ($2.45 each)
+- 50-report bundle: $99 ($1.98 each)
+- 100-report bundle: $185 ($1.85 each)
+- Bundle credits never expire.
+- Monthly memberships (for dealers and high-volume buyers) are cheaper per report than bundles: Starter $39/20 reports, Dealer $89/50, Pro $169/100, Fleet $349/250, Enterprise $649/500. Membership credits roll over one month, then expire. Cancel anytime.
+
+## Key pages
+
+- [Home / run a VIN report](https://www.autovinreveal.com/): Enter a VIN or license plate and buy a report.
+- [Free VIN decoder](https://www.autovinreveal.com/free-vin-decoder): Free tool that decodes year, make, model, engine, and specs from a VIN. No payment or account required.
+- [Dealer memberships](https://www.autovinreveal.com/membership.html): Monthly plans for dealers, wholesalers, and flippers.
+- [Blog](https://www.autovinreveal.com/blog/): Guides on reading VINs, spotting odometer fraud, salvage titles, and used-car buying.
+
+## Common questions
+
+- What is in the report? Accidents and damage, title brands (salvage, flood, lemon, rebuilt), odometer readings and rollback detection, open safety recalls, service and maintenance records, and ownership/registration history.
+- Is it a real CARFAX report? It is a full vehicle history report drawn from national vehicle-history databases covering the same categories. AutoVINReveal is an independent provider and is not affiliated with CARFAX, Inc.
+- What do you need? A 17-character VIN. License plate plus state also works for most US vehicles.
+- Refunds: 30-day money-back guarantee. If a report cannot be generated, the customer is not charged and any deducted credit is refunded automatically.
+- Support: support@autovinreveal.com
+
+## Policies
+
+- [Terms of service](https://www.autovinreveal.com/terms.html)
+- [Privacy policy](https://www.autovinreveal.com/privacy.html)

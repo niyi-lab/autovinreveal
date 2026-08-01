@@ -70,14 +70,14 @@
       <!-- Stats (logged-in) -->
       <div id="statsWrap" class="hidden">
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Credits Left</div><div class="text-3xl font-black text-blue-600" id="statBalance">—</div></div>
-          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">This Month</div><div class="text-3xl font-black text-slate-900" id="statThisMonth">—</div></div>
-          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">All Time</div><div class="text-3xl font-black text-slate-900" id="statTotal">—</div></div>
-          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Saved vs CARFAX</div><div class="text-3xl font-black text-green-600" id="statSaved">—</div></div>
+          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-2">Credits Left</div><div class="text-3xl font-black text-blue-600" id="statBalance">—</div></div>
+          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-2">This Month</div><div class="text-3xl font-black text-slate-900" id="statThisMonth">—</div></div>
+          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-2">All Time</div><div class="text-3xl font-black text-slate-900" id="statTotal">—</div></div>
+          <div class="bg-white rounded-2xl border border-gray-200 p-5"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-2">Saved vs CARFAX</div><div class="text-3xl font-black text-green-600" id="statSaved">—</div></div>
         </div>
         <div class="bg-white rounded-2xl border border-gray-200 p-5 mb-6">
           <div class="text-sm font-bold text-slate-700">Reports per month</div>
-          <div class="text-[11px] text-gray-400 mb-4">Last 6 months</div>
+          <div class="text-[11px] text-gray-500 mb-4">Last 6 months</div>
           <div class="flex items-end gap-2 h-24" id="barChart"></div>
         </div>
       </div>
@@ -90,7 +90,7 @@
           </div>
           <div>
             <div class="text-base font-bold text-slate-900 leading-tight">Admin · Users &amp; subscriptions</div>
-            <div class="text-xs text-gray-400">Every customer across both sites</div>
+            <div class="text-xs text-gray-500">Every customer across both sites</div>
           </div>
         </div>
 
@@ -101,7 +101,7 @@
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div class="p-4 border-b border-gray-100 flex gap-2 flex-wrap items-center">
             <div class="relative flex-1 min-w-[200px]">
-              <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+              <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-500">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
               </div>
               <input id="ownerSearch" type="text" placeholder="Search by email…" class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 outline-none text-sm transition-all" />
@@ -113,7 +113,7 @@
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead>
-                <tr class="text-left text-[11px] uppercase tracking-wider text-gray-400 bg-gray-50/70">
+                <tr class="text-left text-[11px] uppercase tracking-wider text-gray-500 bg-gray-50/70">
                   <th class="py-2.5 px-4 font-semibold">Customer</th>
                   <th class="py-2.5 px-3 font-semibold">Joined</th>
                   <th class="py-2.5 px-3 font-semibold">Last seen</th>
@@ -137,7 +137,7 @@
 
         <!-- Search input -->
         <div class="relative flex-1">
-          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-500">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
             </svg>
@@ -169,7 +169,7 @@
       <!-- Status bar: result count + sync status -->
       <div class="flex items-center justify-between mb-4 px-1">
         <p id="resultCount" class="text-sm text-gray-500"></p>
-        <div id="syncStatus" class="hidden items-center gap-2 text-xs text-gray-400 font-medium">
+        <div id="syncStatus" class="hidden items-center gap-2 text-xs text-gray-500 font-medium">
           <div class="loader w-3 h-3 border-2" style="width:12px;height:12px;border-width:2px;"></div>
           <span>Syncing from server…</span>
         </div>
@@ -182,7 +182,7 @@
       <div id="emptyState" class="hidden bg-white rounded-2xl border border-dashed border-gray-200 p-16 text-center">
         <div class="text-5xl mb-4">📋</div>
         <h3 class="font-bold text-gray-700 text-lg mb-1">No reports found</h3>
-        <p class="text-gray-400 text-sm mb-6" id="emptyMsg">You haven't run any reports yet.</p>
+        <p class="text-gray-500 text-sm mb-6" id="emptyMsg">You haven't run any reports yet.</p>
         <a href="/" class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl transition-colors text-sm shadow-lg shadow-blue-600/20">
           Check a VIN
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
@@ -195,7 +195,7 @@
     <div id="emailModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
       role="dialog" aria-modal="true" aria-labelledby="emailModalTitle">
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 relative">
-        <button id="closeEmailModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600" aria-label="Close">✕</button>
+        <button id="closeEmailModal" class="absolute top-4 right-4 text-gray-500 hover:text-gray-600" aria-label="Close">✕</button>
         <h3 id="emailModalTitle" class="text-xl font-bold text-gray-900 mb-2">Email Report</h3>
         <p class="text-sm text-gray-500 mb-4">We'll send the PDF to this address.</p>
         <input id="emailTargetInput" type="email" placeholder="name@example.com" autofocus
@@ -326,7 +326,7 @@
           // Bar height in px — a % height can't resolve inside the auto-height column (renders flat).
           const val = vals[i]; const px = Math.max(Math.round((val / max) * 56), val > 0 ? 7 : 3); const cur = i === keys.length - 1;
           const col = document.createElement('div'); col.className = 'flex flex-col items-center justify-end gap-1 flex-1';
-          col.innerHTML = `<span class="text-[10px] text-gray-400">${val > 0 ? val : ''}</span><div class="w-full rounded-t" style="height:${px}px;background:${cur ? '#2563eb' : '#cbd5e1'}"></div><span class="text-[10px] ${cur ? 'text-blue-600 font-bold' : 'text-gray-400'}">${STAT_MONTHS[parseInt(k.split('-')[1]) - 1]}</span>`;
+          col.innerHTML = `<span class="text-[10px] text-gray-500">${val > 0 ? val : ''}</span><div class="w-full rounded-t" style="height:${px}px;background:${cur ? '#2563eb' : '#cbd5e1'}"></div><span class="text-[10px] ${cur ? 'text-blue-600 font-bold' : 'text-gray-500'}">${STAT_MONTHS[parseInt(k.split('-')[1]) - 1]}</span>`;
           chart.appendChild(col);
         });
       }
@@ -381,7 +381,7 @@
         const totCredits = ownerUsers.reduce((s,u)=>s+(u.balance||0)+Number(u.sub_credits||0),0);
         const totSubs    = ownerUsers.filter(u=>u.sub_active).length;
         const totReports = ownerUsers.reduce((s,u)=>s+Number(u.reports||0),0);
-        const card = (label, val, accent)=>`<div class="bg-white rounded-2xl border border-gray-200 p-4"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">${label}</div><div class="text-2xl font-black ${accent}">${val}</div></div>`;
+        const card = (label, val, accent)=>`<div class="bg-white rounded-2xl border border-gray-200 p-4"><div class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-1.5">${label}</div><div class="text-2xl font-black ${accent}">${val}</div></div>`;
         const st = $id('ownerStats');
         if (st) st.innerHTML =
           card('Total users', ownerUsers.length.toLocaleString(), 'text-slate-900') +
@@ -391,7 +391,7 @@
         paintOwnerFilter();
         const more = $id('ownerMore');
         if (!rows.length) {
-          body.innerHTML = '<tr><td colspan="7" class="py-6 px-4 text-center text-gray-400">No users found.</td></tr>';
+          body.innerHTML = '<tr><td colspan="7" class="py-6 px-4 text-center text-gray-500">No users found.</td></tr>';
           if (more) more.classList.add('hidden');
           return;
         }
@@ -412,7 +412,7 @@
             const allShown = ownerShown >= rows.length;
             more.innerHTML = allShown
               ? `<button id="ownerMoreBtn" class="text-sm font-semibold text-gray-500 hover:text-gray-700">Show less</button>`
-              : `<button id="ownerMoreBtn" class="text-sm font-semibold text-indigo-600 hover:text-indigo-700">Show more <span class="text-gray-400 font-normal">(${visible.length} of ${rows.length})</span></button>`;
+              : `<button id="ownerMoreBtn" class="text-sm font-semibold text-indigo-600 hover:text-indigo-700">Show more <span class="text-gray-500 font-normal">(${visible.length} of ${rows.length})</span></button>`;
             $id('ownerMoreBtn').onclick = () => {
               ownerShown = (ownerShown >= rows.length) ? OWNER_PAGE : Math.min(ownerShown + OWNER_STEP, rows.length);
               renderOwner();
@@ -808,7 +808,7 @@
         filteredItems.forEach((item, idx) => {
           const isPlate = item.vin === '(from plate)';
           const label   = isPlate
-            ? `<span class="font-mono font-bold">${item.plate || '—'}</span><span class="ml-1.5 text-xs text-gray-400 font-normal">(plate lookup)</span>`
+            ? `<span class="font-mono font-bold">${item.plate || '—'}</span><span class="ml-1.5 text-xs text-gray-500 font-normal">(plate lookup)</span>`
             : `<span class="font-mono font-bold">${item.vin}</span>`;
           const vehName = (item.vehicle || '').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
           const vehLine = vehName
@@ -824,7 +824,7 @@
                 <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-.88-3.797A4 4 0 0112 6.341 3.5 3.5 0 0118.5 9a3.5 3.5 0 01-.5 6.95M5 19h13"/></svg>
                 Saved
               </span>`
-            : `<span class="px-2 py-0.5 text-[10px] font-medium text-gray-400 bg-gray-100 rounded-full">This device</span>`
+            : `<span class="px-2 py-0.5 text-[10px] font-medium text-gray-500 bg-gray-100 rounded-full">This device</span>`
 
           const row = document.createElement('div');
           row.className = 'row-enter bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-all p-4 sm:p-5';
@@ -838,7 +838,7 @@
                   ${typeTag}
                   ${srcTag}
                 </div>
-                <p class="text-xs text-gray-400">${formatTime(item.ts)}</p>
+                <p class="text-xs text-gray-500">${formatTime(item.ts)}</p>
               </div>
               <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                 <button data-action="view"
@@ -862,7 +862,7 @@
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
                   Link
                 </button>
-                <button data-action="del"
+                <button data-action="del" aria-label="Delete this report from history"
                   class="flex items-center justify-center text-red-300 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors">
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                 </button>
