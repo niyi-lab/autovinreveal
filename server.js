@@ -59,6 +59,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
+import compression from "compression";
 import helmet from "helmet";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
@@ -2421,6 +2422,19 @@ app.post("/api/whop-webhook", express.raw({ type: "*/*" }), async (req, res) => 
 /* ================================================================
    Middleware
 ================================================================ */
+// Gzip responses. Reports are ~0.7-1.9 MB of HTML and were served UNCOMPRESSED,
+// so a large one could outrun the client's 60s timeout and render nothing (a
+// 1.6 MB Infiniti QX60 report did exactly that). HTML compresses ~8-10x.
+// Webhook routes parse their own raw body per-route, so this never touches
+// signature verification; request bodies are unaffected either way.
+app.use(compression({
+  threshold: 1024,                       // don't bother with tiny payloads
+  filter: (req, res) => {
+    // Never compress already-compressed report payloads served as binary.
+    if (res.getHeader("Content-Encoding")) return false;
+    return compression.filter(req, res);
+  },
+}));
 app.use(express.json({ limit: "8mb" }));   // larger limit so chat screenshots fit
 app.use(cookieParser());
 app.use(cors({ origin: ALLOWED_ORIGIN, credentials: false }));
