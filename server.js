@@ -5029,11 +5029,32 @@ app.get("/api/decode-vin", async (req, res) => {
 // Clean URL for the free VIN decoder tool.
 app.get("/free-vin-decoder", (_req, res) => res.sendFile(path.join(__dirname, "public", "free-vin-decoder.html")));
 
+// Unknown paths must return a REAL 404. Serving index.html with a 200 made every
+// bad URL a soft-404 — Google indexed nonexistent pages (e.g. /cfc-dashboard.html,
+// a stale URL that isn't even in this repo) as duplicate homepages, wasting crawl
+// budget. Known SPA-ish entry points are listed explicitly above this handler.
 app.get("*", (req, res) => {
+  if (req.path.startsWith("/api/")) return res.status(404).json({ error: "not_found" });
+  res.status(404);
+  res.setHeader("Cache-Control", "no-store, must-revalidate");
   if (req.accepts("html")) {
-    res.setHeader("Cache-Control", "no-store, must-revalidate");
-    res.sendFile(path.join(__dirname, "public", "index.html"));
-  } else res.status(404).send("Not found");
+    return res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,follow">
+<title>Page not found · AutoVINReveal</title>
+<link rel="stylesheet" href="/tw.css">
+</head><body class="bg-slate-50 text-slate-900">
+<div class="max-w-lg mx-auto px-6 py-24 text-center">
+  <div class="text-6xl font-black text-slate-300">404</div>
+  <h1 class="text-2xl font-black mt-4">We couldn't find that page</h1>
+  <p class="text-gray-500 mt-2">It may have moved, or the link may be wrong.</p>
+  <div class="flex flex-wrap gap-3 justify-center mt-8">
+    <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-3 rounded-xl text-sm">Check a VIN</a>
+    <a href="/blog/" class="bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold px-5 py-3 rounded-xl text-sm">Read the guides</a>
+  </div>
+</div></body></html>`);
+  }
+  res.send("Not found");
 });
 
 app.listen(Number(PORT), HOST, () => {
