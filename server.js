@@ -4953,6 +4953,16 @@ app.get("/api/vin-summary/:vin", lookupLimiter, async (req, res) => {
 /* ================================================================
    Static Files & Boot
 ================================================================ */
+// Serve /blog directly instead of letting express.static 301 it to /blog/.
+// A bare /blog resolves in one hop over https but up to THREE via http://www
+// (http -> https -> apex -> trailing slash), and Googlebot gives up on long
+// chains — Search Console logged this as a Redirect error on the sister site.
+// Canonical still points at /blog/, so there's no duplicate-content risk.
+app.get(["/blog", "/blog/index.html"], (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, must-revalidate");
+  res.sendFile(path.join(__dirname, "public", "blog", "index.html"));
+});
+
 app.use(express.static(path.join(__dirname, "public"), {
   setHeaders: (res, filePath) => {
     // Never serve stale HTML — keeps old button text/copy from lingering in browsers
