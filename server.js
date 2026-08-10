@@ -3142,9 +3142,11 @@ app.get("/api/provider-proxy/cheapcarfax/:vin", async (req, res) => {
   if (!CHEAPCARFAX_KEY) return res.status(503).json({ message: "CHEAPCARFAX_API_KEY not set on proxy" });
 
   try {
+    // 120s: fresh reports generate slowly (>45s). The proxy runs on raw Render
+    // (no Cloudflare 100s cap on this hop), so a longer wait is safe here.
     const r = await axios.get(`${CHEAPCARFAX_BASE}/api/carfax/vin/${vin}/html`, {
       headers: cheapcarfaxHeaders(),
-      timeout: 45000,
+      timeout: 120000,
       validateStatus: () => true,
     });
     console.log(`[ProviderProxy] cheapcarfax ${vin} → ${r.status} (for CFC)`);
@@ -3154,6 +3156,43 @@ app.get("/api/provider-proxy/cheapcarfax/:vin", async (req, res) => {
     console.error(`[ProviderProxy] cheapcarfax ${vin} upstream error: ${err.message}`);
     res.status(502).json({ message: "Report Not Available! (proxy upstream error: " + err.message + ")" });
   }
+});
+
+// TEMP DIAGNOSTIC (2026-08-10): probe cheapcarfax's stored-report API so we can
+// build "generate → retrieve stored" instead of the slow synchronous /html call.
+// AVR's IP is whitelisted with the provider; ops-secret gated. Remove after wiring.
+app.get("/api/provider-proxy/cheapcarfax-probe/:vin", async (req, res) => {
+  const given = String(req.headers["x-proxy-secret"] || "");
+  const ok = PROVIDER_PROXY_SECRET
+    && given.length === PROVIDER_PROXY_SECRET.length
+    && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(PROVIDER_PROXY_SECRET));
+  if (!ok) return res.status(401).json({ message: "Unauthorized" });
+  const vin = String(req.params.vin || "").trim().toUpperCase();
+  const candidates = [
+    `/api/reports?vin=${vin}`,
+    `/api/reports?page=1&per_page=20&sort_by=created_at&sort_order=desc`,
+    `/api/carfax/vin/${vin}`,
+    `/api/carfax/reports?vin=${vin}`,
+  ];
+  const out = [];
+  for (const path of candidates) {
+    try {
+      const r = await axios.get(`${CHEAPCARFAX_BASE}${path}`, {
+        headers: cheapcarfaxHeaders(), timeout: 15000, validateStatus: () => true,
+      });
+      let sample;
+      if (typeof r.data === "object") {
+        const s = JSON.stringify(r.data);
+        sample = s.length > 1500 ? s.slice(0, 1500) + "…(truncated)" : s;
+      } else {
+        sample = String(r.data).slice(0, 400);
+      }
+      out.push({ path, status: r.status, contentType: r.headers["content-type"], sample });
+    } catch (e) {
+      out.push({ path, error: e.message });
+    }
+  }
+  res.json({ vin, probes: out });
 });
 
 app.get("/api/myip", async (req, res) => {
