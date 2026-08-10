@@ -380,8 +380,17 @@ const CFC_CREDITS_KEY = "cfc_credits_remaining";
      GET /v1/balance                — credit balance
 ================================================================ */
 
-// Report provider — switchable via REPORT_PROVIDER ("reportsvin" | "cheapcarfax").
-const REPORT_PROVIDER  = (process.env.REPORT_PROVIDER || "reportsvin").toLowerCase();
+// Report provider. reports.vin is RETIRED (2026-08-10) — its account is drained,
+// so falling back to it silently stalls/fails every report. cheapcarfax
+// (panel.cheapcarfax.net) is the only live provider. Default to it and coerce any
+// stale "reportsvin" env value so a lost/wrong Render var can never select the
+// dead provider — REPORT_PROVIDER also drives chrome/base-tag injection below, so
+// it MUST resolve to cheapcarfax everywhere, not just in the fetch dispatch.
+let REPORT_PROVIDER    = (process.env.REPORT_PROVIDER || "cheapcarfax").toLowerCase();
+if (REPORT_PROVIDER === "reportsvin") {
+  console.warn("[Provider] REPORT_PROVIDER=reportsvin is retired — forcing cheapcarfax.");
+  REPORT_PROVIDER = "cheapcarfax";
+}
 const CCF_BASE         = process.env.REPORTSVIN_BASE    || "https://api.reports.vin/v1";
 const CHEAPCARFAX_BASE = process.env.CHEAPCARFAX_BASE   || "https://panel.cheapcarfax.net";
 const CHEAPCARFAX_KEY  = process.env.CHEAPCARFAX_API_KEY || "";
