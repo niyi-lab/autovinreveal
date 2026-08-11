@@ -536,7 +536,9 @@ async function fetchFromCheapcarfax(vin, _type = "carfax") {
     console.log(`[CheapCARFAX] Live fetch (attempt ${attempt}/${MAX_ATTEMPTS}): GET ${endpoint}`);
     const r = await axios.get(endpoint, {
       headers: cheapcarfaxHeaders(),
-      timeout: 45000,
+      // Fresh reports generate in ~60-65s; 45s was aborting them mid-generation.
+      // 90s clears that while staying under Cloudflare's ~100s browser->origin cap.
+      timeout: 90000,
       validateStatus: () => true,
     });
     console.log(`[CheapCARFAX] Status: ${r.status} for ${vin}`);

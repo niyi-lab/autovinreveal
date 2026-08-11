@@ -407,7 +407,7 @@ function showReportOverlay(html, vin, opts = {}) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ vin, type: opts.type || 'carfax', as: 'html', allowLive: true, refresh: true }),
-        }, 60_000);
+        }, 95_000);
         if (!r.ok) { showToast(await friendlyReportError(r), 'error'); reset(); return; }
         const freshHtml = await r.text();
         const o2 = ownerOptsFromRes(r, true);
@@ -586,7 +586,7 @@ async function resumePendingPurchase() {
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (!user && stripeSessionId) pending.oneTimeSession = stripeSessionId;
   try {
-    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) }, 60_000);
+    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(pending) }, 95_000);
     if (!r.ok) { showToast(await friendlyReportError(r), 'error'); return; }
     const html = await r.text();
     clearPending();
@@ -680,7 +680,7 @@ async function handleSuccessIfNeeded() {
       const r = await apiFetch(API.report, {
         method: 'POST', headers,
         body: JSON.stringify({ vin: vinParam, type: 'carfax', as: 'html', oneTimeSession: stripeSessionId }),
-      }, 60_000);
+      }, 95_000);
       if (!r.ok) throw new Error(await friendlyReportError(r));
       const html = await r.text();
       // Purchase complete: clear the pending state NOW so a later purchase can't
@@ -1073,7 +1073,7 @@ async function openHistoryHTML(item) {
         r = await apiFetch(API.report, {
           method: 'POST', headers,
           body: JSON.stringify({ vin, type, as: 'html', allowLive: true }),
-        }, 60_000);
+        }, 95_000);
         if (!r.ok) { showToast(await friendlyReportError(r), 'error'); return; }
       } else { showToast('Report not found.', 'error'); return; }
     }
@@ -1097,7 +1097,7 @@ async function downloadHistoryPDF(item, btn = null) {
     await ensureBackendReady();
     // Use dedicated PDF endpoint — streams PDF or print-dialog HTML from CFC
     const url = '/api/download-pdf?vin=' + encodeURIComponent(vin);
-    const r   = await apiFetch(url, { headers: { Authorization: `Bearer ${token}` } }, 60_000);
+    const r   = await apiFetch(url, { headers: { Authorization: `Bearer ${token}` } }, 95_000);
     if (!r.ok) { showToast('We couldn’t generate the PDF right now — please try again in a moment.', 'error'); restore(); return; }
     const ct = r.headers.get('content-type') || '';
     if (ct.includes('application/pdf')) {
@@ -1652,7 +1652,7 @@ f?.addEventListener('submit', async (e) => {
   try {
     if (!currentUser && stripeSessionId) data.oneTimeSession = stripeSessionId;
 
-    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) }, 60_000);
+    const r = await apiFetch(API.report, { method: 'POST', headers, body: JSON.stringify(data) }, 95_000);
 
     if (r.status === 401 || r.status === 402) {
       localStorage.setItem(PENDING_KEY, JSON.stringify(data));
