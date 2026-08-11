@@ -1648,8 +1648,16 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
       // redeeming the receipt on /api/report — granting the metadata credit too
       // double-fulfills (report + a leftover credit worth a second report).
       let creditsToAdd = Number(session.metadata?.credits || 0);
-      if ((session.metadata?.intent || "") === "buy_report") creditsToAdd = 0;
-      if (!creditsToAdd) {
+      // Single reports (1 credit) are fulfilled by redeeming the receipt on
+      // /api/report — granting here too would double-fulfill, so skip them.
+      // Bundles (>=5 credits) always grant. Detect by CREDIT COUNT, not by a
+      // per-site metadata key: the khlin account is shared, so CFC's webhook also
+      // receives AVR events and vice-versa. AVR tags singles with intent=buy_report
+      // and sets plan_key; CFC keyed on price_key. When one site processed the
+      // OTHER's bundle event, the mismatched key read as "single" and zeroed a real
+      // bundle (a $18 5-pack landed with 0 credits). Credit count is unambiguous.
+      if (creditsToAdd === 1) creditsToAdd = 0;
+      else if (!creditsToAdd) {
         const sStripe   = stripeForId(session.id);
         const lineItems = await sStripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
         for (const li of lineItems.data) {
