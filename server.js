@@ -1061,7 +1061,18 @@ function addPrintFitScript(html) {
     `function strip(){try{var els=d.querySelectorAll('.sidebar-shown');for(var i=0;i<els.length;i++){els[i].classList.remove('sidebar-shown');if(st.indexOf(els[i])<0)st.push(els[i])}}catch(e){}}` +
     `function restore(){try{for(var i=0;i<st.length;i++)st[i].classList.add('sidebar-shown');st=[]}catch(e){}}` +
     `try{var s=d.createElement('style');s.id='vin-pagesize';` +
-    `s.textContent='@page{size:1240px 1750px;margin:12px}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}';` +
+    `s.textContent='@page{size:1240px 1750px;margin:12px}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}` +
+    // The report's own CSS caps content at ~1049px, so on a 1240px page it hugged
+    // the left with a dead strip on the right. Center the report container.
+    `body>*,#vehicle-history-report,main{margin-left:auto!important;margin-right:auto!important}` +
+    // Trailing blank page: a fixed/absolute footer, a stray trailing element, or a
+    // container whose height overshoots the last page pushes one empty sheet out.
+    // Collapse trailing whitespace and forbid a page break after the last block.
+    `html,body{height:auto!important;min-height:0!important}` +
+    `body>*:last-child{margin-bottom:0!important;padding-bottom:0!important;break-after:avoid!important;page-break-after:avoid!important}` +
+    `body::after,html::after{content:none!important;display:none!important}` +
+    // Never let an empty/hidden trailing node claim its own sheet.
+    `*{break-inside:auto}#avr-dlbar,#ccf-dlbar{display:none!important}}';` +
     `(d.documentElement||d.body).appendChild(s)}catch(e){}` +
     `window.addEventListener('beforeprint',strip);window.addEventListener('afterprint',restore);` +
     (unhandled.length
