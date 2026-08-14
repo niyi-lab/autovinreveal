@@ -1048,8 +1048,39 @@ function decodeReportBase64(rawB64) {
 // Injected with its OWN idempotency guard, separately from the main chrome, so
 // reports cached with an older chrome (or baked by the sibling CFC site —
 // shared cache) still gain it when re-served. Byte-identical with the CFC copy.
+// Print page box. 1240px was far wider than the report's own ~1049px max-width,
+// so the content printed small, left-aligned, with a dead strip down the right.
+// 1100px (Letter aspect) lets the report fill the sheet like the on-screen view.
+// Single-quote free: this string is embedded inside a single-quoted JS literal.
+const PRINT_PAGE_CSS =
+  "@page{size:1100px 1424px;margin:12px}" +
+  "@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}" +
+  "body>*,#vehicle-history-report,main{margin-left:auto!important;margin-right:auto!important}" +
+  "html,body{height:auto!important;min-height:0!important}" +
+  "body>*:last-child{margin-bottom:0!important;padding-bottom:0!important;break-after:avoid!important;page-break-after:avoid!important}" +
+  "body::after,html::after{content:none!important;display:none!important}" +
+  "#avr-dlbar,#ccf-dlbar{display:none!important}}";
+
+// Reports are cached with the chrome BAKED IN (CFC bakes at fetch time, and the
+// fit script is baked on both sites), so an old cached report carries the old
+// page CSS forever and every idempotency guard below skips it. Rewrite the legacy
+// page box wherever it appears — inside the baked script literal and the raw
+// download-bar <style> alike — so cached reports pick up the new layout on serve.
+const LEGACY_PAGE_RULES = [
+  "@page{size:1240px 1750px;margin:12px}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}",
+  "@page{size:1240px 1750px;margin:12px}",
+];
+function upgradePrintPageCss(html) {
+  if (!html || typeof html !== "string" || html.includes("size:1100px 1424px")) return html;
+  let out = html;
+  for (const legacy of LEGACY_PAGE_RULES) out = out.split(legacy).join(PRINT_PAGE_CSS);
+  return out;
+}
+
 function addPrintFitScript(html) {
-  if (!html || typeof html !== "string" || html.includes('id="vin-fitpage"')) return html;
+  if (!html || typeof html !== "string") return html;
+  html = upgradePrintPageCss(html);   // upgrade BEFORE the guard, so cached reports get it
+  if (html.includes('id="vin-fitpage"')) return html;
   // Cross-site print messages: the shared cache means HTML baked by the sibling
   // site (listener for its brand message only) can be served here. Add a printing
   // listener ONLY for the brand messages this HTML provably does NOT handle (the
@@ -1061,18 +1092,7 @@ function addPrintFitScript(html) {
     `function strip(){try{var els=d.querySelectorAll('.sidebar-shown');for(var i=0;i<els.length;i++){els[i].classList.remove('sidebar-shown');if(st.indexOf(els[i])<0)st.push(els[i])}}catch(e){}}` +
     `function restore(){try{for(var i=0;i<st.length;i++)st[i].classList.add('sidebar-shown');st=[]}catch(e){}}` +
     `try{var s=d.createElement('style');s.id='vin-pagesize';` +
-    `s.textContent='@page{size:1240px 1750px;margin:12px}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}` +
-    // The report's own CSS caps content at ~1049px, so on a 1240px page it hugged
-    // the left with a dead strip on the right. Center the report container.
-    `body>*,#vehicle-history-report,main{margin-left:auto!important;margin-right:auto!important}` +
-    // Trailing blank page: a fixed/absolute footer, a stray trailing element, or a
-    // container whose height overshoots the last page pushes one empty sheet out.
-    // Collapse trailing whitespace and forbid a page break after the last block.
-    `html,body{height:auto!important;min-height:0!important}` +
-    `body>*:last-child{margin-bottom:0!important;padding-bottom:0!important;break-after:avoid!important;page-break-after:avoid!important}` +
-    `body::after,html::after{content:none!important;display:none!important}` +
-    // Never let an empty/hidden trailing node claim its own sheet.
-    `*{break-inside:auto}#avr-dlbar,#ccf-dlbar{display:none!important}}';` +
+    `s.textContent='${PRINT_PAGE_CSS}';` +
     `(d.documentElement||d.body).appendChild(s)}catch(e){}` +
     `window.addEventListener('beforeprint',strip);window.addEventListener('afterprint',restore);` +
     (unhandled.length
@@ -1279,10 +1299,9 @@ function injectReportChrome(html) {
     `<style>#avr-dlbar{position:fixed;top:14px;right:14px;z-index:2147483647}` +
     `#avr-dlbar button{display:flex;align-items:center;gap:7px;background:#2563eb;color:#fff;border:none;border-radius:10px;padding:11px 18px;font:600 14px system-ui,-apple-system,sans-serif;cursor:pointer;box-shadow:0 6px 18px rgba(37,99,235,.4)}` +
     `#avr-dlbar button:hover{background:#1d4ed8}` +
-    // Wide print page so the full-width report fits without clipping on the right
-    // (matches the Cloudflare email-PDF render width). The print engine paginates
-    // vertically, so only the page WIDTH matters for clipping.
-    `@page{size:1240px 1750px;margin:12px}` +
+    // Page box sized to the report's own ~1049px content width so it fills the
+    // sheet instead of printing small against a dead right margin.
+    `${PRINT_PAGE_CSS}` +
     `@media print{#avr-dlbar{display:none!important}}</style>` +
     // 1) Remove this floating button when (a) Cloudflare renders the PDF (?pdf=1),
     //    or (b) the report is inside the in-app overlay iframe — the overlay toolbar
