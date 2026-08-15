@@ -235,6 +235,33 @@ const SUB_PRICE_BY_KEY = {
   fleet: SUB_FLEET, enterprise: SUB_ENTERPRISE,
 };
 
+/* ================================================================
+   khlin return-forwarder warm-up
+   Stripe returns every buyer through khlinautomotive.com/r (keeps this domain
+   off Stripe). That hop is POST-payment, so a cold start there never blocks a
+   sale — but it does strand a buyer who already paid, which is the worst moment
+   to be slow. Two cheap guards: ping on checkout creation (wakes it while the
+   buyer types card details) and a periodic ping so it never idles out at all.
+================================================================ */
+const KHLIN_BASE = (process.env.KHLIN_RETURN_BASE || "https://khlinautomotive.com").replace(/\/$/, "");
+let _khlinWarmAt = 0;
+function warmKhlinReturn() {
+  const now = Date.now();
+  if (now - _khlinWarmAt < 60_000) return;   // at most once a minute
+  _khlinWarmAt = now;
+  axios.get(`${KHLIN_BASE}/r?s=avr&d=cancel`, {
+    timeout: 8000, maxRedirects: 0, validateStatus: () => true,
+    headers: { "User-Agent": "avr-warmup" },
+  }).catch(() => {});                        // never let a warm-up surface an error
+}
+// Keep it awake around the clock: idle plans sleep after ~15 min, and this
+// service is already always-on, so it makes a free keep-alive pinger.
+setInterval(() => {
+  _khlinWarmAt = 0;                          // bypass the per-minute throttle
+  warmKhlinReturn();
+}, 10 * 60 * 1000);
+setTimeout(() => { _khlinWarmAt = 0; warmKhlinReturn(); }, 20_000);
+
 function stripeForId(id) {
   const isTest = typeof id === "string" && id.startsWith("cs_test_");
   if (isTest) {
@@ -3052,6 +3079,14 @@ app.post("/api/create-checkout-session", async (req, res) => {
         .update({ session_id: session.id }).eq("order_id", orderId)
         .then(({ error }) => { if (error) console.warn("[order-map] session_id update failed:", error.message); });
     }
+
+    // Wake the khlin return forwarder now. Stripe sends the buyer back through
+    // khlinautomotive.com, and if that service has spun down (idle plans sleep)
+    // the buyer stares at a cold start AFTER paying — the window where a bail-out
+    // means paid-but-no-report. They're about to spend 30-60s entering card
+    // details, which is ample time for it to boot. Fire-and-forget: this must
+    // never delay or fail checkout.
+    warmKhlinReturn();
 
     // Log guest purchases for investigator detection
     if (!userId && vin) {
