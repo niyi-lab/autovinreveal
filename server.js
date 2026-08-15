@@ -5090,6 +5090,13 @@ app.use(express.static(path.join(__dirname, "public"), {
   setHeaders: (res, filePath) => {
     // Never serve stale HTML — keeps old button text/copy from lingering in browsers
     if (filePath.endsWith(".html")) res.setHeader("Cache-Control", "no-store, must-revalidate");
+    // The sample report PDF is a marketing asset, not a landing page — we'd rather
+    // buyers arrive on a real page. Google had it parked in "Crawled - currently
+    // not indexed" (an undecided state that keeps failing validation); an explicit
+    // noindex moves it to "Excluded by noindex tag", i.e. deliberately excluded.
+    // Crawling stays ALLOWED so the header is actually seen (a robots.txt block
+    // would hide it). PDFs can only carry this via header — they have no <meta>.
+    if (filePath.endsWith(".pdf")) res.setHeader("X-Robots-Tag", "noindex, nofollow");
   },
 }));
 app.get("/301", (_req, res) => res.redirect(301, "/"));
