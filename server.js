@@ -4527,6 +4527,35 @@ const OWNER_ADMIN_TOOLS = [
     description: "Most recent report runs across ALL users: VIN, type, vehicle, success, time, and the user's email (or 'guest'). Use for 'what ran today' or 'any failures lately'.",
     input_schema: { type: "object", properties: { limit: { type: "integer", description: "Max rows, default 20, max 100" }, only_failures: { type: "boolean", description: "true = only failed runs" } }, required: [] },
   },
+  // ── Ops tools (owner-only, same verified-email gate) ──────────────────────
+  {
+    name: "provider_status",
+    description: "Check whether the sites can actually SELL right now. Returns this server's outbound (egress) IP, whether that IP is whitelisted with the report provider, and a live provider health probe. Render rotates the egress IP on every deploy, and a non-whitelisted IP silently blocks checkout on BOTH sites (customers see 'reports temporarily unavailable'). Call this whenever the owner reports no sales, checkout errors, or asks if anything is broken.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "grant_credits",
+    description: "Add credits to a customer's account by email. Use when a customer paid but their credits never landed (a webhook failure), or to comp a customer for a bad experience. Always call lookup_user first to confirm the account and current balance, and tell the owner the before/after balance. Positive numbers only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        email:  { type: "string",  description: "The customer's email address" },
+        amount: { type: "integer", description: "How many credits to add (1-500)" },
+        reason: { type: "string",  description: "Short note for the ledger, e.g. 'paid 5-pack, webhook missed'" },
+      },
+      required: ["email", "amount"],
+    },
+  },
+  {
+    name: "recent_sales",
+    description: "Recent successful payments from Stripe (both sites, newest first): time, amount, buyer email, and what they bought. Use for 'did we sell today', 'who bought recently', or to cross-check a customer's claim that they paid. Amounts are USD.",
+    input_schema: { type: "object", properties: { limit: { type: "integer", description: "Max charges, default 10, max 50" } }, required: [] },
+  },
+  {
+    name: "run_reconcile",
+    description: "Force the stranded-purchase sweep to run now instead of waiting for its 10-minute timer. This finds guests who paid but never got their report delivered (closed the tab before the return hop) and emails it to them. Use when a customer says they paid and got nothing.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
 ];
 
 async function execOwnerAdminTool(name, input) {
@@ -4571,6 +4600,71 @@ async function execOwnerAdminTool(name, input) {
       user: r.user_id ? (emails[r.user_id] || r.user_id) : "guest",
     })));
   }
+  // ── Ops tools ─────────────────────────────────────────────────────────────
+  if (name === "provider_status") {
+    let egress = null;
+    try {
+      const ipr = await axios.get("https://api.ipify.org?format=json", { timeout: 8000 });
+      egress = ipr.data?.ip || null;
+    } catch (e) { egress = null; }
+    const whitelisted = egress ? WHITELISTED_IPS.includes(egress) : null;
+    const healthy = await providerHealthy();
+    return JSON.stringify({
+      egress_ip: egress,
+      ip_whitelisted: whitelisted,
+      whitelisted_ips: WHITELISTED_IPS,
+      provider_reachable: healthy,
+      selling: !!(whitelisted && healthy),
+      note: whitelisted === false
+        ? "NOT whitelisted — checkout is blocked on BOTH sites. Fix: redeploy projectecho until the egress IP lands in the whitelist, or have the provider whitelist this IP."
+        : (healthy ? "Provider reachable and IP whitelisted — sales should be working." : "IP is fine but the provider probe failed; may be a transient provider issue."),
+    });
+  }
+
+  if (name === "grant_credits") {
+    const email  = String(input?.email || "").trim().toLowerCase();
+    const amount = parseInt(input?.amount, 10);
+    if (!email) return "Need the customer's email.";
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 500) return "Amount must be a whole number between 1 and 500.";
+    // Resolve the account (and current balance) the same way lookup_user does.
+    const { data: detail, error: detErr } = await supabaseService.rpc("admin_user_detail", { p_email: email });
+    if (detErr) throw new Error(detErr.message);
+    if (!detail) return `No account found for ${email}. Use list_users with a partial search to find the right address — do NOT grant credits to a guessed account.`;
+    const userId = detail.user_id || detail.id || (detail.user && detail.user.id);
+    if (!userId) return `Found ${email} but could not resolve their user id; not granting.`;
+    const before = detail.balance ?? detail.credits ?? null;
+    await addCreditsAtomic(userId, amount);
+    const { data: after } = await supabaseService
+      .from("credits").select("balance").eq("user_id", userId).maybeSingle();
+    console.log(`[OwnerOps] granted ${amount} credits to ${email} (${input?.reason || "no reason given"})`);
+    return JSON.stringify({
+      email, granted: amount, balance_before: before, balance_after: after?.balance ?? null,
+      reason: input?.reason || null, ok: true,
+    });
+  }
+
+  if (name === "recent_sales") {
+    const limit = Math.min(Math.max(parseInt(input?.limit, 10) || 10, 1), 50);
+    const charges = await stripeDefault.charges.list({ limit });
+    const rows = (charges.data || [])
+      .filter(c => c.status === "succeeded")
+      .map(c => ({
+        at: new Date(c.created * 1000).toISOString(),
+        amount: (c.amount || 0) / 100,
+        email: c.billing_details?.email || null,
+        bought: c.description || null,
+        refunded: !!c.refunded,
+      }));
+    return JSON.stringify(rows);
+  }
+
+  if (name === "run_reconcile") {
+    const jobs = [];
+    if (typeof reconcileStripeSingles === "function") { try { await reconcileStripeSingles(); jobs.push("stripe_singles"); } catch (e) { jobs.push("stripe_singles_failed:" + e.message); } }
+    if (typeof reconcileWhopCheckouts === "function") { try { await reconcileWhopCheckouts(); jobs.push("whop"); } catch (e) { jobs.push("whop_failed:" + e.message); } }
+    return JSON.stringify({ ran: jobs, note: "Any stranded paid purchases found were delivered and the owner emailed." });
+  }
+
   return "Unknown tool: " + name;
 }
 
@@ -4579,6 +4673,14 @@ async function runOwnerAdminChat({ apiKey, history, message, image }) {
   const sys = `You are the private ADMIN assistant for the owner of AutoVINReveal (autovinreveal.com) and CheapestCarFax (cheapestcarfax.com). Both sites share ONE backend, so your tools cover users, credits, reports, and purchases of BOTH sites.
 
 You are talking to the OWNER — their identity was verified by server-side login, so answer freely about any customer or business data. Always use the tools instead of guessing; if one lookup comes back empty, try list_users with a partial search before giving up.
+
+You can also run OPS actions, so the owner can fix things from their phone:
+- provider_status: the single most useful check when the owner says sales are down or something is broken. Render rotates this server's outbound IP on every deploy, and a non-whitelisted IP silently blocks checkout on BOTH sites while the sites still load fine. Run this FIRST for any "no sales", "is it working", or "checkout broken" question, and say plainly whether the sites can sell right now.
+- recent_sales: real payments from Stripe, to confirm or refute "did we sell today".
+- grant_credits: fix a customer who paid but got no credits. ALWAYS lookup_user first to confirm the account exists and see their balance; report the before/after numbers. If the email does not match an account, say so and stop — never grant to a guessed account.
+- run_reconcile: force the stranded-purchase sweep when a customer says they paid and received nothing.
+
+For anything destructive or money-related (granting credits), state exactly what you did and the resulting numbers. If a tool reports a problem, lead with the plain-English impact ("customers cannot buy right now") before the technical detail.
 
 STYLE: plain text only, no markdown or bullets. Be concise but give real numbers, emails, and dates (like "Jun 28, 2026"). Short multi-line summaries are fine. If asked something that needs no data (or general support questions), just answer normally.`;
   const { cleaned, lastUserContent } = buildChatTurns(history, message, image);
@@ -4589,7 +4691,10 @@ STYLE: plain text only, no markdown or bullets. Be concise but give real numbers
     const r = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model: "claude-opus-4-8",
+        // Owner admin brain. Switch models without a code change by setting
+        // OWNER_ADMIN_MODEL on Render (e.g. claude-sonnet-5 for cheaper/faster,
+        // claude-opus-5 for the most capable). Defaults to Opus 5.
+        model: process.env.OWNER_ADMIN_MODEL || "claude-opus-5",
         max_tokens: 1500,
         system: [{ type: "text", text: sys, cache_control: { type: "ephemeral" } }],
         tools: OWNER_ADMIN_TOOLS,
