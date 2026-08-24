@@ -3504,6 +3504,53 @@ if (NP_API_KEY) {
 }
 
 /* ================================================================
+   "How did you hear about us?" — one-tap post-purchase survey.
+   Recorded against the guest's paid session (or the signed-in account) so
+   answers can be joined to revenue. At most one answer per session/account:
+   the DB has unique indexes on both, so a retry or a spammer can't stuff it.
+================================================================ */
+const ATTRIBUTION_SOURCES = new Set([
+  "google", "reddit", "friend", "referral", "youtube", "facebook", "tiktok", "ad", "other",
+]);
+
+app.post("/api/attribution", async (req, res) => {
+  try {
+    if (!supabaseService) return res.json({ ok: false });
+
+    const source = String(req.body?.source || "").trim().toLowerCase();
+    if (!ATTRIBUTION_SOURCES.has(source)) return res.status(400).json({ ok: false, error: "bad_source" });
+
+    // Identity: a signed-in account, or the guest's paid checkout session.
+    const { user } = await getUser(req).catch(() => ({ user: null }));
+    const sessionId = String(req.body?.session_id || "").trim().slice(0, 120) || null;
+    if (!user && !sessionId) return res.status(400).json({ ok: false, error: "no_identity" });
+
+    const clip = (v, n) => { const s = String(v ?? "").trim(); return s ? s.slice(0, n) : null; };
+    const row = {
+      site:          SITE_ID,
+      source,
+      detail:        source === "other" ? clip(req.body?.detail, 200) : null,
+      user_id:       user?.id || null,
+      session_id:    user ? null : sessionId,   // guests keyed by session, users by account
+      vin:           clip(req.body?.vin, 20),
+      gclid:         clip(req.body?.gclid, 200),
+      utm_source:    clip(req.body?.utm_source, 100),
+      utm_medium:    clip(req.body?.utm_medium, 100),
+      utm_campaign:  clip(req.body?.utm_campaign, 150),
+      referrer_host: clip(req.body?.referrer_host, 150),
+    };
+
+    const { error } = await supabaseService.from("attribution_responses").insert(row);
+    // 23505 = already answered. That's a success from the caller's point of view.
+    if (error && error.code !== "23505") throw new Error(error.message);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[attribution] failed:", e.message);
+    res.status(500).json({ ok: false });
+  }
+});
+
+/* ================================================================
    Referral endpoints (see the referral helpers above for the rules)
 ================================================================ */
 

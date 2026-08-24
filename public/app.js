@@ -329,6 +329,9 @@ function showReportOverlay(html, vin, opts = {}) {
 
   overlay.appendChild(bar);
   overlay.appendChild(iframe);
+  // One-tap "how did you hear about us?", docked below the report. Fades in
+  // after ~9s so it never competes with the thing they just paid for.
+  mountAttributionSurvey(overlay, { vin, oneTimeSession: opts.oneTimeSession || null });
   document.body.appendChild(overlay);
 
   // Push history state so Android back-button also closes the overlay
@@ -1027,6 +1030,128 @@ function deviceId() {
     }
   } catch {}
 })();
+
+/* ================================
+   "How did you hear about us?"
+   Technical params (gclid/utm) are captured on the FIRST landing and kept, so
+   they survive the Stripe round-trip. The one-tap survey then runs after the
+   report has rendered — never before the customer has what they paid for.
+================================ */
+const MKT_KEY  = 'avr_mkt';
+const SURV_KEY = 'avr_surveyed';
+
+(function captureMarketingParams() {
+  try {
+    if (localStorage.getItem(MKT_KEY)) return;      // keep the FIRST touch
+    const p = new URLSearchParams(location.search);
+    const mkt = {
+      gclid:        p.get('gclid') || '',
+      utm_source:   p.get('utm_source') || '',
+      utm_medium:   p.get('utm_medium') || '',
+      utm_campaign: p.get('utm_campaign') || '',
+      referrer_host: (() => { try { return document.referrer ? new URL(document.referrer).hostname : ''; } catch { return ''; } })(),
+    };
+    if (Object.values(mkt).some(Boolean)) localStorage.setItem(MKT_KEY, JSON.stringify(mkt));
+  } catch {}
+})();
+
+const ATTRIBUTION_OPTIONS = [
+  ['google',   'Google search'],
+  ['reddit',   'Reddit'],
+  ['friend',   'A friend'],
+  ['referral', 'Referral link'],
+  ['youtube',  'YouTube'],
+  ['facebook', 'Facebook'],
+  ['tiktok',   'TikTok / IG'],
+  ['ad',       'Saw an ad'],
+  ['other',    'Other'],
+];
+
+function mountAttributionSurvey(overlay, { vin = '', oneTimeSession = null } = {}) {
+  try {
+    if (localStorage.getItem(SURV_KEY)) return;     // already answered on this browser
+  } catch { return; }
+
+  const bar = document.createElement('div');
+  bar.style.cssText =
+    'flex:0 0 auto;background:#0f172a;border-top:1px solid rgba(255,255,255,.12);' +
+    'padding:10px 14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;' +
+    'opacity:0;transition:opacity .4s ease;';
+
+  const label = document.createElement('span');
+  label.textContent = 'Quick one — how did you hear about us?';
+  label.style.cssText = 'color:#e2e8f0;font-size:12px;font-weight:700;margin-right:2px;';
+  bar.appendChild(label);
+
+  const chipCss =
+    'background:rgba(255,255,255,.10);color:#e2e8f0;border:1px solid rgba(255,255,255,.18);' +
+    'padding:5px 11px;border-radius:999px;font-size:12px;cursor:pointer;white-space:nowrap;';
+
+  const done = (msg) => {
+    try { localStorage.setItem(SURV_KEY, '1'); } catch {}
+    bar.innerHTML = '';
+    const t = document.createElement('span');
+    t.textContent = msg;
+    t.style.cssText = 'color:#4ade80;font-size:12px;font-weight:700;';
+    bar.appendChild(t);
+    setTimeout(() => { bar.style.opacity = '0'; setTimeout(() => bar.remove(), 500); }, 2200);
+  };
+
+  const send = async (source, detail) => {
+    let mkt = {};
+    try { mkt = JSON.parse(localStorage.getItem(MKT_KEY) || '{}'); } catch {}
+    const { token } = await getSession();
+    // A guest needs their paid session; a signed-in user is identified by the token.
+    if (!token && !oneTimeSession) return done('Thanks!');
+    try {
+      await fetch('/api/attribution', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' },
+                               token ? { Authorization: `Bearer ${token}` } : {}),
+        body: JSON.stringify({ source, detail, vin, session_id: oneTimeSession, ...mkt }),
+      });
+    } catch {}
+    done('Thanks — that really helps!');
+  };
+
+  ATTRIBUTION_OPTIONS.forEach(([value, text]) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = text; b.style.cssText = chipCss;
+    b.addEventListener('mouseenter', () => { b.style.background = 'rgba(255,255,255,.20)'; });
+    b.addEventListener('mouseleave', () => { b.style.background = 'rgba(255,255,255,.10)'; });
+    b.addEventListener('click', () => {
+      if (value !== 'other') return send(value, null);
+      // "Other" swaps the chips for a small free-text box.
+      bar.innerHTML = '';
+      bar.appendChild(label);
+      const input = document.createElement('input');
+      input.type = 'text'; input.placeholder = 'Where did you find us?'; input.maxLength = 200;
+      input.style.cssText = 'flex:1;min-width:160px;max-width:320px;padding:6px 10px;border-radius:8px;border:none;font-size:12px;';
+      const go = document.createElement('button');
+      go.type = 'button'; go.textContent = 'Send';
+      go.style.cssText = 'background:#16a34a;color:#fff;border:none;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;';
+      go.addEventListener('click', () => send('other', input.value));
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send('other', input.value); });
+      bar.appendChild(input); bar.appendChild(go);
+      input.focus();
+    });
+    bar.appendChild(b);
+  });
+
+  const skip = document.createElement('button');
+  skip.type = 'button'; skip.textContent = '✕';
+  skip.title = 'No thanks';
+  skip.style.cssText = 'margin-left:auto;background:none;border:none;color:rgba(255,255,255,.45);font-size:14px;cursor:pointer;';
+  skip.addEventListener('click', () => {
+    try { localStorage.setItem(SURV_KEY, '1'); } catch {}
+    bar.style.opacity = '0'; setTimeout(() => bar.remove(), 400);
+  });
+  bar.appendChild(skip);
+
+  overlay.appendChild(bar);
+  // Let them actually read the report first.
+  setTimeout(() => { bar.style.opacity = '1'; }, 9000);
+}
 
 async function tryAttachReferral() {
   let code = null;
