@@ -82,6 +82,34 @@
         </div>
       </div>
 
+      <!-- Refer a friend (revealed by JS once signed in) -->
+      <div id="referWrap" class="hidden mb-8">
+        <div class="bg-white rounded-2xl border border-gray-200 p-5">
+          <div class="flex items-center gap-2.5 mb-3">
+            <div class="w-9 h-9 rounded-xl bg-green-600/10 text-green-600 flex items-center justify-center shrink-0">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            </div>
+            <div>
+              <div class="text-base font-bold text-slate-900 leading-tight">Refer a friend</div>
+              <div class="text-xs text-gray-500" id="referBlurb">Share your link and earn free reports.</div>
+            </div>
+          </div>
+          <div class="flex flex-col sm:flex-row gap-2">
+            <input id="referLink" type="text" readonly
+                   class="flex-1 min-w-0 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-mono text-slate-700"
+                   value="" />
+            <button id="referCopy" type="button"
+                    class="shrink-0 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold rounded-xl px-5 py-2.5 transition">Copy</button>
+          </div>
+          <div class="grid grid-cols-3 gap-3 mt-4">
+            <div class="text-center"><div class="text-2xl font-black text-slate-900" id="referPending">0</div><div class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mt-1">Signed up</div></div>
+            <div class="text-center"><div class="text-2xl font-black text-green-600" id="referRewarded">0</div><div class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mt-1">Purchased</div></div>
+            <div class="text-center"><div class="text-2xl font-black text-blue-600" id="referEarned">0</div><div class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mt-1">Credits earned</div></div>
+          </div>
+          <p class="text-[11px] text-gray-400 mt-3">Credits are added once your friend completes their first purchase.</p>
+        </div>
+      </div>
+
       <!-- Owner-only: Admin · users & subscriptions (revealed by JS only for the site owner) -->
       <div id="ownerPanel" class="hidden mb-8">
         <div class="flex items-center gap-2.5 mb-4">
@@ -347,6 +375,36 @@
           if (d.monthly) renderChart(d.monthly);
         } catch (e) {}
       }
+
+      /* ---- Refer a friend ----
+         Server creates the code on first view. Rewards are paid out by the
+         Stripe webhook only after the referred account actually buys. */
+      async function loadReferral(token) {
+        try {
+          const r = await apiFetch('/api/referral/me', { headers: { Authorization: `Bearer ${token}` } }, 15_000);
+          if (!r.ok) return;
+          const d = await r.json();
+          if (!d.enabled || !d.url) return;
+          const link = $id('referLink');
+          if (link) link.value = d.url;
+          if ($id('referPending'))  $id('referPending').textContent  = d.pending  ?? 0;
+          if ($id('referRewarded')) $id('referRewarded').textContent = d.rewarded ?? 0;
+          if ($id('referEarned'))   $id('referEarned').textContent   = d.credits_earned ?? 0;
+          const blurb = $id('referBlurb');
+          if (blurb) {
+            const rr = d.reward_referrer ?? 2, re = d.reward_referee ?? 1;
+            blurb.textContent = `They get ${re} bonus credit${re === 1 ? '' : 's'} on their first purchase — you get ${rr}.`;
+          }
+          $id('referWrap')?.classList.remove('hidden');
+        } catch (e) {}
+      }
+      $id('referCopy')?.addEventListener('click', async () => {
+        const link = $id('referLink'), btn = $id('referCopy');
+        if (!link?.value) return;
+        try { await navigator.clipboard.writeText(link.value); }
+        catch { link.select(); try { document.execCommand('copy'); } catch (e) {} }
+        if (btn) { const t = btn.textContent; btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = t; }, 1500); }
+      });
 
       /* ---- Owner-only users & subscriptions panel ----
          Backed by /api/owner/users (server enforces owner via the Supabase
@@ -909,6 +967,7 @@
         if (user && token) {
           loadStats(token);        // dashboard stats (non-blocking)
           loadOwnerPanel(token);   // owner-only users panel (403 → stays hidden)
+          loadReferral(token);     // refer-a-friend card (non-blocking)
           const syncEl = $id('syncStatus');
           if (syncEl) { syncEl.classList.remove('hidden'); syncEl.style.display = 'flex'; }
 

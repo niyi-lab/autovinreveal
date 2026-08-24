@@ -970,6 +970,7 @@ async function checkOwnerAccess() {
     } else {
       reflectAuthUI(data.session);
       await refreshBalancePill();
+      tryAttachReferral();
     }
   } catch (authErr) {
     console.warn('[Auth] Session init failed:', authErr.message);
@@ -979,6 +980,9 @@ async function checkOwnerAccess() {
     if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
       reflectAuthUI(session);
       refreshBalancePill();
+      // A pending ?ref= code binds as soon as the visitor is actually signed in
+      // (signup with email confirmation has no session until they confirm).
+      if (event === 'SIGNED_IN') tryAttachReferral();
     }
   });
 })();
@@ -991,6 +995,64 @@ async function getSession() {
   const { data } = await supabase.auth.getSession();
   const session  = data?.session || null;
   return { session, user: session?.user || null, token: session?.access_token || null };
+}
+
+/* ================================
+   Referral capture + attach
+   A ?ref= code is remembered locally and bound to the account the first time
+   this visitor is signed in. NOTHING is granted here — the server only pays
+   out after the referred account completes a real purchase.
+================================ */
+const REF_CODE_KEY  = 'avr_ref_code';
+const REF_DONE_KEY  = 'avr_ref_done';
+const DEVICE_ID_KEY = 'avr_device_id';
+
+// Stable per-browser id, used server-side to cap rewarded referrals per device.
+function deviceId() {
+  try {
+    let d = localStorage.getItem(DEVICE_ID_KEY);
+    if (!d) {
+      d = (self.crypto?.randomUUID?.() || (Date.now().toString(36) + Math.random().toString(36).slice(2)));
+      localStorage.setItem(DEVICE_ID_KEY, d);
+    }
+    return d;
+  } catch { return null; }
+}
+
+(function captureReferralCode() {
+  try {
+    const code = (new URLSearchParams(location.search).get('ref') || '').trim().toUpperCase();
+    if (/^[A-Z0-9]{6,12}$/.test(code) && !localStorage.getItem(REF_DONE_KEY)) {
+      localStorage.setItem(REF_CODE_KEY, code);
+    }
+  } catch {}
+})();
+
+async function tryAttachReferral() {
+  let code = null;
+  try {
+    if (localStorage.getItem(REF_DONE_KEY)) return;
+    code = localStorage.getItem(REF_CODE_KEY);
+  } catch { return; }
+  if (!code) return;
+
+  const { token } = await getSession();
+  if (!token) return;                 // not signed in yet — retried on next sign-in
+  try {
+    const r = await fetch('/api/referral/attach', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ code, device_id: deviceId() }),
+    });
+    if (!r.ok) return;                // transient (401/5xx) — keep the code, retry later
+    const j = await r.json().catch(() => ({}));
+    // Any definitive answer (applied, or permanently ineligible) ends the attempt.
+    try { localStorage.setItem(REF_DONE_KEY, '1'); localStorage.removeItem(REF_CODE_KEY); } catch {}
+    if (j.ok) {
+      const n = j.reward_referee || 1;
+      showToast(`Referral applied — ${n} bonus credit${n === 1 ? '' : 's'} on your first purchase.`, 'ok');
+    }
+  } catch {}
 }
 
 async function fetchBalance() {

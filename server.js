@@ -1534,6 +1534,153 @@ async function reverseCredits(userId, amount) {
 }
 
 /* ================================================================
+   Referral program — SHARED with cheapestcarfax.com
+   Rewards are granted ONLY after the referee completes a real, non-refunded
+   payment, so farming costs real money by construction. Every abuse cap is
+   enforced inside the claim_referral_reward() RPC under a row lock (and by
+   unique constraints on referee_user_id / normalized email), so a bug in this
+   file still cannot mint credits twice.
+   NOTE: the khlin Stripe account is shared and BOTH sites' webhooks race for
+   every event — whichever site wins processes it, so this logic must stay
+   IDENTICAL in cheapestcarfax's server.js.
+================================================================ */
+const REFERRAL_ENABLED          = process.env.REFERRAL_ENABLED !== "0";
+const REFERRAL_REWARD_REFERRER  = Number(process.env.REFERRAL_REWARD_REFERRER  || 2);
+const REFERRAL_REWARD_REFEREE   = Number(process.env.REFERRAL_REWARD_REFEREE   || 1);
+const REFERRAL_WINDOW_DAYS      = Number(process.env.REFERRAL_WINDOW_DAYS      || 30);
+const REFERRAL_MAX_LIFETIME     = Number(process.env.REFERRAL_MAX_LIFETIME     || 25);
+const REFERRAL_MAX_PER_IP       = Number(process.env.REFERRAL_MAX_PER_IP       || 3);
+const REFERRAL_MAX_PER_DEVICE   = Number(process.env.REFERRAL_MAX_PER_DEVICE   || 2);
+// A reward must never be worth more than the purchase that unlocked it.
+const REFERRAL_MIN_SPEND_CENTS  = Number(process.env.REFERRAL_MIN_SPEND_CENTS  || 500);
+
+// Collapse gmail dots/plus-aliases so one human can't be "referred" repeatedly
+// as bob+1@, bob+2@, b.o.b@ … The DB has a unique index on this value.
+function normalizeEmail(email) {
+  const raw = String(email || "").trim().toLowerCase();
+  const at  = raw.lastIndexOf("@");
+  if (at < 1) return null;
+  let local = raw.slice(0, at).split("+")[0];
+  let domain = raw.slice(at + 1);
+  if (domain === "googlemail.com") domain = "gmail.com";
+  if (domain === "gmail.com") local = local.replace(/\./g, "");
+  return local ? `${local}@${domain}` : null;
+}
+
+// Ambiguity-free alphabet (no 0/O/1/I) — codes get typed and read aloud.
+function makeReferralCode() {
+  const A = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const b = crypto.randomBytes(8);
+  let s = "";
+  for (let i = 0; i < 8; i++) s += A[b[i] % A.length];
+  return s;
+}
+
+async function getOrCreateReferralCode(userId) {
+  const { data } = await supabaseService
+    .from("referral_codes").select("code").eq("user_id", userId).maybeSingle();
+  if (data?.code) return data.code;
+  for (let i = 0; i < 5; i++) {
+    const code = makeReferralCode();
+    const { error } = await supabaseService.from("referral_codes").insert({ user_id: userId, code });
+    if (!error) return code;
+    if (error.code !== "23505") throw new Error(error.message);
+    // 23505 = either the code collided, or this user raced us. Re-read: if the
+    // user now has a code we're done, otherwise retry with a fresh code.
+    const { data: again } = await supabaseService
+      .from("referral_codes").select("code").eq("user_id", userId).maybeSingle();
+    if (again?.code) return again.code;
+  }
+  throw new Error("could not allocate a referral code");
+}
+
+// Stripe returns a stable fingerprint per physical card, so "the referee paid
+// with a card the referrer has already used" is a strong self-referral signal.
+async function recordPaymentFingerprint(userId, fingerprint) {
+  if (!userId || !fingerprint) return;
+  try {
+    await supabaseService.from("user_payment_fingerprints")
+      .upsert({ user_id: userId, fingerprint }, { onConflict: "user_id,fingerprint" });
+  } catch (e) { console.warn("[referral] fingerprint record failed:", e.message); }
+}
+
+async function cardFingerprintForPayment(stripeClient, paymentIntentId) {
+  if (!stripeClient || !paymentIntentId) return null;
+  try {
+    const pi = await stripeClient.paymentIntents.retrieve(paymentIntentId, { expand: ["latest_charge"] });
+    return pi?.latest_charge?.payment_method_details?.card?.fingerprint || null;
+  } catch { return null; }
+}
+
+// The ONLY place referral credits are granted. Safe to call on every completed
+// payment: it no-ops unless this buyer has a pending referral attribution.
+async function maybeRewardReferral({ userId, paymentId, paymentIntentId = null, amountTotal = null, stripeClient = null }) {
+  if (!REFERRAL_ENABLED || !supabaseService || !userId || !paymentId) return;
+  try {
+    if (amountTotal != null && amountTotal < REFERRAL_MIN_SPEND_CENTS) return;
+
+    const fingerprint = await cardFingerprintForPayment(stripeClient, paymentIntentId);
+    // Record BEFORE claiming: this buyer's card must be known for the same-card
+    // check to catch them if they later refer someone else.
+    await recordPaymentFingerprint(userId, fingerprint);
+
+    const { data, error } = await supabaseService.rpc("claim_referral_reward", {
+      p_referee:         userId,
+      p_payment_id:      paymentId,
+      p_fingerprint:     fingerprint,
+      p_reward_referrer: REFERRAL_REWARD_REFERRER,
+      p_reward_referee:  REFERRAL_REWARD_REFEREE,
+      p_window_days:     REFERRAL_WINDOW_DAYS,
+      p_max_lifetime:    REFERRAL_MAX_LIFETIME,
+      p_max_per_ip:      REFERRAL_MAX_PER_IP,
+      p_max_per_device:  REFERRAL_MAX_PER_DEVICE,
+    });
+    if (error) { console.error("[referral] claim RPC failed:", error.message); return; }
+
+    const r = Array.isArray(data) ? data[0] : data;
+    if (!r?.ok) {
+      if (r?.reason && r.reason !== "no_pending") {
+        console.log(`[referral] not rewarded (${r.reason}) — referee ${userId}`);
+      }
+      return;
+    }
+    try {
+      await addCreditsAtomic(r.referrer, r.grant_referrer);
+      if (r.grant_referee > 0) await addCreditsAtomic(userId, r.grant_referee);
+      console.log(`[referral] rewarded — referrer ${r.referrer} +${r.grant_referrer}, referee ${userId} +${r.grant_referee}`);
+    } catch (grantErr) {
+      // Put it back so the reward is retried rather than silently lost.
+      await supabaseService.from("referrals")
+        .update({ status: "pending", rewarded_at: null, qualifying_payment_id: null })
+        .eq("id", r.referral_id);
+      console.error("[referral] grant failed, reverted to pending:", grantErr.message);
+    }
+  } catch (e) {
+    console.error("[referral] maybeRewardReferral error:", e.message);
+  }
+}
+
+// Claw the reward back when the purchase that unlocked it is refunded/disputed.
+async function reverseReferralForPayment(paymentId) {
+  if (!supabaseService || !paymentId) return;
+  try {
+    const { data: rows } = await supabaseService.from("referrals")
+      .select("id, referrer_user_id, referee_user_id, reward_referrer, reward_referee")
+      .eq("qualifying_payment_id", paymentId).eq("status", "rewarded");
+    for (const r of rows || []) {
+      // Conditional flip — the sibling site may be reversing the same event.
+      const { data: flipped } = await supabaseService.from("referrals")
+        .update({ status: "reversed", rejected_reason: "qualifying_payment_refunded" })
+        .eq("id", r.id).eq("status", "rewarded").select("id");
+      if (!flipped?.length) continue;
+      await reverseCredits(r.referrer_user_id, r.reward_referrer);
+      if (r.reward_referee > 0) await reverseCredits(r.referee_user_id, r.reward_referee);
+      console.log(`[referral] reward reversed — refunded payment ${paymentId}`);
+    }
+  } catch (e) { console.error("[referral] reverse error:", e.message); }
+}
+
+/* ================================================================
    Pending Charges — DB-backed crash-safe refunds
 ================================================================ */
 async function createPendingCharge({ userId = null, sessionId = null, vin }) {
@@ -1733,6 +1880,19 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
       if (userId && creditsToAdd > 0) {
         await addCreditsAtomic(userId, creditsToAdd);
       }
+
+      // Referral: a completed one-time payment is a qualifying purchase. Runs
+      // for singles too (creditsToAdd is 0 for those — the receipt fulfils them).
+      // No-ops unless this buyer has a pending referral attribution.
+      if (userId) {
+        await maybeRewardReferral({
+          userId,
+          paymentId:       session.id,
+          paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id,
+          amountTotal:     session.amount_total,
+          stripeClient:    stripeForId(session.id),
+        });
+      }
     }
 
     // ── Subscription: grant expiring credits each billing period (first month
@@ -1762,6 +1922,15 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
 
       if (userId && credits > 0) {
         await grantStripeSubPayment(invoice.id, userId, credits, planKey);
+        // A paid subscription invoice is a qualifying purchase too (first month
+        // only in practice — the attribution is consumed on the first reward).
+        await maybeRewardReferral({
+          userId,
+          paymentId:       invoice.id,
+          paymentIntentId: typeof invoice.payment_intent === "string" ? invoice.payment_intent : invoice.payment_intent?.id,
+          amountTotal:     invoice.amount_paid,
+          stripeClient:    stripeDefault,
+        });
       } else {
         console.warn(`[Sub] invoice.paid — unresolved (user:${userId} credits:${credits} price:${priceId} cust:${customerId})`);
       }
@@ -1789,6 +1958,8 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
         try {
           const sList = await stripeDefault.checkout.sessions.list({ payment_intent: piId, limit: 1 });
           const s       = sList.data?.[0];
+          // A refunded/disputed purchase must not leave a referral reward standing.
+          if (s?.id) await reverseReferralForPayment(s.id);
           const uid     = s?.metadata?.user_id || s?.client_reference_id || null;
           const sIntent = s?.metadata?.intent || "";
           const credits = Number(s?.metadata?.credits || 0);
@@ -3331,6 +3502,87 @@ if (NP_API_KEY) {
   setInterval(reconcileCryptoPayments, 10 * 60 * 1000);
   setTimeout(reconcileCryptoPayments, 80 * 1000);
 }
+
+/* ================================================================
+   Referral endpoints (see the referral helpers above for the rules)
+================================================================ */
+
+// The caller's own code, share link and stats. Creates the code on first view.
+app.get("/api/referral/me", async (req, res) => {
+  try {
+    if (!REFERRAL_ENABLED) return res.json({ enabled: false });
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "unauthorized" });
+
+    const code = await getOrCreateReferralCode(user.id);
+    const { data: rows } = await supabaseService
+      .from("referrals").select("status, reward_referrer").eq("referrer_user_id", user.id);
+    const rewarded = (rows || []).filter(r => r.status === "rewarded");
+
+    res.json({
+      enabled: true,
+      code,
+      url: `${SITE_URL}/?ref=${code}`,
+      pending:  (rows || []).filter(r => r.status === "pending").length,
+      rewarded: rewarded.length,
+      credits_earned:  rewarded.reduce((n, r) => n + (r.reward_referrer || 0), 0),
+      reward_referrer: REFERRAL_REWARD_REFERRER,
+      reward_referee:  REFERRAL_REWARD_REFEREE,
+    });
+  } catch (e) {
+    console.error("[referral] /me failed:", e.message);
+    res.status(500).json({ error: "server_error" });
+  }
+});
+
+// Bind the signed-in account to a referral code. Succeeds at most ONCE per
+// account (and once per normalized email) — the DB enforces both. Nothing is
+// granted here; credits only move after this account actually pays.
+app.post("/api/referral/attach", async (req, res) => {
+  try {
+    if (!REFERRAL_ENABLED) return res.json({ ok: false, reason: "disabled" });
+    const { user } = await getUser(req);
+    if (!user) return res.status(401).json({ error: "unauthorized" });
+
+    const code   = String(req.body?.code || "").trim().toUpperCase();
+    const device = String(req.body?.device_id || "").slice(0, 64) || null;
+    if (!/^[A-Z0-9]{6,12}$/.test(code)) return res.json({ ok: false, reason: "bad_code" });
+
+    const { data: existing } = await supabaseService
+      .from("referrals").select("id").eq("referee_user_id", user.id).maybeSingle();
+    if (existing) return res.json({ ok: false, reason: "already_referred" });
+
+    const { data: owner } = await supabaseService
+      .from("referral_codes").select("user_id").eq("code", code).maybeSingle();
+    if (!owner)                      return res.json({ ok: false, reason: "unknown_code" });
+    if (owner.user_id === user.id)   return res.json({ ok: false, reason: "self_referral" });
+
+    // A referral code is a NEW-customer offer: an account that has already
+    // pulled a report can't attach one retroactively.
+    const { count: used } = await supabaseService
+      .from("vin_queries").select("id", { count: "exact", head: true }).eq("user_id", user.id);
+    if (used && used > 0) return res.json({ ok: false, reason: "existing_customer" });
+
+    const { error } = await supabaseService.from("referrals").insert({
+      referrer_user_id:   owner.user_id,
+      referee_user_id:    user.id,
+      code,
+      site:               SITE_ID,
+      signup_ip:          clientIp(req) || null,
+      signup_device:      device,
+      referee_email_norm: normalizeEmail(user.email),
+    });
+    if (error) {
+      // 23505 = this account, or this human's normalized email, was already referred.
+      if (error.code === "23505") return res.json({ ok: false, reason: "already_referred" });
+      throw new Error(error.message);
+    }
+    res.json({ ok: true, reward_referee: REFERRAL_REWARD_REFEREE });
+  } catch (e) {
+    console.error("[referral] /attach failed:", e.message);
+    res.status(500).json({ error: "server_error" });
+  }
+});
 
 app.post("/api/crypto/create-payment", async (req, res) => {
   try {
