@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+<!-- GA4 + Google Ads (one loader, two destinations) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-FF0NXRN0Y6"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-FF0NXRN0Y6');
+  gtag('config', 'AW-18241895372');
+</script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>True Cost of Ownership Calculator | AutoVINReveal</title>
+  <meta name="description" content="The sticker price is a fraction of what a car costs. Add depreciation, fuel, insurance, maintenance, repairs and registration to see the real 5-year cost and cost per mile." />
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+  <link rel="canonical" href="https://www.autovinreveal.com/true-cost-of-ownership" />
+  <meta property="og:title" content="True Cost of Ownership Calculator" />
+  <meta property="og:description" content="The sticker price is a fraction of what a car costs. Add depreciation, fuel, insurance, maintenance, repairs and registration to see the real 5-year cost and cost per mile." />
+  <meta property="og:site_name" content="AutoVINReveal" />
+  <meta property="og:image" content="https://www.autovinreveal.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.autovinreveal.com/true-cost-of-ownership" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="True Cost of Ownership Calculator" />
+  <meta name="twitter:description" content="The sticker price is a fraction of what a car costs. Add depreciation, fuel, insurance, maintenance, repairs and registration to see the real 5-year cost and cost per mile." />
+  <meta name="twitter:image" content="https://www.autovinreveal.com/og-image.png" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='%230F2A4A'/%3E%3Crect x='8' y='18' width='32' height='13' rx='3' fill='none' stroke='%2322D3EE' stroke-width='3'/%3E%3Cg fill='white'%3E%3Crect x='13' y='22' width='4' height='5' rx='1'/%3E%3Crect x='20' y='22' width='4' height='5' rx='1'/%3E%3C/g%3E%3Crect x='27' y='22' width='4' height='5' rx='1' fill='%23F59E0B'/%3E%3C/svg%3E" />
+  <meta name="theme-color" content="#0F2A4A" />
+
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"WebApplication","name":"True Cost of Ownership Calculator","url":"https://www.autovinreveal.com/true-cost-of-ownership","applicationCategory":"FinanceApplication","operatingSystem":"Any","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"The sticker price is a fraction of what a car costs. Add depreciation, fuel, insurance, maintenance, repairs and registration to see the real 5-year cost and cost per mile."}
+  </script>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is included in true cost of ownership?","acceptedAnswer":{"@type":"Answer","text":"Depreciation, fuel, insurance, routine maintenance, repairs, registration and taxes, and finance charges if the car is financed. Depreciation is normally the single largest component and the one buyers most often ignore because it is never invoiced."}},{"@type":"Question","name":"How fast do cars depreciate?","acceptedAnswer":{"@type":"Answer","text":"A common pattern is roughly 20 percent in year one and 15 percent or so of the remaining value in each following year, though this varies widely by make, model and segment. Luxury vehicles typically depreciate faster; pickups and some hybrids hold value better."}},{"@type":"Question","name":"Why does cost per mile matter?","acceptedAnswer":{"@type":"Answer","text":"It normalises for how much you drive, which makes vehicles with very different fuel economy and maintenance profiles directly comparable. Someone driving 25,000 miles a year and someone driving 6,000 will get different answers from the same two cars."}},{"@type":"Question","name":"Does a vehicle history report affect cost of ownership?","acceptedAnswer":{"@type":"Answer","text":"Indirectly but significantly. Cars with accident records or branded titles resell for meaningfully less, which raises depreciation, the biggest cost line, and prior damage is correlated with higher repair costs."}}]}
+  </script>
+  <link rel="stylesheet" href="/tw.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #f8fafc; }
+    .brand-font { font-family: 'Poppins', sans-serif; }
+    .hero-bg  { background: radial-gradient(circle at top right, #7c3aed 0%, #3b0764 100%); }
+    .vin-in { letter-spacing: .14em; text-transform: uppercase; font-family: 'Poppins', monospace; }
+    .spec-row { display:flex; justify-content:space-between; gap:12px; padding:11px 16px; border-bottom:1px solid #f1f5f9; font-size:14px; }
+    .spec-row:last-child { border-bottom:0; }
+    .spec-row .k { color:#64748b; }
+    .spec-row .v { color:#0f172a; font-weight:700; text-align:right; }
+    .prose-body { font-size: 16px; line-height: 1.8; color: #334155; }
+    .prose-body h2 { font-family:'Poppins',sans-serif; font-size:1.35rem; font-weight:800; color:#0f172a; margin:2.2rem 0 .8rem; }
+    .prose-body p { margin-bottom: 1.1rem; }
+    .prose-body a { color:#2563eb; text-decoration:underline; text-underline-offset:3px; }
+    .fld { display:block; font-size:12px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:5px; }
+    .inp { width:100%; border:2px solid #e2e8f0; border-radius:12px; padding:10px 12px; font-size:15px; color:#0f172a; outline:none; }
+    .inp:focus { border-color:#2563eb; }
+    .outrow { display:flex; justify-content:space-between; align-items:baseline; padding:10px 0; border-bottom:1px solid #f1f5f9; }
+    .outrow:last-child { border-bottom:0; }
+  </style>
+</head>
+<body class="text-slate-800 antialiased">
+
+  <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2">
+        <svg width="36" height="36" viewBox="0 0 48 48" role="img" aria-label="AutoVINReveal" class="shrink-0"><rect width="48" height="48" rx="11" fill="#0F2A4A"/><rect x="9" y="18" width="30" height="12.5" rx="3" fill="none" stroke="#22D3EE" stroke-width="2"/><g fill="#fff"><rect x="13" y="21.5" width="3.4" height="5.5" rx="1"/><rect x="18.4" y="21.5" width="3.4" height="5.5" rx="1"/><rect x="23.8" y="21.5" width="3.4" height="5.5" rx="1"/></g><rect x="29.2" y="21.5" width="3.4" height="5.5" rx="1" fill="#F59E0B"/><path d="M13.5 13.5a13 13 0 0 1 21 0" fill="none" stroke="#5C7EA3" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="text-xl font-bold text-slate-900 brand-font">AutoVIN<span class="text-blue-600">Reveal</span></span>
+      </a>
+      <div class="flex items-center gap-4">
+        <a href="/blog/" class="text-sm font-semibold text-gray-600 hover:text-blue-600">Blog</a>
+        <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2 rounded-lg shadow-md shadow-blue-600/20">Get Report — $5.99</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero-bg py-14 px-4">
+    <div class="max-w-xl mx-auto text-center">
+      <span class="inline-block bg-white/15 text-white text-xs font-bold px-3 py-1 rounded-full mb-4">Free calculator</span>
+      <h1 class="text-3xl sm:text-4xl font-black text-white leading-tight mb-3" style="font-family:'Poppins',sans-serif;">True Cost of Ownership</h1>
+      <p class="text-purple-100 text-base max-w-lg mx-auto leading-relaxed">Depreciation, fuel, insurance, maintenance, repairs and registration — the real number behind the price tag.</p>
+    </div>
+  </header>
+
+  <main class="max-w-xl mx-auto px-4 py-10">
+
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-lg p-5 sm:p-6 -mt-16 relative z-10">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="col-span-2"><label class="fld" for="tprice">Purchase price ($)</label><input id="tprice" class="inp" type="number" inputmode="decimal" value="25000" min="0" step="100"></div>
+        <div><label class="fld" for="tyears">Years kept</label><input id="tyears" class="inp" type="number" inputmode="numeric" value="5" min="1" max="25" step="1"></div>
+        <div><label class="fld" for="tmiles">Miles / year</label><input id="tmiles" class="inp" type="number" inputmode="numeric" value="12000" min="0" step="500"></div>
+        <div><label class="fld" for="tmpg">MPG</label><input id="tmpg" class="inp" type="number" inputmode="decimal" value="28" min="1" step="1"></div>
+        <div><label class="fld" for="tgas">Fuel ($/gal)</label><input id="tgas" class="inp" type="number" inputmode="decimal" value="3.40" min="0" step="0.05"></div>
+        <div><label class="fld" for="tins">Insurance ($/yr)</label><input id="tins" class="inp" type="number" inputmode="decimal" value="1600" min="0" step="50"></div>
+        <div><label class="fld" for="tmaint">Maintenance ($/yr)</label><input id="tmaint" class="inp" type="number" inputmode="decimal" value="700" min="0" step="50"></div>
+        <div><label class="fld" for="trep">Repairs ($/yr)</label><input id="trep" class="inp" type="number" inputmode="decimal" value="500" min="0" step="50"></div>
+        <div><label class="fld" for="treg">Registration ($/yr)</label><input id="treg" class="inp" type="number" inputmode="decimal" value="180" min="0" step="10"></div>
+        <div class="col-span-2"><label class="fld" for="tdep">Depreciation rate (% / yr)</label><input id="tdep" class="inp" type="number" inputmode="decimal" value="15" min="0" max="60" step="1">
+          <p class="text-[11px] text-slate-400 mt-1">Applied to remaining value each year, after a steeper first-year drop.</p></div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm mt-6 overflow-hidden">
+      <div class="bg-slate-900 text-white px-5 py-5 text-center">
+        <p class="text-[11px] uppercase tracking-[0.18em] text-slate-400">Total cost of ownership</p>
+        <p id="tTotal" class="text-4xl font-black mt-1" style="font-family:'Poppins',sans-serif;">$0</p>
+        <p id="tPerMile" class="text-xs text-slate-400 mt-1"></p>
+      </div>
+      <div class="px-5 py-3">
+        <div class="outrow"><span class="text-sm text-slate-500">Depreciation</span><span id="tDep" class="font-bold text-slate-900">$0</span></div>
+        <div class="outrow"><span class="text-sm text-slate-500">Fuel</span><span id="tFuel" class="font-bold text-slate-900">$0</span></div>
+        <div class="outrow"><span class="text-sm text-slate-500">Insurance</span><span id="tIns" class="font-bold text-slate-900">$0</span></div>
+        <div class="outrow"><span class="text-sm text-slate-500">Maintenance &amp; repairs</span><span id="tMr" class="font-bold text-slate-900">$0</span></div>
+        <div class="outrow"><span class="text-sm text-slate-500">Registration</span><span id="tReg" class="font-bold text-slate-900">$0</span></div>
+        <div class="outrow"><span class="text-sm text-slate-500">Estimated resale value</span><span id="tResale" class="font-bold text-green-600">$0</span></div>
+        <div class="outrow"><span class="text-sm text-slate-500">Cost per year</span><span id="tYear" class="font-bold text-slate-900">$0</span></div>
+      </div>
+    </div>
+
+    <div class="mt-8 bg-gradient-to-r from-blue-600 to-blue-800 rounded-2xl p-6 text-white text-center">
+      <h2 class="text-xl font-black mb-2" style="font-family:'Poppins',sans-serif;">Depreciation depends on history you can't see</h2>
+      <p class="text-blue-100 text-sm mb-4 max-w-md mx-auto">An accident record or branded title changes resale value far more than fuel economy. Check it for $5.99.</p>
+      <a href="/" class="inline-flex items-center gap-2 bg-white text-blue-700 font-bold px-6 py-3 rounded-xl hover:bg-blue-50 transition-colors shadow-lg">Get the full report — $5.99
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+      </a>
+    </div>
+    <section class="prose-body mt-12">
+      <h2>The cheapest car to buy is rarely the cheapest car to own</h2>
+      <p>Purchase price is the number everyone shops on and it is comfortably the least useful. Two cars advertised at the same figure can differ by many thousands of dollars over five years once depreciation, fuel, insurance, maintenance and repairs are counted — and depreciation, the largest single line for most owners, is invisible until the day you sell.</p>
+      <p>This calculator adds up the parts. Give it a purchase price, how long you plan to keep the car, how far you drive, the fuel economy and what you expect to pay for insurance and upkeep, and it returns total cost, cost per year and cost per mile. Cost per mile is the figure worth remembering: it makes two very different cars directly comparable.</p>
+      <h2>Where the estimates come from — and where they break</h2>
+      <p>Depreciation is modelled as a declining percentage each year, which is how vehicles actually lose value: fastest early, then flattening. The default assumes a mainstream vehicle. Luxury European models routinely depreciate faster, and trucks and some hybrids hold value better, so adjust the rate if you know the segment.</p>
+      <p>The one input the calculator cannot guess is the condition of the specific car. A vehicle with an accident record or a branded title depreciates faster and tends to cost more to keep on the road. Before you plug in a resale assumption, it's worth spending <a href="/">$5.99 on the history report</a> to know which kind of car you're modelling.</p>
+    </section>
+  </main>
+
+  <footer class="bg-slate-900 text-slate-400 mt-8 pt-10 pb-6">
+    <div class="max-w-5xl mx-auto px-4">
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-4 text-sm">
+        <a href="/" class="font-bold text-white brand-font">AutoVIN<span class="text-blue-400">Reveal</span></a>
+        <div class="flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs">
+          <a href="/" class="hover:text-white">Home</a><a href="/free-vin-decoder" class="hover:text-white">VIN Decoder</a><a href="/window-sticker" class="hover:text-white">Window Sticker</a><a href="/car-payment-calculator" class="hover:text-white">Payment Calculator</a><a href="/true-cost-of-ownership" class="hover:text-white">Cost of Ownership</a><a href="/browser-extension" class="hover:text-white">Browser Extension</a><a href="/blog/" class="hover:text-white">Blog</a><a href="/terms.html" class="hover:text-white">Terms</a><a href="/privacy.html" class="hover:text-white">Privacy</a>
+        </div>
+      </div>
+      <p class="text-xs text-slate-600 text-center sm:text-right mt-4">© 2026 AutoVINReveal</p>
+    </div>
+  </footer>
+  <script>
+    (function(){
+      var ids=['tprice','tyears','tmiles','tmpg','tgas','tins','tmaint','trep','treg','tdep'], el={};
+      ids.forEach(function(i){ el[i]=document.getElementById(i); });
+      function num(x){ var v=parseFloat(el[x].value); return isFinite(v)&&v>0?v:0; }
+      var money=function(n){ return '$'+Math.round(isFinite(n)?n:0).toLocaleString('en-US'); };
+      function calc(){
+        var price=num('tprice'), years=Math.max(1,Math.round(num('tyears'))), miles=num('tmiles'),
+            mpg=num('tmpg')||1, gas=num('tgas'), ins=num('tins'), maint=num('tmaint'),
+            rep=num('trep'), reg=num('treg'), dep=num('tdep')/100;
+        // First year drops harder than later years — matches how the market prices cars.
+        var value=price;
+        for(var y=0;y<years;y++){ value = value * (1 - (y===0 ? Math.min(0.95, dep+0.05) : dep)); }
+        var depreciation = Math.max(0, price - value);
+        var fuel = (miles/mpg)*gas*years;
+        var insurance = ins*years, mr = (maint+rep)*years, registration = reg*years;
+        var total = depreciation + fuel + insurance + mr + registration;
+        document.getElementById('tDep').textContent   = money(depreciation);
+        document.getElementById('tFuel').textContent  = money(fuel);
+        document.getElementById('tIns').textContent   = money(insurance);
+        document.getElementById('tMr').textContent    = money(mr);
+        document.getElementById('tReg').textContent   = money(registration);
+        document.getElementById('tResale').textContent= money(value);
+        document.getElementById('tTotal').textContent = money(total);
+        document.getElementById('tYear').textContent  = money(total/years);
+        var tm = miles*years;
+        document.getElementById('tPerMile').textContent = tm>0 ? ('$'+(total/tm).toFixed(2)+' per mile over '+years+' year'+(years===1?'':'s')) : '';
+      }
+      ids.forEach(function(i){ el[i].addEventListener('input', calc); });
+      calc();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  body { width: 300px; margin: 0; padding: 16px; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; }
+  h1 { font-size: 15px; margin: 0 0 3px; }
+  p.sub { margin: 0 0 13px; font-size: 12px; color: #64748b; }
+  input { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 2px solid #e2e8f0; border-radius: 9px;
+          font-family: ui-monospace, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; }
+  input:focus { outline: none; border-color: #2563eb; }
+  button { width: 100%; margin-top: 9px; padding: 9px; border: 0; border-radius: 9px; cursor: pointer;
+           background: #2563eb; color: #fff; font-weight: 700; font-size: 13px; }
+  button.ghost { background: #f1f5f9; color: #334155; }
+  .row { margin-top: 8px; }
+  .err { color: #b91c1c; font-size: 12px; margin-top: 7px; display: none; }
+  .spec { margin-top: 12px; font-size: 12.5px; border-top: 1px solid #eef2f7; display: none; }
+  .spec div { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid #f6f8fb; }
+  .spec .k { color: #64748b; }
+  .spec .v { font-weight: 700; text-align: right; }
+</style>
+</head>
+<body>
+  <h1>AutoVINReveal</h1>
+  <p class="sub">Paste a VIN to decode it free, or pull the full history.</p>
+  <input id="vin" maxlength="17" placeholder="17-character VIN" spellcheck="false" autocomplete="off" />
+  <button id="decode">Decode free</button>
+  <div class="row"><button id="full" class="ghost">Full history report — $5.99</button></div>
+  <p class="err" id="err"></p>
+  <div class="spec" id="spec"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

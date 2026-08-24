@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+<!-- GA4 + Google Ads (one loader, two destinations) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-FF0NXRN0Y6"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-FF0NXRN0Y6');
+  gtag('config', 'AW-18241895372');
+</script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Car Payment Calculator — Monthly Auto Loan Cost | AutoVINReveal</title>
+  <meta name="description" content="Work out a car's real monthly payment: price, down payment, trade-in, sales tax, fees, APR and term. See total interest and the true cost of the loan. Free." />
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+  <link rel="canonical" href="https://www.autovinreveal.com/car-payment-calculator" />
+  <meta property="og:title" content="Car Payment Calculator — Monthly Auto Loan Cost" />
+  <meta property="og:description" content="Work out a car's real monthly payment: price, down payment, trade-in, sales tax, fees, APR and term. See total interest and the true cost of the loan. Free." />
+  <meta property="og:site_name" content="AutoVINReveal" />
+  <meta property="og:image" content="https://www.autovinreveal.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.autovinreveal.com/car-payment-calculator" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Car Payment Calculator — Monthly Auto Loan Cost" />
+  <meta name="twitter:description" content="Work out a car's real monthly payment: price, down payment, trade-in, sales tax, fees, APR and term. See total interest and the true cost of the loan. Free." />
+  <meta name="twitter:image" content="https://www.autovinreveal.com/og-image.png" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='%230F2A4A'/%3E%3Crect x='8' y='18' width='32' height='13' rx='3' fill='none' stroke='%2322D3EE' stroke-width='3'/%3E%3Cg fill='white'%3E%3Crect x='13' y='22' width='4' height='5' rx='1'/%3E%3Crect x='20' y='22' width='4' height='5' rx='1'/%3E%3C/g%3E%3Crect x='27' y='22' width='4' height='5' rx='1' fill='%23F59E0B'/%3E%3C/svg%3E" />
+  <meta name="theme-color" content="#0F2A4A" />
+
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"WebApplication","name":"Car Payment Calculator","url":"https://www.autovinreveal.com/car-payment-calculator","applicationCategory":"FinanceApplication","operatingSystem":"Any","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"Work out a car's real monthly payment: price, down payment, trade-in, sales tax, fees, APR and term. See total interest and the true cost of the loan. Free."}
+  </script>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"How is a car loan monthly payment calculated?","acceptedAnswer":{"@type":"Answer","text":"With the standard amortisation formula: payment = P x r / (1 - (1 + r)^-n), where P is the amount financed, r is the monthly interest rate (APR divided by 12) and n is the number of months. The amount financed is the vehicle price plus tax and fees, minus your down payment and any trade-in value."}},{"@type":"Question","name":"Does a longer loan term save money?","acceptedAnswer":{"@type":"Answer","text":"No. It lowers the monthly payment and raises the total cost. Every extra month is another month of interest charged on the balance, and long terms also keep you in negative equity — owing more than the car is worth — for much of the loan."}},{"@type":"Question","name":"Should sales tax and fees be included?","acceptedAnswer":{"@type":"Answer","text":"Yes, if you are financing them, which most buyers do. Leaving them out understates both the monthly payment and the total. Use the out-the-door figure."}},{"@type":"Question","name":"What APR should I assume?","acceptedAnswer":{"@type":"Answer","text":"Use a real pre-approval from a bank or credit union if you have one. Advertised promotional rates usually require top-tier credit, so budgeting against them tends to produce an optimistic payment."}}]}
+  </script>
+  <link rel="stylesheet" href="/tw.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #f8fafc; }
+    .brand-font { font-family: 'Poppins', sans-serif; }
+    .hero-bg  { background: radial-gradient(circle at top right, #7c3aed 0%, #3b0764 100%); }
+    .vin-in { letter-spacing: .14em; text-transform: uppercase; font-family: 'Poppins', monospace; }
+    .spec-row { display:flex; justify-content:space-between; gap:12px; padding:11px 16px; border-bottom:1px solid #f1f5f9; font-size:14px; }
+    .spec-row:last-child { border-bottom:0; }
+    .spec-row .k { color:#64748b; }
+    .spec-row .v { color:#0f172a; font-weight:700; text-align:right; }
+    .prose-body { font-size: 16px; line-height: 1.8; color: #334155; }
+    .prose-body h2 { font-family:'Poppins',sans-serif; font-size:1.35rem; font-weight:800; color:#0f172a; margin:2.2rem 0 .8rem; }
+    .prose-body p { margin-bottom: 1.1rem; }
+    .prose-body a { color:#2563eb; text-decoration:underline; text-underline-offset:3px; }
+    .fld { display:block; font-size:12px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:5px; }
+    .inp { width:100%; border:2px solid #e2e8f0; border-radius:12px; padding:10px 12px; font-size:15px; color:#0f172a; outline:none; }
+    .inp:focus { border-color:#2563eb; }
+    .outrow { display:flex; justify-content:space-between; align-items:baseline; padding:10px 0; border-bottom:1px solid #f1f5f9; }
+    .outrow:last-child { border-bottom:0; }
+  </style>
+</head>
+<body class="text-slate-800 antialiased">
+
+  <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2">
+        <svg width="36" height="36" viewBox="0 0 48 48" role="img" aria-label="AutoVINReveal" class="shrink-0"><rect width="48" height="48" rx="11" fill="#0F2A4A"/><rect x="9" y="18" width="30" height="12.5" rx="3" fill="none" stroke="#22D3EE" stroke-width="2"/><g fill="#fff"><rect x="13" y="21.5" width="3.4" height="5.5" rx="1"/><rect x="18.4" y="21.5" width="3.4" height="5.5" rx="1"/><rect x="23.8" y="21.5" width="3.4" height="5.5" rx="1"/></g><rect x="29.2" y="21.5" width="3.4" height="5.5" rx="1" fill="#F59E0B"/><path d="M13.5 13.5a13 13 0 0 1 21 0" fill="none" stroke="#5C7EA3" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="text-xl font-bold text-slate-900 brand-font">AutoVIN<span class="text-blue-600">Reveal</span></span>
+      </a>
+      <div class="flex items-center gap-4">
+        <a href="/blog/" class="text-sm font-semibold text-gray-600 hover:text-blue-600">Blog</a>
+        <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2 rounded-lg shadow-md shadow-blue-600/20">Get Report — $5.99</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero-bg py-14 px-4">
+    <div class="max-w-xl mx-auto text-center">
+      <span class="inline-block bg-white/15 text-white text-xs font-bold px-3 py-1 rounded-full mb-4">Free calculator</span>
+      <h1 class="text-3xl sm:text-4xl font-black text-white leading-tight mb-3" style="font-family:'Poppins',sans-serif;">Car Payment Calculator</h1>
+      <p class="text-purple-100 text-base max-w-lg mx-auto leading-relaxed">Find out what a car actually costs each month — and how much of it is interest — before you set foot in a dealership.</p>
+    </div>
+  </header>
+
+  <main class="max-w-xl mx-auto px-4 py-10">
+
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-lg p-5 sm:p-6 -mt-16 relative z-10">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="col-span-2"><label class="fld" for="price">Vehicle price ($)</label><input id="price" class="inp" type="number" inputmode="decimal" value="25000" min="0" step="100"></div>
+        <div><label class="fld" for="down">Down payment ($)</label><input id="down" class="inp" type="number" inputmode="decimal" value="3000" min="0" step="100"></div>
+        <div><label class="fld" for="trade">Trade-in ($)</label><input id="trade" class="inp" type="number" inputmode="decimal" value="0" min="0" step="100"></div>
+        <div><label class="fld" for="tax">Sales tax (%)</label><input id="tax" class="inp" type="number" inputmode="decimal" value="7" min="0" step="0.1"></div>
+        <div><label class="fld" for="fees">Fees ($)</label><input id="fees" class="inp" type="number" inputmode="decimal" value="600" min="0" step="50"></div>
+        <div><label class="fld" for="apr">APR (%)</label><input id="apr" class="inp" type="number" inputmode="decimal" value="7.5" min="0" step="0.1"></div>
+        <div><label class="fld" for="term">Term (months)</label><input id="term" class="inp" type="number" inputmode="numeric" value="60" min="1" step="1"></div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm mt-6 overflow-hidden">
+      <div class="bg-slate-900 text-white px-5 py-5 text-center">
+        <p class="text-[11px] uppercase tracking-[0.18em] text-slate-400">Monthly payment</p>
+        <p id="outMonthly" class="text-4xl font-black mt-1" style="font-family:'Poppins',sans-serif;">$0</p>
+      </div>
+      <div class="px-5 py-3">
+        <div class="outrow"><span class="text-sm text-slate-500">Amount financed</span><span id="outFin" class="font-bold text-slate-900">$0</span></div>
+        <div class="outrow"><span class="text-sm text-slate-500">Total interest</span><span id="outInt" class="font-bold text-slate-900">$0</span></div>
+        <div class="outrow"><span class="text-sm text-slate-500">Total of payments</span><span id="outTot" class="font-bold text-slate-900">$0</span></div>
+        <div class="outrow"><span class="text-sm text-slate-500">True cost (incl. down &amp; trade)</span><span id="outAll" class="font-bold text-slate-900">$0</span></div>
+      </div>
+      <div class="bg-slate-50 border-t border-slate-200 px-5 py-3">
+        <p id="termHint" class="text-xs text-slate-500"></p>
+      </div>
+    </div>
+
+    <div class="mt-8 bg-gradient-to-r from-blue-600 to-blue-800 rounded-2xl p-6 text-white text-center">
+      <h2 class="text-xl font-black mb-2" style="font-family:'Poppins',sans-serif;">Financing a car you haven't checked?</h2>
+      <p class="text-blue-100 text-sm mb-4 max-w-md mx-auto">Accidents, title brands, odometer rollbacks and service history — before you sign anything. $5.99.</p>
+      <a href="/" class="inline-flex items-center gap-2 bg-white text-blue-700 font-bold px-6 py-3 rounded-xl hover:bg-blue-50 transition-colors shadow-lg">Get the full report — $5.99
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+      </a>
+    </div>
+    <section class="prose-body mt-12">
+      <h2>Why the monthly payment is the wrong thing to negotiate</h2>
+      <p>Dealership finance desks negotiate in monthly payments because a monthly payment can be made to look like almost anything. Stretch a loan from 60 months to 84 and the number drops comfortably — while the total interest climbs by hundreds or thousands of dollars, and you spend years owing more than the car is worth. The figure that matters is the one at the bottom of this calculator: total cost.</p>
+      <p>Run the same car at 48, 60 and 72 months and watch what happens. The monthly payment falls each time. The total paid rises each time. That trade is the entire game, and seeing both numbers side by side is usually enough to settle how long a term you actually want.</p>
+      <h2>What to plug in</h2>
+      <p>Use the out-the-door price, not the advertised one — sales tax and fees are financed alongside the car and belong in the calculation. Your APR depends on credit score and lender, so if you have a pre-approval, use its real rate rather than the manufacturer's advertised promotional rate, which is typically reserved for top-tier credit.</p>
+      <p>One more line item worth pricing before you sign: the car's past. A <a href="/">$5.99 vehicle history report</a> is rounding error against a $25,000 loan, and a hidden accident or branded title moves resale value by far more than any rate you negotiate.</p>
+    </section>
+  </main>
+
+  <footer class="bg-slate-900 text-slate-400 mt-8 pt-10 pb-6">
+    <div class="max-w-5xl mx-auto px-4">
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-4 text-sm">
+        <a href="/" class="font-bold text-white brand-font">AutoVIN<span class="text-blue-400">Reveal</span></a>
+        <div class="flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs">
+          <a href="/" class="hover:text-white">Home</a><a href="/free-vin-decoder" class="hover:text-white">VIN Decoder</a><a href="/window-sticker" class="hover:text-white">Window Sticker</a><a href="/car-payment-calculator" class="hover:text-white">Payment Calculator</a><a href="/true-cost-of-ownership" class="hover:text-white">Cost of Ownership</a><a href="/browser-extension" class="hover:text-white">Browser Extension</a><a href="/blog/" class="hover:text-white">Blog</a><a href="/terms.html" class="hover:text-white">Terms</a><a href="/privacy.html" class="hover:text-white">Privacy</a>
+        </div>
+      </div>
+      <p class="text-xs text-slate-600 text-center sm:text-right mt-4">© 2026 AutoVINReveal</p>
+    </div>
+  </footer>
+  <script>
+    (function(){
+      var ids=['price','down','trade','tax','fees','apr','term'], el={};
+      ids.forEach(function(i){ el[i]=document.getElementById(i); });
+      var money=function(n){ return '$'+(isFinite(n)?n:0).toLocaleString('en-US',{maximumFractionDigits:0}); };
+      function num(x){ var v=parseFloat(el[x].value); return isFinite(v)&&v>0?v:0; }
+      function calc(){
+        var price=num('price'), down=num('down'), trade=num('trade'),
+            tax=num('tax'), fees=num('fees'), apr=num('apr'), term=Math.max(1,Math.round(num('term')));
+        var taxed = price*(tax/100);
+        var financed = Math.max(0, price + taxed + fees - down - trade);
+        var r = apr/100/12, monthly;
+        if(r>0){ monthly = financed*r/(1-Math.pow(1+r,-term)); }
+        else   { monthly = financed/term; }
+        if(!isFinite(monthly)) monthly=0;
+        var totalPaid = monthly*term, interest = Math.max(0, totalPaid-financed);
+        document.getElementById('outMonthly').textContent = money(Math.round(monthly));
+        document.getElementById('outFin').textContent  = money(Math.round(financed));
+        document.getElementById('outInt').textContent  = money(Math.round(interest));
+        document.getElementById('outTot').textContent  = money(Math.round(totalPaid));
+        document.getElementById('outAll').textContent  = money(Math.round(totalPaid+down+trade));
+        // Show the term trade-off explicitly — the whole point of the page.
+        var hint='';
+        if(financed>0 && r>0){
+          var alt = term>36 ? term-12 : term+12;
+          var am = financed*r/(1-Math.pow(1+r,-alt));
+          var diff = Math.round((monthly*term)-(am*alt));
+          if(isFinite(am)){
+            hint = 'At '+alt+' months you would pay '+money(Math.round(am))+'/mo and '+
+                   (diff>0 ? money(Math.abs(diff))+' LESS in total.' : money(Math.abs(diff))+' MORE in total.');
+          }
+        }
+        document.getElementById('termHint').textContent = hint;
+      }
+      ids.forEach(function(i){ el[i].addEventListener('input', calc); });
+      calc();
+    })();
+  </script>
+</body>
+</html>

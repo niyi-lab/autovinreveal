@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+<!-- GA4 + Google Ads (one loader, two destinations) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-FF0NXRN0Y6"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-FF0NXRN0Y6');
+  gtag('config', 'AW-18241895372');
+</script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Free Window Sticker Lookup by VIN | AutoVINReveal</title>
+  <meta name="description" content="Rebuild a vehicle's factory window sticker from its VIN — year, make, model, trim, engine, drivetrain and assembly plant, laid out like the original Monroney label. Free, no account." />
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+  <link rel="canonical" href="https://www.autovinreveal.com/window-sticker" />
+  <meta property="og:title" content="Free Window Sticker Lookup by VIN" />
+  <meta property="og:description" content="Rebuild a vehicle's factory window sticker from its VIN — year, make, model, trim, engine, drivetrain and assembly plant, laid out like the original Monroney label. Free, no account." />
+  <meta property="og:site_name" content="AutoVINReveal" />
+  <meta property="og:image" content="https://www.autovinreveal.com/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.autovinreveal.com/window-sticker" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Free Window Sticker Lookup by VIN" />
+  <meta name="twitter:description" content="Rebuild a vehicle's factory window sticker from its VIN — year, make, model, trim, engine, drivetrain and assembly plant, laid out like the original Monroney label. Free, no account." />
+  <meta name="twitter:image" content="https://www.autovinreveal.com/og-image.png" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='%230F2A4A'/%3E%3Crect x='8' y='18' width='32' height='13' rx='3' fill='none' stroke='%2322D3EE' stroke-width='3'/%3E%3Cg fill='white'%3E%3Crect x='13' y='22' width='4' height='5' rx='1'/%3E%3Crect x='20' y='22' width='4' height='5' rx='1'/%3E%3C/g%3E%3Crect x='27' y='22' width='4' height='5' rx='1' fill='%23F59E0B'/%3E%3C/svg%3E" />
+  <meta name="theme-color" content="#0F2A4A" />
+
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"WebApplication","name":"Window Sticker Lookup","url":"https://www.autovinreveal.com/window-sticker","applicationCategory":"UtilitiesApplication","operatingSystem":"Any","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"Rebuild a vehicle's factory window sticker from its VIN — year, make, model, trim, engine, drivetrain and assembly plant, laid out like the original Monroney label. Free, no account."}
+  </script>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can you get an original window sticker from a VIN?","acceptedAnswer":{"@type":"Answer","text":"Partially. The factory build data — year, make, model, trim, engine, drivetrain, transmission and assembly plant — is permanently encoded in the VIN and can be rebuilt from it. Original MSRP and individual option packages live in manufacturer databases rather than the VIN, so no VIN-based lookup can recover those."}},{"@type":"Question","name":"Is this window sticker lookup free?","acceptedAnswer":{"@type":"Answer","text":"Yes. Rebuilding the factory build sheet costs nothing and needs no account. It reads from the U.S. Department of Transportation's NHTSA vPIC database. Only the full vehicle history report is paid, at $5.99."}},{"@type":"Question","name":"Why would I look up a window sticker on a used car?","acceptedAnswer":{"@type":"Answer","text":"To check that the listing is honest. Sellers routinely describe a base model as a higher trim, or get the engine or drivetrain wrong. The build sheet is decided at the factory and never changes, so it settles those claims instantly."}},{"@type":"Question","name":"Where do I find the VIN to look up?","acceptedAnswer":{"@type":"Answer","text":"At the base of the windshield on the driver's side, on the sticker inside the driver's door jamb, or on the title, registration and insurance card."}}]}
+  </script>
+  <link rel="stylesheet" href="/tw.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #f8fafc; }
+    .brand-font { font-family: 'Poppins', sans-serif; }
+    .hero-bg  { background: radial-gradient(circle at top right, #7c3aed 0%, #3b0764 100%); }
+    .vin-in { letter-spacing: .14em; text-transform: uppercase; font-family: 'Poppins', monospace; }
+    .spec-row { display:flex; justify-content:space-between; gap:12px; padding:11px 16px; border-bottom:1px solid #f1f5f9; font-size:14px; }
+    .spec-row:last-child { border-bottom:0; }
+    .spec-row .k { color:#64748b; }
+    .spec-row .v { color:#0f172a; font-weight:700; text-align:right; }
+    .prose-body { font-size: 16px; line-height: 1.8; color: #334155; }
+    .prose-body h2 { font-family:'Poppins',sans-serif; font-size:1.35rem; font-weight:800; color:#0f172a; margin:2.2rem 0 .8rem; }
+    .prose-body p { margin-bottom: 1.1rem; }
+    .prose-body a { color:#2563eb; text-decoration:underline; text-underline-offset:3px; }
+    .fld { display:block; font-size:12px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:5px; }
+    .inp { width:100%; border:2px solid #e2e8f0; border-radius:12px; padding:10px 12px; font-size:15px; color:#0f172a; outline:none; }
+    .inp:focus { border-color:#2563eb; }
+    .outrow { display:flex; justify-content:space-between; align-items:baseline; padding:10px 0; border-bottom:1px solid #f1f5f9; }
+    .outrow:last-child { border-bottom:0; }
+  </style>
+</head>
+<body class="text-slate-800 antialiased">
+
+  <nav class="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2">
+        <svg width="36" height="36" viewBox="0 0 48 48" role="img" aria-label="AutoVINReveal" class="shrink-0"><rect width="48" height="48" rx="11" fill="#0F2A4A"/><rect x="9" y="18" width="30" height="12.5" rx="3" fill="none" stroke="#22D3EE" stroke-width="2"/><g fill="#fff"><rect x="13" y="21.5" width="3.4" height="5.5" rx="1"/><rect x="18.4" y="21.5" width="3.4" height="5.5" rx="1"/><rect x="23.8" y="21.5" width="3.4" height="5.5" rx="1"/></g><rect x="29.2" y="21.5" width="3.4" height="5.5" rx="1" fill="#F59E0B"/><path d="M13.5 13.5a13 13 0 0 1 21 0" fill="none" stroke="#5C7EA3" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="text-xl font-bold text-slate-900 brand-font">AutoVIN<span class="text-blue-600">Reveal</span></span>
+      </a>
+      <div class="flex items-center gap-4">
+        <a href="/blog/" class="text-sm font-semibold text-gray-600 hover:text-blue-600">Blog</a>
+        <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2 rounded-lg shadow-md shadow-blue-600/20">Get Report — $5.99</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero-bg py-14 px-4">
+    <div class="max-w-xl mx-auto text-center">
+      <span class="inline-block bg-white/15 text-white text-xs font-bold px-3 py-1 rounded-full mb-4">Free · No account required</span>
+      <h1 class="text-3xl sm:text-4xl font-black text-white leading-tight mb-3" style="font-family:'Poppins',sans-serif;">Window Sticker Lookup</h1>
+      <p class="text-purple-100 text-base max-w-lg mx-auto leading-relaxed">Enter a 17-digit VIN and we'll lay out the factory build data like the sticker that hung in the window on day one — trim, engine, drivetrain, plant and more.</p>
+    </div>
+  </header>
+
+  <main class="max-w-xl mx-auto px-4 py-10">
+
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-lg p-5 sm:p-6 -mt-16 relative z-10">
+      <label for="vinInput" class="fld">Enter a VIN</label>
+      <div class="flex flex-col sm:flex-row gap-3">
+        <input id="vinInput" class="vin-in flex-1 border-2 border-gray-200 focus:border-blue-500 outline-none rounded-xl px-4 py-3 text-lg text-slate-900" maxlength="17" placeholder="1HGCM82633A004352" autocomplete="off" spellcheck="false" />
+        <button id="decodeBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-xl transition-colors whitespace-nowrap">Build sticker</button>
+      </div>
+      <p class="text-xs text-gray-500 mt-2">Windshield base, driver's door jamb, or your registration.</p>
+      <p id="decodeMsg" class="hidden mt-3 text-sm rounded-lg px-3 py-2"></p>
+    </div>
+
+    <!-- Monroney-style sticker -->
+    <div id="sticker" class="hidden mt-6 bg-white border-[3px] border-slate-900 rounded-lg overflow-hidden shadow-lg">
+      <div class="border-b-[3px] border-slate-900 px-5 py-3 text-center">
+        <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Vehicle Build Summary</p>
+        <p id="stkTitle" class="text-xl font-black text-slate-900 leading-tight mt-1" style="font-family:'Poppins',sans-serif;"></p>
+        <p id="stkVin" class="text-[11px] font-mono text-slate-500 mt-1"></p>
+      </div>
+      <div id="stkBody"></div>
+      <div class="bg-slate-900 text-center py-2.5 px-4">
+        <p class="text-[10px] text-slate-400 uppercase tracking-widest">Factory data via NHTSA vPIC · MSRP and option pricing are not encoded in the VIN</p>
+      </div>
+    </div>
+
+    <div id="upsellWrap" class="hidden">
+    <div class="mt-8 bg-gradient-to-r from-blue-600 to-blue-800 rounded-2xl p-6 text-white text-center">
+      <h2 class="text-xl font-black mb-2" style="font-family:'Poppins',sans-serif;">The sticker shows how it was built. The report shows how it was treated.</h2>
+      <p class="text-blue-100 text-sm mb-4 max-w-md mx-auto">Crash records, title brands, odometer readings, service history and open recalls — $5.99.</p>
+      <a href="/" class="inline-flex items-center gap-2 bg-white text-blue-700 font-bold px-6 py-3 rounded-xl hover:bg-blue-50 transition-colors shadow-lg">Get the full report — $5.99
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+      </a>
+    </div></div>
+
+    <section class="prose-body mt-12">
+      <h2>What the original window sticker was</h2>
+      <p>Every new car sold in the United States has to carry a Monroney label — the paper sticker taped to the glass listing the model, the engine, the standard equipment, the options the dealer added and the price of each. It's named after Senator Mike Monroney, whose 1958 law made it illegal to sell a new car without one. Once the car is driven off the lot that sticker is usually thrown away, and with it the cleanest single summary of how the vehicle was built.</p>
+      <p>This tool reconstructs the part of that label that lives permanently inside the VIN. Feed it 17 characters and it returns the model year, make, model, trim, body style, engine, fuel type, drivetrain, transmission and the plant that assembled the car, presented in sticker layout so it reads the way the original did.</p>
+      <h2>What it can't rebuild</h2>
+      <p>Be clear on the limits before you rely on it: original MSRP, individual option packages and dealer-installed extras are held in manufacturer systems, not encoded in the VIN, so no VIN-based tool can recover them. What you get here is the factory build sheet — accurate, permanent, and enough to confirm a listing's trim and engine claims are real.</p>
+      <p>And build data says nothing about what happened afterward. Accidents, branded titles, odometer rollbacks and skipped service are recorded across a car's life, which is why they only appear in a <a href="/">full vehicle history report</a>.</p>
+    </section>
+  </main>
+
+  <footer class="bg-slate-900 text-slate-400 mt-8 pt-10 pb-6">
+    <div class="max-w-5xl mx-auto px-4">
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-4 text-sm">
+        <a href="/" class="font-bold text-white brand-font">AutoVIN<span class="text-blue-400">Reveal</span></a>
+        <div class="flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs">
+          <a href="/" class="hover:text-white">Home</a><a href="/free-vin-decoder" class="hover:text-white">VIN Decoder</a><a href="/window-sticker" class="hover:text-white">Window Sticker</a><a href="/car-payment-calculator" class="hover:text-white">Payment Calculator</a><a href="/true-cost-of-ownership" class="hover:text-white">Cost of Ownership</a><a href="/browser-extension" class="hover:text-white">Browser Extension</a><a href="/blog/" class="hover:text-white">Blog</a><a href="/terms.html" class="hover:text-white">Terms</a><a href="/privacy.html" class="hover:text-white">Privacy</a>
+        </div>
+      </div>
+      <p class="text-xs text-slate-600 text-center sm:text-right mt-4">© 2026 AutoVINReveal</p>
+    </div>
+  </footer>
+  <script>
+    (function () {
+      var input=document.getElementById('vinInput'), btn=document.getElementById('decodeBtn'),
+          msg=document.getElementById('decodeMsg'), stk=document.getElementById('sticker'),
+          body=document.getElementById('stkBody'), t=document.getElementById('stkTitle'),
+          v=document.getElementById('stkVin'), up=document.getElementById('upsellWrap');
+      function clean(x){ return (x||'').toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g,'').slice(0,17); }
+      input.addEventListener('input', function(){ input.value = clean(input.value); });
+      function show(text, kind){ msg.textContent=text; msg.className='mt-3 text-sm rounded-lg px-3 py-2 '+(kind==='err'?'bg-red-50 text-red-700':'bg-slate-100 text-slate-700'); msg.classList.remove('hidden'); }
+      function hide(){ msg.classList.add('hidden'); }
+      var esc = function(x){ return String(x).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); };
+      var GROUPS = [
+        ['Vehicle', [['Model year','year'],['Make','make'],['Model','model'],['Trim','trim'],['Body style','body'],['Doors','doors'],['Vehicle type','vehicleType']]],
+        ['Powertrain', [['Engine','engine'],['Fuel type','fuel'],['Drivetrain','drive'],['Transmission','transmission']]],
+        ['Manufacturing', [['Assembly plant','plant'],['Manufacturer','manufacturer']]]
+      ];
+      function render(d){
+        t.textContent=[d.year,d.make,d.model].filter(Boolean).join(' ')+(d.trim?' '+d.trim:'');
+        v.textContent='VIN '+d.vin;
+        var html='';
+        GROUPS.forEach(function(g){
+          var rows='';
+          g[1].forEach(function(f){ if(d[f[1]]) rows+='<div class="spec-row"><span class="k">'+f[0]+'</span><span class="v">'+esc(d[f[1]])+'</span></div>'; });
+          if(rows) html+='<div class="px-5 pt-3 pb-1 bg-slate-50 border-b border-slate-200"><p class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">'+g[0]+'</p></div>'+rows;
+        });
+        body.innerHTML=html||'<div class="spec-row"><span class="k">No build data returned for this VIN</span></div>';
+        stk.classList.remove('hidden'); up.classList.remove('hidden');
+        stk.scrollIntoView({behavior:'smooth',block:'nearest'});
+      }
+      async function go(){
+        var vin=clean(input.value); input.value=vin;
+        stk.classList.add('hidden'); up.classList.add('hidden'); hide();
+        if(vin.length!==17){ show('A VIN is exactly 17 characters. You entered '+vin.length+'.','err'); input.focus(); return; }
+        var o=btn.textContent; btn.textContent='Building…'; btn.disabled=true; show('Reading factory data…','info');
+        try{
+          var r=await fetch('/api/decode-vin?vin='+encodeURIComponent(vin));
+          var j=await r.json();
+          if(!r.ok){ show(j.error||'Could not read that VIN.','err'); return; }
+          hide(); render(j);
+        }catch(e){ show('Something went wrong — please try again.','err'); }
+        finally{ btn.textContent=o; btn.disabled=false; }
+      }
+      btn.addEventListener('click',go);
+      input.addEventListener('keydown',function(e){ if(e.key==='Enter') go(); });
+      try{ var q=new URLSearchParams(location.search).get('vin'); if(q){ input.value=clean(q); if(input.value.length===17) go(); } }catch(e){}
+    })();
+  </script>
+</body>
+</html>

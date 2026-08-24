@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "AutoVINReveal — VIN Checker",
+  "version": "1.0.0",
+  "description": "Spot VINs on car listings and check accident history, title brands and odometer records in one click.",
+  "permissions": [
+    "contextMenus",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.facebook.com/marketplace/*",
+    "https://*.craigslist.org/*",
+    "https://www.ebay.com/itm/*",
+    "https://www.cars.com/*",
+    "https://www.autotrader.com/*",
+    "https://www.cargurus.com/*",
+    "https://offerup.com/*",
+    "https://*.carmax.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AutoVINReveal VIN Checker"
+  },
+  "icons": {
+    "128": "icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.facebook.com/marketplace/*",
+        "https://*.craigslist.org/*",
+        "https://www.ebay.com/itm/*",
+        "https://www.cars.com/*",
+        "https://www.autotrader.com/*",
+        "https://www.cargurus.com/*",
+        "https://offerup.com/*",
+        "https://*.carmax.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

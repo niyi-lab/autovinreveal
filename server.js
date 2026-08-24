@@ -5561,7 +5561,21 @@ app.get("/api/decode-vin", async (req, res) => {
 });
 
 // Clean URL for the free VIN decoder tool.
-app.get("/free-vin-decoder", (_req, res) => res.sendFile(path.join(__dirname, "public", "free-vin-decoder.html")));
+// Free tool pages — served at extensionless URLs. express.static also serves the
+// .html files, but these are the canonical URLs used in sitemap + canonical tags.
+[
+  "free-vin-decoder",
+  "window-sticker",
+  "car-payment-calculator",
+  "true-cost-of-ownership",
+  "browser-extension",
+  "ford-vin-decoder",
+  "toyota-vin-decoder",
+  "porsche-vin-decoder",
+  "mercedes-vin-decoder",
+].forEach((page) => {
+  app.get(`/${page}`, (_req, res) => res.sendFile(path.join(__dirname, "public", `${page}.html`)));
+});
 
 // Unknown paths must return a REAL 404. Serving index.html with a 200 made every
 // bad URL a soft-404 — Google indexed nonexistent pages (e.g. /cfc-dashboard.html,
