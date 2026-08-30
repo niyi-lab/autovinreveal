@@ -1901,19 +1901,43 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
     //    customer→user mapping stored at checkout. ──
     if (event.type === "invoice.paid") {
       const invoice = event.data.object;
-      if (!invoice.subscription) return res.status(200).json({ ok: true });
+      const line    = invoice.lines?.data?.[0];
 
-      const line     = invoice.lines?.data?.[0];
-      const price    = line?.price || {};
-      const priceId  = price.id;
-      const credits  = Number(price.metadata?.credits) || SUB_CREDITS[priceId] || 0;
-      const planKey  = price.metadata?.plan_key || "";
+      // Stripe RESTRUCTURED the Invoice object in API version 2025-09-30:
+      //   invoice.subscription              -> invoice.parent.subscription_details.subscription
+      //   invoice.subscription_details.meta -> invoice.parent.subscription_details.metadata
+      //   line.price (with metadata inline)  -> line.pricing.price_details.price (ID ONLY)
+      // Webhook endpoints here send the ACCOUNT DEFAULT version, so the payload
+      // changed shape with no deploy on our side. The old `if (!invoice.subscription)`
+      // guard then bailed AFTER the event id was already claimed — every
+      // subscriber was charged and granted zero credits, with no Stripe retry.
+      // Read BOTH shapes so this survives the version either way.
+      const subId = invoice.subscription
+        || invoice.parent?.subscription_details?.subscription
+        || line?.parent?.subscription_item_details?.subscription
+        || null;
+      if (!subId) return res.status(200).json({ ok: true });   // genuinely not a subscription invoice
+
+      const subMeta  = invoice.parent?.subscription_details?.metadata
+                    || invoice.subscription_details?.metadata || {};
+      const priceId  = line?.price?.id || line?.pricing?.price_details?.price || null;
+      const planKey  = line?.price?.metadata?.plan_key || subMeta.plan_key || line?.metadata?.plan_key || "";
       const customerId = invoice.customer;
 
+      // Credits: inline metadata (old shape) -> local map by price id -> fetch
+      // the Price (new shape no longer inlines metadata) -> map via plan key.
+      let credits = Number(line?.price?.metadata?.credits) || SUB_CREDITS[priceId] || 0;
+      if (!credits && priceId) {
+        try {
+          const pr = await stripeDefault.prices.retrieve(priceId);
+          credits = Number(pr?.metadata?.credits) || 0;
+        } catch (e) { console.warn(`[Sub] price ${priceId} lookup failed: ${e.message}`); }
+      }
+      if (!credits && planKey) credits = SUB_CREDITS[SUB_PRICE_BY_KEY[planKey]] || 0;
+
       // Resolve the Supabase user: subscription metadata (set at checkout) first,
-      // then the customer→user mapping on the credits row.
-      let userId = invoice.subscription_details?.metadata?.user_id
-                || invoice.lines?.data?.[0]?.metadata?.user_id || null;
+      // then the line metadata, then the customer→user mapping on the credits row.
+      let userId = subMeta.user_id || line?.metadata?.user_id || null;
       if (!userId && customerId) {
         const { data: row } = await supabaseService
           .from("credits").select("user_id").eq("stripe_customer_id", customerId).maybeSingle();
@@ -1932,7 +1956,11 @@ app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async
           stripeClient:    stripeDefault,
         });
       } else {
-        console.warn(`[Sub] invoice.paid — unresolved (user:${userId} credits:${credits} price:${priceId} cust:${customerId})`);
+        // NEVER 200 an unresolved subscription invoice: the event id is already
+        // claimed in the shared table, so returning OK strands the customer
+        // permanently AND blocks the sibling site from processing it. Throw so
+        // the outer catch rolls the marker back and Stripe retries.
+        throw new Error(`invoice.paid unresolved — user:${userId} credits:${credits} price:${priceId} cust:${customerId} sub:${subId}`);
       }
     }
 

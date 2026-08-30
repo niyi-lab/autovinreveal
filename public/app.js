@@ -1067,15 +1067,28 @@ const ATTRIBUTION_OPTIONS = [
   ['other',    'Other'],
 ];
 
-function mountAttributionSurvey(overlay, { vin = '', oneTimeSession = null } = {}) {
+async function mountAttributionSurvey(overlay, { vin = '', oneTimeSession = null } = {}) {
   try {
     if (localStorage.getItem(SURV_KEY)) return;     // already answered on this browser
   } catch { return; }
 
+  // Who actually gets asked: guests holding a paid receipt (new by definition),
+  // and accounts created in the last 24h. Long-standing customers already know
+  // how they found us — asking them is noise and skews the answers.
+  const { user } = await getSession();
+  if (user) {
+    const created = Date.parse(user.created_at || '');
+    if (!created || Date.now() - created > 24 * 60 * 60 * 1000) return;
+  } else if (!oneTimeSession) {
+    return;                                          // no identity — server would reject it anyway
+  }
+
   const bar = document.createElement('div');
+  // display:none until it is time to appear. An opacity:0 element still takes
+  // up flex height, which left a blank band covering part of the report.
   bar.style.cssText =
     'flex:0 0 auto;background:#0f172a;border-top:1px solid rgba(255,255,255,.12);' +
-    'padding:10px 14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;' +
+    'padding:10px 14px;display:none;gap:8px;align-items:center;flex-wrap:wrap;' +
     'opacity:0;transition:opacity .4s ease;';
 
   const label = document.createElement('span');
@@ -1149,8 +1162,11 @@ function mountAttributionSurvey(overlay, { vin = '', oneTimeSession = null } = {
   bar.appendChild(skip);
 
   overlay.appendChild(bar);
-  // Let them actually read the report first.
-  setTimeout(() => { bar.style.opacity = '1'; }, 9000);
+  // Let them actually read the report first, then enter the layout and fade in.
+  setTimeout(() => {
+    bar.style.display = 'flex';
+    requestAnimationFrame(() => { bar.style.opacity = '1'; });
+  }, 9000);
 }
 
 async function tryAttachReferral() {
