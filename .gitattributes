@@ -1,0 +1,5 @@
+# Shell scripts and workflows must keep LF endings: they run on Linux, and a
+# CRLF checkout on Windows makes bash fail with literal \r errors.
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
