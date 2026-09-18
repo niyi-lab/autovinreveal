@@ -102,16 +102,40 @@ if (!APP_SECRET || APP_SECRET === "change_me_in_env_file") {
 /* ================================================================
    Security / redirects
 ================================================================ */
-app.set("trust proxy", 1);
+// Is Cloudflare (orange-cloud) actually in front of us? This changes BOTH the
+// proxy hop count and which header carries the true client IP, so it must match
+// reality. Set BEHIND_CLOUDFLARE=0 the moment DNS stops pointing at Cloudflare.
+//   behind CF: client -> Cloudflare -> Render LB -> app   (2 trusted hops)
+//   direct:    client -> Render LB -> app                 (1 trusted hop)
+const BEHIND_CLOUDFLARE = process.env.BEHIND_CLOUDFLARE !== "0";
+app.set("trust proxy", BEHIND_CLOUDFLARE ? 2 : 1);
 
-// True client IP behind Cloudflare (orange-cloud) + Render. cf-connecting-ip is set
-// by Cloudflare to the real client and can't be forged; the LEFTMOST X-Forwarded-For
-// entry CAN be (an attacker prepends a fake and Cloudflare appends the real one), so
-// never key rate limits / blocklists off XFF alone.
+// Strip the IPv4-mapped-IPv6 prefix so "::ffff:1.2.3.4" and "1.2.3.4" are the
+// same bucket — otherwise a client can double its rate-limit allowance.
+function normalizeIp(ip) {
+  const s = String(ip || "").trim();
+  return s.startsWith("::ffff:") ? s.slice(7) : s;
+}
+
+// True client IP. Everything IP-keyed depends on this being UNFORGEABLE: the
+// report rate limit, trackSuspicion's unique-VIN anti-scrape tracker and the
+// BLOCKED_IPS investigator list.
+//
+// cf-connecting-ip is trustworthy ONLY while Cloudflare is really in front —
+// it overwrites the header on every request. Sent to a bare origin (this app is
+// also reachable directly at projectecho.onrender.com) it is just a string the
+// caller chose, and so is the LEFTMOST x-forwarded-for entry, which a client
+// prepends at will. Keying limits off either one off-Cloudflare lets anyone
+// rotate a fake IP per request and walk past all three controls.
+//
+// req.ip resolves via `trust proxy` to the entry the Render LB itself appended,
+// which the client cannot influence — so it is the safe default.
 function clientIp(req) {
-  return (req.headers["cf-connecting-ip"]
-    || (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
-    || req.ip || "").toString();
+  if (BEHIND_CLOUDFLARE) {
+    const cf = String(req.headers["cf-connecting-ip"] || "").trim();
+    if (cf) return normalizeIp(cf);
+  }
+  return normalizeIp(req.ip || req.socket?.remoteAddress || "");
 }
 const WEBHOOK_PATHS = new Set(["/api/stripe-webhook", "/api/stripe-webhook/", "/api/crypto/ipn"]);
 
