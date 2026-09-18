@@ -707,6 +707,76 @@ async function currentEgressIp() {
   } catch (_) { return "unknown"; }
 }
 
+/* ── Egress self-heal ─────────────────────────────────────────────
+   Render hands out a different outbound IP on every deploy AND on unattended
+   restarts (observed 2026-09-17: a verified-good .165 became .145 with no
+   deploy in the service's history), and only a handful of the pool is
+   whitelisted with cheapcarfax. When the provider is unreachable purely
+   because the current IP isn't on the list, the fix is simply to roll again --
+   so do that automatically instead of waiting for a human to notice both
+   sites have stopped selling.
+
+   Bounded hard so it can never become a redeploy loop: at most
+   SELF_HEAL_MAX_PER_HOUR attempts in a rolling hour, with a cooldown longer
+   than one deploy cycle so we always observe the result before rolling again.
+   Inert unless BOTH Render credentials are present, so it no-ops on the VPS
+   (static IP -- nothing to re-roll) and in local dev.                        */
+const RENDER_API_KEY    = process.env.RENDER_API_KEY || "";
+const RENDER_SERVICE_ID = process.env.RENDER_SERVICE_ID || "";
+const SELF_HEAL_ENABLED = process.env.EGRESS_SELF_HEAL !== "0" && !!RENDER_API_KEY && !!RENDER_SERVICE_ID;
+const SELF_HEAL_MAX_PER_HOUR = 3;
+const SELF_HEAL_COOLDOWN_MS  = 8 * 60 * 1000;   // > deploy (~200s) + boot + probe
+const RENDER_API = (path) => `https://api.render.com/v1/services/${RENDER_SERVICE_ID}${path}`;
+const renderHeaders = () => ({ Authorization: `Bearer ${RENDER_API_KEY}`, "Content-Type": "application/json" });
+
+// The rate limit MUST come from Render's deploy history, not process memory:
+// a self-heal redeploy restarts this very process, so any in-memory counter is
+// wiped by the action it is meant to limit — every fresh boot would start at
+// zero attempts and redeploy again, which is an unbounded loop rather than a
+// capped one. Counting real deploys is the only guard that survives the restart
+// it causes. It also means a human actively deploying backs self-heal off,
+// which is the behaviour we want.
+async function recentDeployCount() {
+  const r = await axios.get(RENDER_API("/deploys?limit=20"), {
+    headers: renderHeaders(), timeout: 15_000, validateStatus: () => true });
+  if (r.status < 200 || r.status >= 300) throw new Error(`deploy list HTTP ${r.status}`);
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  let count = 0, newestAt = 0;
+  for (const row of Array.isArray(r.data) ? r.data : []) {
+    const d = row?.deploy || row;
+    const t = Date.parse(d?.createdAt || d?.created_at || "");
+    if (!t) continue;
+    if (t > cutoff) count++;
+    if (t > newestAt) newestAt = t;
+  }
+  return { count, newestAt };
+}
+
+async function selfHealEgressIp() {
+  if (!SELF_HEAL_ENABLED) return "self-heal disabled (no RENDER_API_KEY/RENDER_SERVICE_ID)";
+  try {
+    const { count, newestAt } = await recentDeployCount();
+    if (count >= SELF_HEAL_MAX_PER_HOUR) {
+      return `self-heal RATE-CAPPED (${count} deploys in the last hour) — rolling the dice isn't working, needs a human`;
+    }
+    const since = Date.now() - newestAt;
+    if (newestAt && since < SELF_HEAL_COOLDOWN_MS) {
+      return `self-heal cooling down (last deploy ${Math.round(since / 1000)}s ago, waiting ${Math.round(SELF_HEAL_COOLDOWN_MS / 1000)}s between rolls)`;
+    }
+    const r = await axios.post(RENDER_API("/deploys"), { clearCache: "do_not_clear" },
+      { headers: renderHeaders(), timeout: 20_000, validateStatus: () => true });
+    if (r.status >= 200 && r.status < 300) {
+      console.warn(`[watchdog] self-heal: triggered redeploy ${r.data?.id || ""} to re-roll the egress IP (${count + 1}/${SELF_HEAL_MAX_PER_HOUR} this hour)`);
+      return `self-heal: redeploy triggered (${r.data?.id || "ok"}) — IP re-rolls in ~3min. Attempt ${count + 1} of ${SELF_HEAL_MAX_PER_HOUR} this hour.`;
+    }
+    console.warn(`[watchdog] self-heal: Render rejected the deploy (HTTP ${r.status})`);
+    return `self-heal FAILED — Render returned HTTP ${r.status}`;
+  } catch (e) {
+    console.warn("[watchdog] self-heal error:", e.message);
+    return "self-heal FAILED — " + e.message;
+  }
+}
+
 async function providerWatchdog() {
   let up = true, detail = "";
   try {
@@ -721,30 +791,51 @@ async function providerWatchdog() {
     up = true; detail = "probe error: " + e.message;
   }
 
-  if (_watchdogLastState === null) { _watchdogLastState = up; }
-  if (up === _watchdogLastState) return;         // no change → stay quiet
+  const firstRun = _watchdogLastState === null;
+  const changed  = !firstRun && up !== _watchdogLastState;
   _watchdogLastState = up;
 
-  const ip = await currentEgressIp();
-  const known = WHITELISTED_IPS.includes(ip);
-  if (!up) {
-    notifyOwner(`provider-down:${ip}`,
-      `🔴 AutoVINReveal: reports provider DOWN — sales are BLOCKED`,
-      `The report provider is rejecting our requests, so checkout is blocked on ` +
-      `BOTH AutoVINReveal and CheapestCarFax. No one can buy right now.\n\n` +
-      `Probe result: ${detail}\n` +
-      `Server outbound IP: ${ip}\n` +
-      `Whitelisted with provider: ${known ? "YES" : "NO — this is almost certainly the cause"}\n\n` +
-      (known
-        ? `The IP IS whitelisted, so this may be a provider outage or an API-key/credit issue. Check the cheapcarfax panel.\n`
-        : `FIX: redeploy on Render to re-roll the outbound IP, or ask cheapcarfax to whitelist ${ip}.\n`) +
-      `\nKnown-good IPs: ${WHITELISTED_IPS.join(", ")}`);
-  } else {
-    notifyOwner(`provider-up:${ip}`,
-      `🟢 AutoVINReveal: reports provider RECOVERED — sales are live`,
-      `The provider is reachable again and checkout works on both sites.\n\n` +
-      `Probe result: ${detail}\nServer outbound IP: ${ip} (${known ? "whitelisted" : "NOT on the known whitelist"})`);
+  // Recovery is a genuine transition — say it once and go quiet.
+  if (up) {
+    if (changed) {
+      const ip = await currentEgressIp();
+      notifyOwner(`provider-up:${ip}`,
+        `🟢 AutoVINReveal: reports provider RECOVERED — sales are live`,
+        `The provider is reachable again and checkout works on both sites.\n\n` +
+        `Probe result: ${detail}\nServer outbound IP: ${ip} ` +
+        `(${WHITELISTED_IPS.includes(ip) ? "whitelisted" : "NOT on the known whitelist"})`);
+    }
+    return;
   }
+
+  // DOWN — alert on EVERY down pass, not only on a transition.
+  //
+  // This used to return early when the state hadn't changed, which made it
+  // blind to the single most common cause: Render restarting the process onto
+  // a non-whitelisted IP. A process that BOOTS into the down state has no
+  // transition to detect — the old first-run branch just initialised
+  // _watchdogLastState to false and the equality check swallowed it, so both
+  // sites sat dead and silent until someone happened to look. (Exactly what
+  // happened on 2026-09-17.)
+  //
+  // Repeats are throttled by notifyOwner's own 30-min per-key dedupe, and the
+  // key carries the IP so a NEW bad IP always alerts immediately.
+  const ip    = await currentEgressIp();
+  const known = WHITELISTED_IPS.includes(ip);
+  const heal  = known ? "" : await selfHealEgressIp();
+
+  notifyOwner(`provider-down:${ip}`,
+    `🔴 AutoVINReveal: reports provider DOWN — sales are BLOCKED`,
+    `The report provider is rejecting our requests, so checkout is blocked on ` +
+    `BOTH AutoVINReveal and CheapestCarFax. No one can buy right now.\n\n` +
+    `Probe result: ${detail}\n` +
+    `Server outbound IP: ${ip}\n` +
+    `Whitelisted with provider: ${known ? "YES" : "NO — this is almost certainly the cause"}\n\n` +
+    (known
+      ? `The IP IS whitelisted, so this may be a provider outage or an API-key/credit issue. Check the cheapcarfax panel.\n`
+      : `${heal}\n\nIf self-heal is rate-capped or failing, redeploy on Render by hand to re-roll the ` +
+        `outbound IP, or ask cheapcarfax to whitelist ${ip}.\n`) +
+    `\nKnown-good IPs: ${WHITELISTED_IPS.join(", ")}`);
 }
 
 // Start after a short delay so it doesn't fire during boot.
